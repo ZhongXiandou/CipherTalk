@@ -258,7 +258,7 @@ function McpPage() {
                 <Box>
                   <Typography sx={{ fontWeight: 600, color: 'var(--text-primary)' }}>默认解析媒体本地路径</Typography>
                   <Typography sx={{ mt: 0.5, fontSize: 13, color: 'var(--text-secondary)' }}>
-                    控制 `get_messages` 默认是否解析并返回图片、视频、语音、文件等本地路径。
+                    控制 `get_messages`、`search_messages`、`get_session_context` 默认是否解析并返回图片、视频、语音、文件等本地路径。
                   </Typography>
                 </Box>
                 <Switch
@@ -328,7 +328,7 @@ function McpPage() {
 
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.2} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }}>
                 <Typography sx={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                  v1 工具：`health_check`、`get_status`、`list_sessions`、`get_messages`
+                  v1 工具：`health_check`、`get_status`、`list_sessions`、`get_messages`、`list_contacts`、`search_messages`、`get_session_context`
                 </Typography>
                 <Button
                   variant="contained"

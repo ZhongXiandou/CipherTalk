@@ -212,6 +212,9 @@ npm run mcp
 - `get_status`
 - `list_sessions`
 - `get_messages`
+- `list_contacts`
+- `search_messages`
+- `get_session_context`
 
 ### 宿主配置示例（开发态）
 

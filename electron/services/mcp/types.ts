@@ -2,13 +2,55 @@ export const MCP_TOOL_NAMES = [
   'health_check',
   'get_status',
   'list_sessions',
-  'get_messages'
+  'get_messages',
+  'list_contacts',
+  'search_messages',
+  'get_session_context'
+] as const
+
+export const MCP_CONTACT_KINDS = [
+  'friend',
+  'group',
+  'official',
+  'former_friend',
+  'other'
+] as const
+
+export const MCP_MESSAGE_KINDS = [
+  'text',
+  'image',
+  'voice',
+  'contact_card',
+  'video',
+  'emoji',
+  'location',
+  'voip',
+  'system',
+  'quote',
+  'app_music',
+  'app_link',
+  'app_file',
+  'app_chat_record',
+  'app_mini_program',
+  'app_quote',
+  'app_pat',
+  'app_announcement',
+  'app_gift',
+  'app_transfer',
+  'app_red_packet',
+  'app',
+  'unknown'
 ] as const
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number]
+export type McpContactKind = (typeof MCP_CONTACT_KINDS)[number]
+export type McpMessageKind = (typeof MCP_MESSAGE_KINDS)[number]
 
 export type McpLaunchMode = 'dev' | 'packaged'
 export type McpLauncherMode = 'dev-runner' | 'packaged-launcher' | 'direct'
+export type McpSessionKind = 'friend' | 'group' | 'official' | 'other'
+export type McpMessageMatchField = 'text' | 'raw'
+export type McpSessionContextMode = 'latest' | 'around'
 
 export interface McpLaunchConfig {
   command: string
@@ -54,13 +96,17 @@ export interface McpStatusPayload {
   warnings: string[]
 }
 
-export interface McpSessionItem {
+export interface McpSessionRef {
   sessionId: string
   displayName: string
-  kind: 'friend' | 'group' | 'official' | 'other'
+  kind: McpSessionKind
+}
+
+export interface McpSessionItem extends McpSessionRef {
   lastMessagePreview: string
   unreadCount: number
   lastTimestamp: number
+  lastTimestampMs: number
 }
 
 export interface McpSessionsPayload {
@@ -69,6 +115,30 @@ export interface McpSessionsPayload {
   offset: number
   limit: number
   hasMore: boolean
+}
+
+export interface McpContactItem {
+  contactId: string
+  displayName: string
+  remark?: string
+  nickname?: string
+  kind: McpContactKind
+  lastContactTimestamp: number
+  lastContactTimestampMs: number
+}
+
+export interface McpContactsPayload {
+  items: McpContactItem[]
+  total: number
+  offset: number
+  limit: number
+  hasMore: boolean
+}
+
+export interface McpCursor {
+  sortSeq: number
+  createTime: number
+  localId: number
 }
 
 export interface McpMessageMedia {
@@ -85,13 +155,15 @@ export interface McpMessageMedia {
 export interface McpMessageItem {
   messageId: number
   timestamp: number
+  timestampMs: number
   direction: 'in' | 'out'
-  kind: string
+  kind: McpMessageKind
   text: string
   sender: {
     username: string | null
     isSelf: boolean
   }
+  cursor: McpCursor
   media?: McpMessageMedia
   raw?: string
 }
@@ -101,4 +173,28 @@ export interface McpMessagesPayload {
   offset: number
   limit: number
   hasMore: boolean
+}
+
+export interface McpSearchHit {
+  session: McpSessionRef
+  message: McpMessageItem
+  excerpt: string
+  matchedField: McpMessageMatchField
+}
+
+export interface McpSearchMessagesPayload {
+  hits: McpSearchHit[]
+  limit: number
+  sessionsScanned: number
+  messagesScanned: number
+  truncated: boolean
+}
+
+export interface McpSessionContextPayload {
+  session: McpSessionRef
+  mode: McpSessionContextMode
+  anchor?: McpMessageItem
+  items: McpMessageItem[]
+  hasMoreBefore: boolean
+  hasMoreAfter: boolean
 }
