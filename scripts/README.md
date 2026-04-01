@@ -112,18 +112,25 @@ npm run build:force-update-manifest
 
 不配置时，`force-update.json` 仍会生成，但只包含当前版本信息，不会强制用户升级。
 
-### AI Release Body Secret
+### AI Release Body 配置
 
 发布工作流会自动生成标准化 Release body。
 
 需要在 GitHub Environment `软件发布` 中配置：
 
-- `GLM_KEY`
+- `AI_API_KEY`
+- `AI_API_URL`（可选）
+- `AI_MODEL`（可选）
 
 用途：
-- 调用智谱 `glm-4.7-flash`
+- 默认会调用当前配置的 AI 模型生成中文 Release 说明
 - 自动生成中文 Release 说明
 - 若 AI 不可用，会自动降级为模板正文，不影响发版
+
+默认值：
+
+- `AI_API_URL`: `https://api.openai.com/v1/chat/completions`
+- `AI_MODEL`: `gpt-5.4`
 
 ### Telegram 通知配置
 

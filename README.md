@@ -280,9 +280,16 @@ git push origin v2.2.14
 AI 生成说明的密钥来源：
 
 - GitHub Environment `软件发布`
-- Secret 名称：`GLM_KEY`
+- Secret 名称：`AI_API_KEY`
+- 可选 Variable：`AI_API_URL`
+- 可选 Variable：`AI_MODEL`
 
 若 AI 不可用，工作流会自动回退为模板化 Release body，不影响正式发布。
+
+默认情况下，发布说明生成会使用：
+
+- `AI_API_URL`: `https://api.openai.com/v1/chat/completions`
+- `AI_MODEL`: `gpt-5.4`
 
 如配置 Telegram Bot，发布成功后还会自动发送：
 

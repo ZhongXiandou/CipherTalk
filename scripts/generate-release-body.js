@@ -5,7 +5,9 @@ const rootDir = path.resolve(__dirname, '..')
 const releaseDir = path.join(rootDir, 'release')
 const contextPath = path.join(releaseDir, 'release-context.json')
 const outputPath = path.join(releaseDir, 'release-body.md')
-const glmKey = process.env.GLM_KEY || ''
+const aiApiKey = process.env.AI_API_KEY || ''
+const aiApiUrl = process.env.AI_API_URL || 'https://api.openai.com/v1/chat/completions'
+const aiModel = process.env.AI_MODEL || 'gpt-5.4'
 
 const PRIMARY_AUTHOR_LOGINS = new Set(['ILoveBingLu'])
 const PRIMARY_AUTHOR_NAMES = new Set(['ILoveBingLu', 'BingLu', 'ILoveBinglu'])
@@ -108,8 +110,8 @@ function isValidAiBody(body) {
 }
 
 async function generateAiBody(context) {
-  if (!glmKey) {
-    throw new Error('GLM_KEY 未配置')
+  if (!aiApiKey) {
+    throw new Error('AI_API_KEY 未配置')
   }
 
   const systemPrompt = [
@@ -132,14 +134,14 @@ async function generateAiBody(context) {
 
   const userPrompt = `请根据以下发布上下文为 ${context.tag} 生成标准化发布说明：\n\n${JSON.stringify(context, null, 2)}`
 
-  const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+  const response = await fetch(aiApiUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${glmKey}`
+      Authorization: `Bearer ${aiApiKey}`
     },
     body: JSON.stringify({
-      model: 'glm-4.7-flash',
+      model: aiModel,
       temperature: 0.2,
       messages: [
         { role: 'system', content: systemPrompt },
