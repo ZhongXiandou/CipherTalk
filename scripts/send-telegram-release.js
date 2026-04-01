@@ -66,9 +66,17 @@ function buildSuccessMessage(context, releaseBody) {
 
   const thanks = []
   const primaryLogins = new Set(['ILoveBingLu'])
+  const primaryNames = new Set(['ILoveBingLu', 'BingLu', 'ILoveBinglu'])
   for (const pr of context?.pullRequests || []) {
     if (pr?.authorLogin && !primaryLogins.has(pr.authorLogin)) {
       thanks.push(`🙏 感谢 @${pr.authorLogin} 提交 PR #${pr.number}`)
+    }
+  }
+  for (const commit of context?.commits || []) {
+    const hasPrRef = /#(\d+)/.test(commit.subject || '')
+    const authorName = String(commit.authorName || '').trim()
+    if (!hasPrRef && authorName && !primaryNames.has(authorName)) {
+      thanks.push(`🙏 感谢 ${authorName} 提交改动《${commit.subject}》`)
     }
   }
 

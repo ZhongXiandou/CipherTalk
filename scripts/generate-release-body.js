@@ -9,14 +9,12 @@ const glmKey = process.env.GLM_KEY || ''
 
 const PRIMARY_AUTHOR_LOGINS = new Set(['ILoveBingLu'])
 const PRIMARY_AUTHOR_NAMES = new Set(['ILoveBingLu', 'BingLu', 'ILoveBinglu'])
-const PRIMARY_AUTHOR_EMAILS = new Set(['aiqiji74@gmail.com', 'aiqji74@gmail.com'])
 
 function isPrimaryAuthor(person) {
   if (!person) return false
   const login = String(person.authorLogin || '').trim()
   const name = String(person.authorName || '').trim()
-  const email = String(person.authorEmail || '').trim().toLowerCase()
-  return PRIMARY_AUTHOR_LOGINS.has(login) || PRIMARY_AUTHOR_NAMES.has(name) || PRIMARY_AUTHOR_EMAILS.has(email)
+  return PRIMARY_AUTHOR_LOGINS.has(login) || PRIMARY_AUTHOR_NAMES.has(name)
 }
 
 function classifyCommit(subject) {

@@ -21,22 +21,47 @@ git push origin v2.2.14
 
 `.github/workflows/release.yml` 会在 `v*` 标签触发后执行：
 
-1. 安装依赖
-2. 重新编译原生模块
-3. 执行 `npm run build`
-4. 生成 `release/force-update.json`
-5. 生成 `release/release-context.json`
-6. 自动生成 `release/release-body.md`（AI 失败时自动降级为模板版）
-7. 创建/更新 GitHub Release
-8. 上传以下文件到 GitHub Release：
+当前工作流已拆成串并行 job：
+
+- `prepare-meta`
+- `build-windows`
+- `generate-release-body`
+- `publish-github-release`
+- `mirror-r2`
+- `notify-telegram-success`
+- `notify-failure`
+
+其中：
+
+1. `prepare-meta` 生成 `force-update.json` 和 `release-context.json`
+2. `build-windows` 负责构建安装包和 `latest.yml`
+3. `generate-release-body` 负责 AI / 模板版发布说明
+4. `publish-github-release` 汇总产物并创建 GitHub Release
+5. `mirror-r2` 与 `notify-telegram-success` 在发布成功后并行执行
+
+GitHub Release 上传内容：
+
+- 安装包
+- `latest.yml`
+- `force-update.json`
+- 若存在则上传 `.blockmap`
+
+Cloudflare R2 同步内容：
+
+- 安装包
+- `latest.yml`
+- `force-update.json`
+
+Telegram 通知：
+
+- 成功时发送 AI 摘要通知
+- 失败时发送失败通知
+
+GitHub Release 资产包括：
    - 安装包
    - `latest.yml`
    - `force-update.json`
    - 若存在则上传 `.blockmap`
-9. 将以下文件同步到 Cloudflare R2：
-   - 安装包
-   - `latest.yml`
-   - `force-update.json`
 10. 向 Telegram 频道/群发送发布通知（AI 摘要 + 强制更新提醒）
 
 ## 版本要求
