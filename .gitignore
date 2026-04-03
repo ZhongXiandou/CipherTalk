@@ -54,3 +54,4 @@ native-dlls
 resources/whisper
 xkey
 skills
+.claude/

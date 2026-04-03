@@ -134,6 +134,11 @@ jobs:
             Write-Error "latest.yml not found"
             exit 1
           }
+          $sizeLines = @(Select-String -Path "release/latest.yml" -Pattern '^\s+size:\s+\d+\s*$')
+          if ($sizeLines.Count -ne 1) {
+            Write-Error "latest.yml should contain exactly one size entry, found $($sizeLines.Count)"
+            exit 1
+          }
           if (-not $blockmaps -or $blockmaps.Count -lt 1) {
             Write-Error "blockmap not found"
             exit 1
@@ -242,6 +247,11 @@ jobs:
             Write-Error "latest.yml not found"
             exit 1
           }
+          $sizeLines = @(Select-String -Path "release/latest.yml" -Pattern '^\s+size:\s+\d+\s*$')
+          if ($sizeLines.Count -ne 1) {
+            Write-Error "latest.yml should contain exactly one size entry, found $($sizeLines.Count)"
+            exit 1
+          }
           if (-not (Test-Path "release/force-update.json")) {
             Write-Error "force-update.json not found"
             exit 1
@@ -259,6 +269,7 @@ jobs:
         uses: softprops/action-gh-release@v2.5.0
         with:
           tag_name: ${{ needs.prepare-meta.outputs.tag }}
+          name: CipherTalk v${{ needs.prepare-meta.outputs.version }}
           body_path: release/release-body.md
           fail_on_unmatched_files: false
           files: |

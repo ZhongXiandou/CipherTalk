@@ -124,6 +124,8 @@ export interface McpSessionsPayload {
 
 export interface McpContactItem {
   contactId: string
+  sessionId?: string
+  hasSession?: boolean
   displayName: string
   remark?: string
   nickname?: string

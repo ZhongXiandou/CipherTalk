@@ -125,6 +125,18 @@ type MessageNormalizeOptions = {
   includeMediaPaths: boolean
   includeRaw: boolean
 }
+type McpContactRef = {
+  contactId: string
+  sessionId: string
+  displayName: string
+  remark?: string
+  nickname?: string
+  kind: McpContactKind
+}
+type McpSessionLookupEntry = {
+  session: McpSessionRef
+  aliases: string[]
+}
 type SearchRawHit = {
   session: McpSessionRef
   message: Message
@@ -341,10 +353,23 @@ function toSessionItem(session: ChatSession): McpSessionItem {
   }
 }
 
-function toContactItem(contact: ContactWithLastContact): McpContactItem {
+function toContactRef(contact: ContactWithLastContact): McpContactRef {
+  return {
+    contactId: contact.username,
+    sessionId: contact.username,
+    displayName: contact.displayName,
+    remark: contact.remark || undefined,
+    nickname: contact.nickname || undefined,
+    kind: contact.type as McpContactKind
+  }
+}
+
+function toContactItem(contact: ContactWithLastContact, hasSession: boolean): McpContactItem {
   const lastContactTimestamp = Number(contact.lastContactTime || 0)
   return {
     contactId: contact.username,
+    sessionId: contact.username,
+    hasSession,
     displayName: contact.displayName,
     remark: contact.remark || undefined,
     nickname: contact.nickname || undefined,
@@ -354,11 +379,199 @@ function toContactItem(contact: ContactWithLastContact): McpContactItem {
   }
 }
 
-function resolveSessionRef(sessionId: string, sessionMap: Map<string, McpSessionRef>): McpSessionRef {
-  return sessionMap.get(sessionId) || {
-    sessionId,
-    displayName: sessionId,
-    kind: detectSessionKind(sessionId)
+function buildContactSearchKeys(contact: McpContactRef): string[] {
+  return [
+    contact.contactId,
+    contact.sessionId,
+    contact.displayName,
+    contact.remark || '',
+    contact.nickname || ''
+  ]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const value of values) {
+    const trimmed = String(value || '').trim()
+    if (!trimmed) continue
+    const normalized = normalizeQuery(trimmed)
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    result.push(trimmed)
+  }
+  return result
+}
+
+function isSubsequence(query: string, target: string): boolean {
+  let qi = 0
+  let ti = 0
+  while (qi < query.length && ti < target.length) {
+    if (query[qi] === target[ti]) qi += 1
+    ti += 1
+  }
+  return qi === query.length
+}
+
+function scoreLookupValue(query: string, rawTarget: string): number {
+  const target = normalizeQuery(rawTarget)
+  if (!query || !target) return 0
+  if (target === query) return 1000
+  if (target.startsWith(query)) return 820 + Math.min(query.length * 8, 120)
+  if (target.includes(query)) return 640 + Math.min(query.length * 6, 100) - Math.min(Math.max(target.length - query.length, 0), 80)
+  if (query.startsWith(target)) return 420 + Math.min(target.length * 5, 80)
+  if (isSubsequence(query, target)) return 260 + Math.min(query.length * 4, 60)
+  return 0
+}
+
+function buildSessionLookupEntries(
+  sessions: McpSessionItem[],
+  contacts: McpContactRef[]
+): McpSessionLookupEntry[] {
+  const entryMap = new Map<string, McpSessionLookupEntry>()
+
+  for (const session of sessions) {
+    entryMap.set(session.sessionId, {
+      session: {
+        sessionId: session.sessionId,
+        displayName: session.displayName,
+        kind: session.kind
+      },
+      aliases: uniqueStrings([session.sessionId, session.displayName])
+    })
+  }
+
+  for (const contact of contacts) {
+    const entry = entryMap.get(contact.sessionId)
+    if (!entry) continue
+    entry.aliases = uniqueStrings([
+      ...entry.aliases,
+      contact.contactId,
+      contact.displayName,
+      contact.remark || '',
+      contact.nickname || ''
+    ])
+  }
+
+  return Array.from(entryMap.values())
+}
+
+function formatSessionCandidateHint(rawInput: string, candidates: McpSessionLookupEntry[]): string {
+  if (candidates.length === 0) {
+    return `未找到与“${rawInput}”匹配的会话。可先用 list_sessions 或 list_contacts 做泛搜索。`
+  }
+
+  const preview = candidates
+    .slice(0, 5)
+    .map((candidate) => `- ${candidate.session.displayName} (${candidate.session.sessionId})`)
+    .join('\n')
+
+  return `“${rawInput}”匹配到多个候选，请改用更具体的信息重试：\n${preview}`
+}
+
+async function getContactCatalog(): Promise<{ items: McpContactRef[]; map: Map<string, McpContactRef> }> {
+  const result = await chatService.getContacts()
+  if (!result.success) {
+    mapChatError(result.error)
+  }
+
+  const items = (result.contacts || []).map((contact) => toContactRef(contact as ContactWithLastContact))
+  const map = new Map<string, McpContactRef>()
+
+  for (const item of items) {
+    for (const key of buildContactSearchKeys(item)) {
+      map.set(normalizeQuery(key), item)
+    }
+  }
+
+  return { items, map }
+}
+
+function tryResolveContactRef(
+  rawValue: string,
+  contactMap: Map<string, McpContactRef>
+): McpContactRef | null {
+  const normalized = normalizeQuery(rawValue)
+  if (!normalized) return null
+
+  const exact = contactMap.get(normalized)
+  if (exact) return exact
+
+  const partialMatches = Array.from(new Set(contactMap.values().filter((contact) =>
+    buildContactSearchKeys(contact).some((value) => normalizeQuery(value).includes(normalized))
+  )))
+
+  return partialMatches.length === 1 ? partialMatches[0] : null
+}
+
+function findSessionCandidates(
+  rawInput: string,
+  sessions: McpSessionItem[],
+  contacts: McpContactRef[]
+): Array<{ entry: McpSessionLookupEntry; score: number }> {
+  const query = normalizeQuery(rawInput)
+  if (!query) return []
+
+  return buildSessionLookupEntries(sessions, contacts)
+    .map((entry) => ({
+      entry,
+      score: Math.max(...entry.aliases.map((alias) => scoreLookupValue(query, alias)), 0)
+    }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.entry.session.displayName.localeCompare(b.entry.session.displayName, 'zh-CN'))
+}
+
+function resolveSessionRefStrict(
+  rawInput: string,
+  sessions: McpSessionItem[],
+  sessionMap: Map<string, McpSessionRef>,
+  contacts: McpContactRef[],
+  contactMap: Map<string, McpContactRef>
+): McpSessionRef {
+  const direct = resolveSessionRef(rawInput, sessionMap, contactMap)
+  if (sessionMap.has(direct.sessionId)) {
+    return direct
+  }
+
+  const candidates = findSessionCandidates(rawInput, sessions, contacts)
+  if (candidates.length === 0) {
+    throw new McpToolError('SESSION_NOT_FOUND', 'Session not found.', formatSessionCandidateHint(rawInput, []))
+  }
+
+  const [first, second] = candidates
+  if (candidates.length === 1 || !second || first.score - second.score >= 140 || first.score >= 1000) {
+    return first.entry.session
+  }
+
+  throw new McpToolError('BAD_REQUEST', 'Session is ambiguous.', formatSessionCandidateHint(
+    rawInput,
+    candidates.map((item) => item.entry)
+  ))
+}
+
+function resolveSessionRef(
+  rawSessionId: string,
+  sessionMap: Map<string, McpSessionRef>,
+  contactMap?: Map<string, McpContactRef>
+): McpSessionRef {
+  const directSession = sessionMap.get(rawSessionId)
+  if (directSession) return directSession
+
+  const contact = contactMap ? tryResolveContactRef(rawSessionId, contactMap) : null
+  if (contact) {
+    return sessionMap.get(contact.sessionId) || {
+      sessionId: contact.sessionId,
+      displayName: contact.displayName || contact.sessionId,
+      kind: detectSessionKind(contact.sessionId)
+    }
+  }
+
+  return {
+    sessionId: rawSessionId,
+    displayName: rawSessionId,
+    kind: detectSessionKind(rawSessionId)
   }
 }
 
@@ -643,14 +856,27 @@ export class McpReadService {
     const limit = Math.min(args.data.limit ?? 100, MAX_LIST_LIMIT)
     const unreadOnly = Boolean(args.data.unreadOnly)
 
-    let sessions = (await getSessionCatalog()).items
+    const [{ items: sessionItems }, { map: contactMap }] = await Promise.all([
+      getSessionCatalog(),
+      getContactCatalog()
+    ])
+
+    let sessions = sessionItems
 
     if (query) {
       sessions = sessions.filter((session) => {
         return [
           session.sessionId,
           session.displayName,
-          session.lastMessagePreview
+          session.lastMessagePreview,
+          ...buildContactSearchKeys(contactMap.get(normalizeQuery(session.sessionId)) || {
+            contactId: session.sessionId,
+            sessionId: session.sessionId,
+            displayName: '',
+            remark: '',
+            nickname: '',
+            kind: session.kind === 'group' ? 'group' : session.kind === 'official' ? 'official' : 'friend'
+          })
         ].some((value) => value.toLowerCase().includes(query))
       })
     }
@@ -687,7 +913,11 @@ export class McpReadService {
       mapChatError(result.error)
     }
 
-    let contacts = (result.contacts || []).map((contact) => toContactItem(contact as ContactWithLastContact))
+    const { map: sessionMap } = await getSessionCatalog()
+    let contacts = (result.contacts || []).map((contact) => {
+      const typedContact = contact as ContactWithLastContact
+      return toContactItem(typedContact, sessionMap.has(typedContact.username))
+    })
 
     if (typeSet) {
       contacts = contacts.filter((contact) => typeSet.has(contact.kind))
@@ -789,7 +1019,7 @@ export class McpReadService {
     }
 
     const {
-      sessionId,
+      sessionId: rawSessionId,
       keyword,
       includeRaw = false,
       order = 'asc'
@@ -801,6 +1031,12 @@ export class McpReadService {
     const keywordQuery = normalizeQuery(keyword)
     const startTimeMs = toTimestampMs(args.data.startTime)
     const endTimeMs = toTimestampMs(args.data.endTime)
+    const [{ items: sessions, map: sessionMap }, { items: contacts, map: contactMap }] = await Promise.all([
+      getSessionCatalog(),
+      getContactCatalog()
+    ])
+    const session = resolveSessionRefStrict(rawSessionId, sessions, sessionMap, contacts, contactMap)
+    const sessionId = session.sessionId
 
     const matched: Message[] = []
     let scanOffset = 0
@@ -854,7 +1090,10 @@ export class McpReadService {
       throw new McpToolError('BAD_REQUEST', 'Invalid search_messages arguments.', args.error.message)
     }
 
-    const { items: sessions, map: sessionMap } = await getSessionCatalog()
+    const [{ items: sessions, map: sessionMap }, { items: contacts, map: contactMap }] = await Promise.all([
+      getSessionCatalog(),
+      getContactCatalog()
+    ])
     const includeRaw = args.data.includeRaw ?? false
     const includeMediaPaths = args.data.includeMediaPaths ?? defaultIncludeMediaPaths
     const limit = Math.min(args.data.limit ?? 20, MAX_SEARCH_LIMIT)
@@ -869,8 +1108,8 @@ export class McpReadService {
     }
 
     const targetSessions = sessionIdCandidates.length > 0
-      ? sessionIdCandidates.map((sessionId) => resolveSessionRef(sessionId, sessionMap))
-      : sessions.slice(0, MAX_SEARCH_SESSIONS).map((session) => ({
+      ? sessionIdCandidates.map((sessionId) => resolveSessionRefStrict(sessionId, sessions, sessionMap, contacts, contactMap))
+      : sessions.map((session) => ({
           sessionId: session.sessionId,
           displayName: session.displayName,
           kind: session.kind
@@ -995,19 +1234,23 @@ export class McpReadService {
       throw new McpToolError('BAD_REQUEST', 'Invalid get_session_context arguments.', args.error.message)
     }
 
-    const { map: sessionMap } = await getSessionCatalog()
-    const session = resolveSessionRef(args.data.sessionId, sessionMap)
+    const [{ items: sessions, map: sessionMap }, { items: contacts, map: contactMap }] = await Promise.all([
+      getSessionCatalog(),
+      getContactCatalog()
+    ])
+    const session = resolveSessionRefStrict(args.data.sessionId, sessions, sessionMap, contacts, contactMap)
+    const resolvedSessionId = session.sessionId
     const includeRaw = args.data.includeRaw ?? false
     const includeMediaPaths = args.data.includeMediaPaths ?? defaultIncludeMediaPaths
 
     if (args.data.mode === 'latest') {
       const latestLimit = Math.min(args.data.beforeLimit ?? 30, MAX_CONTEXT_LIMIT)
-      const result = await chatService.getMessages(args.data.sessionId, 0, latestLimit)
+      const result = await chatService.getMessages(resolvedSessionId, 0, latestLimit)
       if (!result.success) {
         mapChatError(result.error)
       }
 
-      const messages = await normalizeMessages(args.data.sessionId, result.messages || [], {
+      const messages = await normalizeMessages(resolvedSessionId, result.messages || [], {
         includeMediaPaths,
         includeRaw
       })
@@ -1027,21 +1270,21 @@ export class McpReadService {
 
     const [beforeResult, anchorResult, afterResult] = await Promise.all([
       chatService.getMessagesBefore(
-        args.data.sessionId,
+        resolvedSessionId,
         anchorCursor.sortSeq,
         beforeLimit,
         anchorCursor.createTime,
         anchorCursor.localId
       ),
       chatService.getMessagesAfter(
-        args.data.sessionId,
+        resolvedSessionId,
         anchorCursor.sortSeq,
         1,
         anchorCursor.createTime,
         anchorCursor.localId - 1
       ),
       chatService.getMessagesAfter(
-        args.data.sessionId,
+        resolvedSessionId,
         anchorCursor.sortSeq,
         afterLimit,
         anchorCursor.createTime,
@@ -1059,15 +1302,15 @@ export class McpReadService {
     }
 
     const [beforeItems, anchorItem, afterItems] = await Promise.all([
-      normalizeMessages(args.data.sessionId, beforeResult.messages || [], {
+      normalizeMessages(resolvedSessionId, beforeResult.messages || [], {
         includeMediaPaths,
         includeRaw
       }),
-      normalizeMessage(args.data.sessionId, anchorMessage, {
+      normalizeMessage(resolvedSessionId, anchorMessage, {
         includeMediaPaths,
         includeRaw
       }),
-      normalizeMessages(args.data.sessionId, afterResult.messages || [], {
+      normalizeMessages(resolvedSessionId, afterResult.messages || [], {
         includeMediaPaths,
         includeRaw
       })

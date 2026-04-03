@@ -9,79 +9,114 @@ if (!fs.existsSync(ymlPath)) {
   process.exit(0)
 }
 
-// 读取 yml 内容
-const content = fs.readFileSync(ymlPath, 'utf-8')
-const lines = content.split('\n')
+function getExeName(content) {
+  const pathMatch = content.match(/path:\s*(.+\.exe)/)
+  if (pathMatch) {
+    return pathMatch[1].trim()
+  }
 
-// 从 yml 中提取文件名
-const match = content.match(/path:\s*(.+\.exe)/)
-if (!match) {
+  const urlMatch = content.match(/-\s+url:\s*(.+\.exe)/)
+  if (urlMatch) {
+    return urlMatch[1].trim()
+  }
+
+  return null
+}
+
+function finalizeFileItem(itemLines, size) {
+  if (itemLines.length === 0) return itemLines
+
+  const cleanedLines = itemLines.filter((line) => !line.trim().startsWith('size:'))
+  const shaIndex = cleanedLines.findIndex((line) => line.trim().startsWith('sha512:'))
+  const itemIndent = `${cleanedLines[0].match(/^\s*/)?.[0] || '  '}  `
+  const sizeLine = `${itemIndent}size: ${size}`
+
+  if (shaIndex >= 0) {
+    cleanedLines.splice(shaIndex + 1, 0, sizeLine)
+  } else {
+    cleanedLines.push(sizeLine)
+  }
+
+  return cleanedLines
+}
+
+function normalizeLatestYml(content, size) {
+  const lines = content.split(/\r?\n/)
+  const filesIndex = lines.findIndex((line) => line.trim() === 'files:')
+  if (filesIndex === -1) {
+    return { changed: false, content, message: '未找到 files 块' }
+  }
+
+  let blockEnd = lines.length
+  for (let i = filesIndex + 1; i < lines.length; i++) {
+    const line = lines[i]
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    if (!line.startsWith(' ') && !line.startsWith('\t')) {
+      blockEnd = i
+      break
+    }
+  }
+
+  const before = lines.slice(0, filesIndex + 1)
+  const fileBlock = lines.slice(filesIndex + 1, blockEnd)
+  const after = lines.slice(blockEnd)
+
+  const normalizedBlock = []
+  let currentItem = []
+  let handledFirstItem = false
+
+  const flushItem = () => {
+    if (currentItem.length === 0) return
+    normalizedBlock.push(...(handledFirstItem ? currentItem : finalizeFileItem(currentItem, size)))
+    handledFirstItem = true
+    currentItem = []
+  }
+
+  for (const line of fileBlock) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('- ')) {
+      flushItem()
+      currentItem.push(line)
+      continue
+    }
+
+    if (currentItem.length > 0) {
+      currentItem.push(line)
+    } else {
+      normalizedBlock.push(line)
+    }
+  }
+
+  flushItem()
+
+  const nextContent = [...before, ...normalizedBlock, ...after].join('\n')
+  return {
+    changed: nextContent !== content,
+    content: nextContent,
+    message: nextContent !== content ? `已规范 latest.yml 中的 size 字段为 ${size}` : 'latest.yml 中的 size 字段已正确'
+  }
+}
+
+const content = fs.readFileSync(ymlPath, 'utf-8')
+const exeName = getExeName(content)
+
+if (!exeName) {
   console.log('未找到安装包文件名')
   process.exit(0)
 }
 
-const exeName = match[1].trim()
 const exePath = path.join(releaseDir, exeName)
-
 if (!fs.existsSync(exePath)) {
   console.log(`安装包不存在: ${exeName}`)
   process.exit(0)
 }
 
-// 获取文件大小
-const stats = fs.statSync(exePath)
-const size = stats.size
+const size = fs.statSync(exePath).size
+const result = normalizeLatestYml(content, size)
 
-// electron-builder 新版本已经会生成 files[0].size，这里只在缺失时补齐，避免写出重复键
-const newLines = []
-let inFiles = false
-let sizeAdded = false
-let fileItemIndent = ''
-
-for (let i = 0; i < lines.length; i++) {
-  const line = lines[i]
-  newLines.push(line)
-  
-  if (line.startsWith('files:')) {
-    inFiles = true
-    fileItemIndent = ''
-    continue
-  }
-
-  if (!inFiles) {
-    continue
-  }
-
-  const trimmed = line.trim()
-  const indent = line.match(/^\s*/)?.[0] || ''
-
-  if (trimmed.startsWith('- ')) {
-    fileItemIndent = `${indent}  `
-    continue
-  }
-
-  if (trimmed.startsWith('size:')) {
-    console.log('latest.yml 已包含 size，跳过写入')
-    process.exit(0)
-  }
-
-  // 离开 files 块
-  if (trimmed && !line.startsWith(' ') && !line.startsWith('\t')) {
-    inFiles = false
-    continue
-  }
-
-  // 在 files 块内的第一个 sha512 后添加 size
-  if (!sizeAdded && trimmed.startsWith('sha512:')) {
-    newLines.push(`${fileItemIndent || '    '}size: ${size}`)
-    sizeAdded = true
-    inFiles = false
-  }
+if (result.changed) {
+  fs.writeFileSync(ymlPath, result.content)
 }
 
-if (sizeAdded) {
-  fs.writeFileSync(ymlPath, newLines.join('\n'))
-  console.log(`已添加 size: ${size} 到 latest.yml`)
-} else {
-  console.log('未找到合适位置插入 size')
-}
+console.log(result.message)

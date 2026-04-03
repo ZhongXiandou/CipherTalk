@@ -102,7 +102,7 @@ export function registerCipherTalkMcpTools(server: any) {
     title: 'Get Messages',
     description: 'List messages from one chat session with filters and pagination.',
     inputSchema: {
-      sessionId: z.string().trim().min(1).describe('Required session identifier / username.'),
+      sessionId: z.string().trim().min(1).describe('Required session identifier. Accepts sessionId, contactId, display name, remark, or nickname when uniquely resolvable.'),
       offset: z.number().int().nonnegative().optional().describe('Pagination offset.'),
       limit: z.number().int().positive().optional().describe('Pagination limit.'),
       order: z.enum(['asc', 'desc']).optional().describe('Message sort order by time.'),
@@ -145,8 +145,8 @@ export function registerCipherTalkMcpTools(server: any) {
     description: 'Search messages across one or more sessions and return agent-friendly hits.',
     inputSchema: {
       query: z.string().trim().min(1).describe('Required full-text query.'),
-      sessionId: z.string().trim().min(1).optional().describe('Single session identifier to search.'),
-      sessionIds: z.array(z.string().trim().min(1)).max(20).optional().describe('Multiple session identifiers to search.'),
+      sessionId: z.string().trim().min(1).optional().describe('Single session identifier to search. Accepts sessionId, contactId, display name, remark, or nickname when uniquely resolvable.'),
+      sessionIds: z.array(z.string().trim().min(1)).max(20).optional().describe('Multiple session identifiers to search. Each item accepts sessionId, contactId, display name, remark, or nickname when uniquely resolvable.'),
       startTime: z.number().int().positive().optional().describe('Start timestamp in seconds or milliseconds.'),
       endTime: z.number().int().positive().optional().describe('End timestamp in seconds or milliseconds.'),
       kinds: z.array(z.enum(MCP_MESSAGE_KINDS)).optional().describe('Optional message kinds to include.'),
@@ -171,7 +171,7 @@ export function registerCipherTalkMcpTools(server: any) {
     title: 'Get Session Context',
     description: 'Return the latest session context or messages around a cursor anchor.',
     inputSchema: {
-      sessionId: z.string().trim().min(1).describe('Required session identifier / username.'),
+      sessionId: z.string().trim().min(1).describe('Required session identifier. Accepts sessionId, contactId, display name, remark, or nickname when uniquely resolvable.'),
       mode: z.enum(['latest', 'around']).describe('Context mode.'),
       anchorCursor: z.object({
         sortSeq: z.number().int(),
