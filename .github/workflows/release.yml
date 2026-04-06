@@ -118,7 +118,9 @@ jobs:
         run: npm run build:release-body
 
       - name: Build app
-        run: npm run build:ci
+        run: npm run build:win
+        env:
+          GH_TOKEN: ""
 
       - name: Validate build artifacts
         shell: pwsh
@@ -209,6 +211,8 @@ jobs:
 
       - name: Build mac app
         run: npm run build:mac
+        env:
+          GH_TOKEN: ""
 
       - name: Validate build artifacts
         run: |
