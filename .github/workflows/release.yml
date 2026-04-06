@@ -137,7 +137,7 @@ jobs:
           path: |
             release/CipherTalk-${{ needs.prepare-meta.outputs.version }}-Setup.exe
             release/latest.yml
-          if-no-files-found: warn
+          if-no-files-found: error
 
   build-macos:
     runs-on: macos-latest
@@ -197,7 +197,7 @@ jobs:
           path: |
             release/CipherTalk-${{ needs.prepare-meta.outputs.version }}-Setup.dmg
             release/latest-mac.yml
-          if-no-files-found: warn
+          if-no-files-found: error
 
   generate-release-body:
     runs-on: windows-latest
