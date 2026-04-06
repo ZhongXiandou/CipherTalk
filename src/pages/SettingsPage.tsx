@@ -195,6 +195,7 @@ function SettingsPage() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [initialConfig, setInitialConfig] = useState<any>(null)
   const isMac = platformInfo.platform === 'darwin'
+  const biometricLabel = isMac ? 'Touch ID' : 'Windows Hello'
 
   useEffect(() => {
     loadConfig()
@@ -2381,11 +2382,6 @@ function SettingsPage() {
 
 
   const handleSecurityMethodSelect = async (method: 'biometric' | 'password') => {
-    if (method === 'biometric' && isMac) {
-      showMessage('当前平台不支持 Windows Hello，请改用自定义密码。', false)
-      return
-    }
-
     // 1. 如果点击的是当前已激活的方法 -> 关闭
     if (isAuthEnabled && authMethod === method) {
       await disableAuth()
@@ -2403,7 +2399,7 @@ function SettingsPage() {
         show: true,
         title: '切换认证方式',
         message: method === 'biometric'
-          ? '切换到 Windows Hello 将清除当前的密码设置，是否继续？'
+          ? `切换到${biometricLabel}将清除当前的密码设置，是否继续？`
           : '切换到密码认证将清除当前的生物识别设置，是否继续？',
         onConfirm: async () => {
           await disableAuth()
@@ -2427,10 +2423,10 @@ function SettingsPage() {
   }
 
   const activateBiometric = async () => {
-    showMessage('正在等待 Windows Hello 验证...', true)
+    showMessage(`正在等待${biometricLabel}验证...`, true)
     const result = await enableAuth()
     if (result.success) {
-      showMessage('已启用 Windows Hello', true)
+      showMessage(`已启用${biometricLabel}`, true)
       setShowPasswordInput(false)
     } else {
       showMessage(result.error || '启用失败', false)
@@ -2441,42 +2437,42 @@ function SettingsPage() {
     <div className="tab-content">
       <h3 className="section-title">安全保护</h3>
       <div className="section-desc">
-        {isMac ? 'macOS 当前仅支持自定义应用密码。Windows Hello 在此平台直接禁用。' : '配置应用启动时的安全验证方式，保护您的隐私数据。'}
+        {isMac ? '配置应用启动时的安全验证方式。macOS 优先使用 Touch ID，设备不支持时可改用自定义密码。' : '配置应用启动时的安全验证方式，保护您的隐私数据。'}
       </div>
 
       <div className="security-grid">
-        {!isMac && (
-          <div
-            className={`security-card ${isAuthEnabled && authMethod === 'biometric' ? 'active' : ''}`}
-            onClick={() => handleSecurityMethodSelect('biometric')}
-            style={{ cursor: 'pointer' }}
-          >
-            <div className="security-preview-area">
-              <div className="preview-lock-screen">
-                <div className="preview-avatar">
-                  <Lock size={20} />
-                </div>
-                <div className="preview-badge">
-                  <Fingerprint /> Windows Hello
-                </div>
-                <div className="preview-btn" />
+        <div
+          className={`security-card ${isAuthEnabled && authMethod === 'biometric' ? 'active' : ''}`}
+          onClick={() => handleSecurityMethodSelect('biometric')}
+          style={{ cursor: 'pointer' }}
+        >
+          <div className="security-preview-area">
+            <div className="preview-lock-screen">
+              <div className="preview-avatar">
+                <Lock size={20} />
               </div>
-            </div>
-            <div className="security-content">
-              <div className="security-header">
-                <span className="security-title">Windows Hello</span>
-                {isAuthEnabled && authMethod === 'biometric' && (
-                  <div className="theme-check" style={{ position: 'relative', top: 0, right: 0, transform: 'scale(1)', background: 'var(--primary)', boxShadow: 'none' }}>
-                    <Check size={12} />
-                  </div>
-                )}
+              <div className="preview-badge">
+                <Fingerprint /> {biometricLabel}
               </div>
-              <div className="security-desc">
-                使用系统的面部识别、指纹或 PIN 码进行验证。体验最流畅，安全性高。
-              </div>
+              <div className="preview-btn" />
             </div>
           </div>
-        )}
+          <div className="security-content">
+            <div className="security-header">
+              <span className="security-title">{biometricLabel}</span>
+              {isAuthEnabled && authMethod === 'biometric' && (
+                <div className="theme-check" style={{ position: 'relative', top: 0, right: 0, transform: 'scale(1)', background: 'var(--primary)', boxShadow: 'none' }}>
+                  <Check size={12} />
+                </div>
+              )}
+            </div>
+            <div className="security-desc">
+              {isMac
+                ? '使用 macOS 系统 Touch ID 进行验证。设备未启用或不支持时，请改用自定义密码。'
+                : '使用系统的面部识别、指纹或 PIN 码进行验证。体验最流畅，安全性高。'}
+            </div>
+          </div>
+        </div>
 
         {/* Custom Password Card */}
         <div

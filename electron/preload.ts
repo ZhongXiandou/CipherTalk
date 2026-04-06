@@ -74,7 +74,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getMcpLaunchConfig: () => getMcpLaunchConfigSafe(),
     getUpdateState: () => ipcRenderer.invoke('app:getUpdateState'),
     getUpdateSourceInfo: () => ipcRenderer.invoke('app:getUpdateSourceInfo'),
-    getMcpLaunchConfig: () => getMcpLaunchConfigSafe(),
     checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
     downloadAndInstall: () => ipcRenderer.invoke('app:downloadAndInstall'),
     getStartupDbConnected: () => ipcRenderer.invoke('app:getStartupDbConnected'),
@@ -165,6 +164,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     verify: (message?: string) => ipcRenderer.invoke('windowsHello:verify', message) as Promise<{
       success: boolean
       result: number  // WindowsHelloResult 枚举值
+      error?: string
+    }>
+  },
+
+  systemAuth: {
+    getStatus: () => ipcRenderer.invoke('systemAuth:getStatus') as Promise<{
+      platform: string
+      available: boolean
+      method: 'windows-hello' | 'touch-id' | 'none'
+      displayName: string
+      error?: string
+    }>,
+    verify: (reason?: string) => ipcRenderer.invoke('systemAuth:verify', reason) as Promise<{
+      success: boolean
+      method: 'windows-hello' | 'touch-id' | 'none'
       error?: string
     }>
   },

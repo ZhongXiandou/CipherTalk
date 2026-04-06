@@ -27,6 +27,7 @@ import { videoService } from './services/videoService'
 import { voiceTranscribeService } from './services/voiceTranscribeService'
 import { voiceTranscribeServiceWhisper } from './services/voiceTranscribeServiceWhisper'
 import { windowsHelloService, WindowsHelloResult } from './services/windowsHelloService'
+import { systemAuthService } from './services/systemAuthService'
 import { shortcutService } from './services/shortcutService'
 import { httpApiService } from './services/httpApiService'
 import { getBestCachePath, getRuntimePlatformInfo } from './services/platformService'
@@ -218,14 +219,47 @@ function getTrayIconPath(): string {
   return getAppIconPath()
 }
 
+function getTrayTemplateIconPath(): string | null {
+  if (process.platform !== 'darwin') {
+    return null
+  }
+
+  const isDev = !!process.env.VITE_DEV_SERVER_URL
+  const iconName = configService?.get('appIcon') || 'default'
+  const devTemplatePath = iconName === 'xinnian'
+    ? join(__dirname, '../public/xinnian-tray-template.png')
+    : join(__dirname, '../public/tray-mac-template.png')
+
+  return isDev && existsSync(devTemplatePath) ? devTemplatePath : null
+}
+
+function getTrayImage() {
+  const templateIconPath = getTrayTemplateIconPath()
+  const iconPath = templateIconPath || getTrayIconPath()
+  const image = nativeImage.createFromPath(iconPath)
+
+  if (image.isEmpty()) {
+    return iconPath
+  }
+
+  if (process.platform === 'darwin') {
+    const resized = image.resize({ height: 26 })
+    if (templateIconPath) {
+      resized.setTemplateImage(true)
+    }
+    return resized
+  }
+
+  return image
+}
+
 /**
  * 创建系统托盘
  */
 function createTray() {
   if (tray) return tray
 
-  const iconPath = getTrayIconPath()
-  tray = new Tray(iconPath)
+  tray = new Tray(getTrayImage())
 
   if (process.platform === 'darwin') {
     tray.setIgnoreDoubleClickEvents(true)
@@ -1465,6 +1499,10 @@ function registerIpcHandlers() {
           console.error('更新快捷方式失败:', err)
         })
 
+        if (tray) {
+          tray.setImage(getTrayImage())
+        }
+
         return { success: true }
       }
       return { success: false, error: 'Icon not found' }
@@ -1720,6 +1758,14 @@ function registerIpcHandlers() {
 
   ipcMain.handle('windowsHello:verify', async (_, message?: string) => {
     return windowsHelloService.verify(message)
+  })
+
+  ipcMain.handle('systemAuth:getStatus', async () => {
+    return systemAuthService.getStatus()
+  })
+
+  ipcMain.handle('systemAuth:verify', async (_, reason?: string) => {
+    return systemAuthService.verify(reason)
   })
 
   // 密钥获取相关

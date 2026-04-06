@@ -288,6 +288,20 @@ export interface ElectronAPI {
       error?: string
     }>
   }
+  systemAuth: {
+    getStatus: () => Promise<{
+      platform: string
+      available: boolean
+      method: 'windows-hello' | 'touch-id' | 'none'
+      displayName: string
+      error?: string
+    }>
+    verify: (reason?: string) => Promise<{
+      success: boolean
+      method: 'windows-hello' | 'touch-id' | 'none'
+      error?: string
+    }>
+  }
   wxKey: {
     isWeChatRunning: () => Promise<boolean>
     getWeChatPid: () => Promise<number | null>

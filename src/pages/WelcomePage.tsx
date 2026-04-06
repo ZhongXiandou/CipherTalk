@@ -66,6 +66,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
   })
 
   const isMac = platformInfo.platform === 'darwin'
+  const biometricLabel = isMac ? 'Touch ID' : 'Windows Hello'
 
   useEffect(() => {
     const removeStatus = window.electronAPI.wxKey?.onStatus?.((payload) => {
@@ -833,12 +834,20 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
             {currentStep.id === 'security' && (
               <div className="info-content">
                 <h3>安全防护说明</h3>
-                <p>{isMac ? '当前向导不提供 macOS 系统应用锁，后续可在设置中改用自定义密码。' : '为应用添加额外的安全保护（可选）。'}</p>
+                <p>为应用添加额外的安全保护（可选）。</p>
                 {isMac ? (
-                  <div className="info-warning">
-                    <ShieldCheck size={16} />
-                    <span>Windows Hello 仅在 Windows 上可用，macOS 不做假支持。</span>
-                  </div>
+                  <>
+                    <ul className="info-list">
+                      <li>启用后每次启动需要验证</li>
+                      <li>使用 macOS 系统 Touch ID 进行认证</li>
+                      <li>若当前设备不支持，可跳过后改用应用密码</li>
+                      <li>保护您的聊天记录隐私</li>
+                    </ul>
+                    <div className="info-warning" style={{ background: 'rgba(76, 175, 80, 0.1)', color: '#4CAF50' }}>
+                      <ShieldCheck size={16} />
+                      <span>推荐在共享设备上开启此功能</span>
+                    </div>
+                  </>
                 ) : (
                   <>
                     <ul className="info-list">
@@ -1077,76 +1086,62 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
 
               {currentStep.id === 'security' && (
                 <div className="setup-body">
-                  {isMac ? (
-                    <div className="auth-setup-card">
-                      <div className="auth-icon-large">
-                        <Lock size={48} />
-                      </div>
-                      <h3>系统应用锁暂不可用</h3>
-                      <p className="auth-desc">
-                        当前版本不会在 macOS 上伪装支持 Windows Hello。
-                        <br />
-                        你可以先跳过这一步，后续在设置页使用自定义密码。
-                      </p>
+                  <div className="auth-setup-card">
+                    <div className="auth-icon-large">
+                      {isMac ? <Lock size={48} /> : <Fingerprint size={48} />}
                     </div>
-                  ) : (
-                    <div className="auth-setup-card">
-                      <div className="auth-icon-large">
-                        <Fingerprint size={48} />
-                      </div>
-                      <h3>Windows Hello 认证</h3>
-                      <p className="auth-desc">
-                        启用 Windows Hello 以保护您的数据。
-                        <br />
-                        启用后，每次打开应用都需要进行生物识别或 PIN 码验证。
-                      </p>
+                    <h3>{biometricLabel} 认证</h3>
+                    <p className="auth-desc">
+                      {isMac ? '启用 Touch ID 以保护您的数据。' : '启用 Windows Hello 以保护您的数据。'}
+                      <br />
+                      {isMac ? '启用后，每次打开应用都需要进行系统 Touch ID 验证。' : '启用后，每次打开应用都需要进行生物识别或 PIN 码验证。'}
+                    </p>
 
-                      <div className="auth-actions">
-                        {!isAuthEnabled ? (
-                          <button
-                            className="btn btn-primary"
-                            onClick={async () => {
-                              setIsEnablingAuth(true)
-                              setAuthStatus('正在等待 Windows Hello 验证...')
-                              const result = await enableAuth()
-                              setIsEnablingAuth(false)
-                              if (result.success) {
-                                setAuthStatus('已成功启用认证保护')
-                              } else {
-                                setError(result.error || '启用失败')
-                                setAuthStatus('')
-                              }
-                            }}
-                            disabled={isEnablingAuth}
-                          >
-                            {isEnablingAuth ? '正在配置...' : '启用应用锁'}
-                          </button>
-                        ) : (
-                          <div className="auth-success-state">
-                            <div className="success-badge">
-                              <CheckCircle2 size={16} />
-                              <span>已启用保护</span>
-                            </div>
-                            <button
-                              className="btn btn-text-danger"
-                              onClick={async () => {
-                                await disableAuth()
-                                setAuthStatus('')
-                              }}
-                            >
-                              关闭保护
-                            </button>
+                    <div className="auth-actions">
+                      {!isAuthEnabled ? (
+                        <button
+                          className="btn btn-primary"
+                          onClick={async () => {
+                            setIsEnablingAuth(true)
+                            setAuthStatus(`正在等待${biometricLabel}验证...`)
+                            const result = await enableAuth()
+                            setIsEnablingAuth(false)
+                            if (result.success) {
+                              setAuthStatus('已成功启用认证保护')
+                            } else {
+                              setError(result.error || '启用失败')
+                              setAuthStatus('')
+                            }
+                          }}
+                          disabled={isEnablingAuth}
+                        >
+                          {isEnablingAuth ? '正在配置...' : '启用应用锁'}
+                        </button>
+                      ) : (
+                        <div className="auth-success-state">
+                          <div className="success-badge">
+                            <CheckCircle2 size={16} />
+                            <span>已启用保护</span>
                           </div>
-                        )}
-                      </div>
-
-                      {authStatus && (
-                        <div className="auth-status-text">
-                          {authStatus}
+                          <button
+                            className="btn btn-text-danger"
+                            onClick={async () => {
+                              await disableAuth()
+                              setAuthStatus('')
+                            }}
+                          >
+                            关闭保护
+                          </button>
                         </div>
                       )}
                     </div>
-                  )}
+
+                    {authStatus && (
+                      <div className="auth-status-text">
+                        {authStatus}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
