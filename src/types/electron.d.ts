@@ -1,5 +1,6 @@
 import type { ChatSession, Message, Contact, ContactInfo } from './models'
 import type { SummaryResult } from './ai'
+import type { AccountProfile } from './account'
 
 export interface ImageListItem {
   imagePath: string
@@ -33,7 +34,7 @@ export interface ElectronAPI {
     openAnnualReportWindow: (year: number) => Promise<boolean>
     openAgreementWindow: () => Promise<boolean>
     openPurchaseWindow: () => Promise<boolean>
-    openWelcomeWindow: () => Promise<boolean>
+    openWelcomeWindow: (mode?: 'default' | 'add-account') => Promise<boolean>
     completeWelcome: () => Promise<boolean>
     isChatWindowOpen: () => Promise<boolean>
     closeChatWindow: () => Promise<boolean>
@@ -56,6 +57,14 @@ export interface ElectronAPI {
     set: (key: string, value: unknown) => Promise<void>
     getTldCache: () => Promise<{ tlds: string[]; updatedAt: number } | null>
     setTldCache: (tlds: string[]) => Promise<void>
+  }
+  accounts: {
+    list: () => Promise<AccountProfile[]>
+    getActive: () => Promise<AccountProfile | null>
+    setActive: (accountId: string) => Promise<AccountProfile | null>
+    save: (profile: Omit<AccountProfile, 'id' | 'createdAt' | 'updatedAt' | 'lastUsedAt'>) => Promise<AccountProfile | null>
+    update: (accountId: string, patch: Partial<Omit<AccountProfile, 'id' | 'createdAt' | 'updatedAt' | 'lastUsedAt'>>) => Promise<AccountProfile | null>
+    delete: (accountId: string, deleteLocalData?: boolean) => Promise<{ success: boolean; error?: string; deleted?: AccountProfile | null; nextActiveAccountId?: string }>
   }
   db: {
     open: (dbPath: string, key?: string) => Promise<boolean>
@@ -812,6 +821,8 @@ export interface ElectronAPI {
     clearDatabases: () => Promise<{ success: boolean; error?: string }>
     clearAll: () => Promise<{ success: boolean; error?: string }>
     clearConfig: () => Promise<{ success: boolean; error?: string }>
+    clearCurrentAccount: (deleteLocalData?: boolean) => Promise<{ success: boolean; error?: string }>
+    clearAllAccountConfigs: () => Promise<{ success: boolean; error?: string }>
     getCacheSize: () => Promise<{
       success: boolean;
       error?: string;

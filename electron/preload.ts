@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { AccountProfile } from '../src/types/account'
 
 function getMcpLaunchConfigSafe(): Promise<{
   command: string
@@ -31,6 +32,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     set: (key: string, value: any) => ipcRenderer.invoke('config:set', key, value),
     getTldCache: () => ipcRenderer.invoke('config:getTldCache'),
     setTldCache: (tlds: string[]) => ipcRenderer.invoke('config:setTldCache', tlds)
+  },
+
+  accounts: {
+    list: () => ipcRenderer.invoke('accounts:list') as Promise<AccountProfile[]>,
+    getActive: () => ipcRenderer.invoke('accounts:getActive') as Promise<AccountProfile | null>,
+    setActive: (accountId: string) => ipcRenderer.invoke('accounts:setActive', accountId) as Promise<AccountProfile | null>,
+    save: (profile: Omit<AccountProfile, 'id' | 'createdAt' | 'updatedAt' | 'lastUsedAt'>) => ipcRenderer.invoke('accounts:save', profile) as Promise<AccountProfile | null>,
+    update: (accountId: string, patch: Partial<Omit<AccountProfile, 'id' | 'createdAt' | 'updatedAt' | 'lastUsedAt'>>) =>
+      ipcRenderer.invoke('accounts:update', accountId, patch) as Promise<AccountProfile | null>,
+    delete: (accountId: string, deleteLocalData?: boolean) =>
+      ipcRenderer.invoke('accounts:delete', accountId, deleteLocalData) as Promise<{ success: boolean; error?: string; deleted?: AccountProfile | null; nextActiveAccountId?: string }>
   },
 
   // 数据库操作
@@ -128,7 +140,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openAnnualReportWindow: (year: number) => ipcRenderer.invoke('window:openAnnualReportWindow', year),
     openAgreementWindow: () => ipcRenderer.invoke('window:openAgreementWindow'),
     openPurchaseWindow: () => ipcRenderer.invoke('window:openPurchaseWindow'),
-    openWelcomeWindow: () => ipcRenderer.invoke('window:openWelcomeWindow'),
+    openWelcomeWindow: (mode?: 'default' | 'add-account') => ipcRenderer.invoke('window:openWelcomeWindow', mode),
     completeWelcome: () => ipcRenderer.invoke('window:completeWelcome'),
     isChatWindowOpen: () => ipcRenderer.invoke('window:isChatWindowOpen'),
     closeChatWindow: () => ipcRenderer.invoke('window:closeChatWindow'),
@@ -413,6 +425,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     clearDatabases: () => ipcRenderer.invoke('cache:clearDatabases'),
     clearAll: () => ipcRenderer.invoke('cache:clearAll'),
     clearConfig: () => ipcRenderer.invoke('cache:clearConfig'),
+    clearCurrentAccount: (deleteLocalData?: boolean) => ipcRenderer.invoke('cache:clearCurrentAccount', deleteLocalData),
+    clearAllAccountConfigs: () => ipcRenderer.invoke('cache:clearAllAccountConfigs'),
     getCacheSize: () => ipcRenderer.invoke('cache:getCacheSize')
   },
   log: {

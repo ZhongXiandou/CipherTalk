@@ -4,6 +4,7 @@ import { useAppStore } from '../stores/appStore'
 import { useThemeStore, themes } from '../stores/themeStore'
 import { useActivationStore } from '../stores/activationStore'
 import type { UpdateDownloadProgressPayload } from '../types/electron'
+import type { AccountProfile } from '../types/account'
 import { dialog } from '../services/ipc'
 import * as configService from '../services/config'
 import AISummarySettings from '../components/ai/AISummarySettings'
@@ -45,13 +46,16 @@ const sttModelTypeOptions = [
 function SettingsPage() {
   const [searchParams] = useSearchParams()
   const location = useLocation()
-  const { setDbConnected, setLoading } = useAppStore()
+  const { setDbConnected, setLoading, setMyWxid: setCurrentWxid } = useAppStore()
   const { currentTheme, themeMode, setTheme, setThemeMode, appIcon, setAppIcon } = useThemeStore()
   const { status: activationStatus, checkStatus: checkActivationStatus } = useActivationStore()
 
   const { isAuthEnabled, enableAuth, disableAuth, setupPassword, authMethod } = useAuthStore()
   const [passwordInput, setPasswordInput] = useState('')
   const [showPasswordInput, setShowPasswordInput] = useState(false)
+  const [accountsList, setAccountsList] = useState<AccountProfile[]>([])
+  const [activeAccountId, setActiveAccountId] = useState('')
+  const [editingAccountId, setEditingAccountId] = useState('')
 
   // 安全设置确认弹窗状态
   const [securityConfirm, setSecurityConfirm] = useState<{
@@ -143,7 +147,7 @@ function SettingsPage() {
   const [closeToTray, setCloseToTray] = useState(true)
   const [showAesKey, setShowAesKey] = useState(false)
   const [showClearDialog, setShowClearDialog] = useState<{
-    type: 'images' | 'emojis' | 'databases' | 'all' | 'config'
+    type: 'images' | 'emojis' | 'databases' | 'all' | 'currentAccount' | 'allAccounts'
     title: string
     message: string
   } | null>(null)
@@ -197,6 +201,41 @@ function SettingsPage() {
   const isMac = platformInfo.platform === 'darwin'
   const biometricLabel = isMac ? 'Touch ID' : 'Windows Hello'
 
+  const buildAccountPayload = () => ({
+    wxid: wxid.trim(),
+    dbPath: dbPath.trim(),
+    decryptKey: decryptKey.trim(),
+    cachePath: cachePath.trim(),
+    imageXorKey: imageXorKey.trim(),
+    imageAesKey: imageAesKey.trim(),
+    displayName: wxid.trim() || '未命名账号'
+  })
+
+  const applyAccountToForm = (account: AccountProfile | null) => {
+    setEditingAccountId(account?.id || '')
+    setDecryptKey(account?.decryptKey || '')
+    setDbPath(account?.dbPath || '')
+    setWxid(account?.wxid || '')
+    setCachePath(account?.cachePath || '')
+    setImageXorKey(account?.imageXorKey || '')
+    setImageAesKey(account?.imageAesKey || '')
+    setIsAccountVerified(Boolean(account?.decryptKey && account?.dbPath && account?.wxid))
+  }
+
+  const refreshAccountsState = async (preferredEditingId?: string) => {
+    const [accounts, activeAccount] = await Promise.all([
+      configService.listAccounts(),
+      configService.getActiveAccount()
+    ])
+    setAccountsList(accounts)
+    setActiveAccountId(activeAccount?.id || '')
+
+    const editingId = preferredEditingId || editingAccountId || activeAccount?.id || accounts[0]?.id || ''
+    const editingAccount = accounts.find(item => item.id === editingId) || activeAccount || accounts[0] || null
+    applyAccountToForm(editingAccount)
+    return { accounts, activeAccount, editingAccount }
+  }
+
   useEffect(() => {
     loadConfig()
     loadDefaultExportPath()
@@ -210,6 +249,7 @@ function SettingsPage() {
 
   const loadConfig = async () => {
     try {
+      const { activeAccount, editingAccount } = await refreshAccountsState()
       const savedKey = await configService.getDecryptKey()
       const savedPath = await configService.getDbPath()
       const savedWxid = await configService.getMyWxid()
@@ -222,12 +262,13 @@ function SettingsPage() {
       const savedSkipIntegrityCheck = await configService.getSkipIntegrityCheck()
       const savedAutoUpdateDatabase = await configService.getAutoUpdateDatabase()
 
-      if (savedKey) setDecryptKey(savedKey)
-      if (savedPath) setDbPath(savedPath)
-      if (savedWxid) setWxid(savedWxid)
-      if (savedCachePath) setCachePath(savedCachePath)
-      if (savedXorKey) setImageXorKey(savedXorKey)
-      if (savedAesKey) setImageAesKey(savedAesKey)
+      if (!editingAccount && savedKey) setDecryptKey(savedKey)
+      if (!editingAccount && savedPath) setDbPath(savedPath)
+      if (!editingAccount && savedWxid) setWxid(savedWxid)
+      if (!editingAccount && savedCachePath) setCachePath(savedCachePath)
+      if (!editingAccount && savedXorKey) setImageXorKey(savedXorKey)
+      if (!editingAccount && savedAesKey) setImageAesKey(savedAesKey)
+      setIsAccountVerified(Boolean((editingAccount || activeAccount)?.decryptKey && (editingAccount || activeAccount)?.dbPath && (editingAccount || activeAccount)?.wxid))
       if (savedExportPath) setExportPath(savedExportPath)
       if (savedSttLanguages && savedSttLanguages.length > 0) {
         setSttLanguagesState(savedSttLanguages)
@@ -308,7 +349,8 @@ function SettingsPage() {
         aiCustomSystemPrompt: savedAiCustomSystemPrompt,
         aiEnableThinking: savedAiEnableThinking,
         aiMessageLimit: savedAiMessageLimit,
-        closeToTray: savedCloseToTray
+        closeToTray: savedCloseToTray,
+        editingAccountId: (editingAccount || activeAccount)?.id || ''
       })
 
     } catch (e) {
@@ -356,7 +398,8 @@ function SettingsPage() {
       aiCustomSystemPrompt,
       aiEnableThinking,
       aiMessageLimit,
-      closeToTray
+      closeToTray,
+      editingAccountId
     }
 
     // 深度比较配置是否有变化
@@ -369,7 +412,7 @@ function SettingsPage() {
     quoteStyle, exportDefaultDateRange, exportDefaultAvatars,
     aiProvider, aiApiKey, aiModel, aiDefaultTimeRange, aiSummaryDetail,
     aiSystemPromptPreset, aiCustomSystemPrompt, aiEnableThinking, aiMessageLimit,
-    closeToTray, initialConfig
+    closeToTray, editingAccountId, initialConfig
   ])
 
   const loadAppVersion = async () => {
@@ -604,11 +647,19 @@ function SettingsPage() {
     })
   }
 
-  const handleClearConfig = () => {
+  const handleClearCurrentAccount = () => {
     setShowClearDialog({
-      type: 'config',
-      title: '清除配置',
-      message: '此操作将删除所有保存的配置信息（包括密钥、路径等），清除后无法恢复。确定要继续吗？'
+      type: 'currentAccount',
+      title: '清除当前账号',
+      message: '此操作将清除当前账号的密钥、路径等配置，不影响其他账号。确定要继续吗？'
+    })
+  }
+
+  const handleClearAllAccounts = () => {
+    setShowClearDialog({
+      type: 'allAccounts',
+      title: '清空全部账号配置',
+      message: '此操作将删除所有账号配置和账号级密钥/路径信息，不删除全局主题、AI、MCP、HTTP API 等通用设置。确定要继续吗？'
     })
   }
 
@@ -617,31 +668,34 @@ function SettingsPage() {
 
     try {
       let result
-      switch (showClearDialog.type) {
-        case 'images':
-          result = await window.electronAPI.cache.clearImages()
-          break
+        switch (showClearDialog.type) {
+          case 'images':
+            result = await window.electronAPI.cache.clearImages()
+            break
         case 'emojis':
           result = await window.electronAPI.cache.clearEmojis()
           break
         case 'databases':
           result = await window.electronAPI.cache.clearDatabases()
           break
-        case 'all':
-          result = await window.electronAPI.cache.clearAll()
-          break
-        case 'config':
-          result = await window.electronAPI.cache.clearConfig()
-          break
-      }
-
-      if (result.success) {
-        showMessage(`${showClearDialog.title}成功`, true)
-        if (showClearDialog.type === 'config') {
-          await loadConfig()
-        } else {
-          await loadCacheSize()
+          case 'all':
+            result = await window.electronAPI.cache.clearAll()
+            break
+          case 'currentAccount':
+            result = await window.electronAPI.cache.clearCurrentAccount(false)
+            break
+          case 'allAccounts':
+            result = await window.electronAPI.cache.clearAllAccountConfigs()
+            break
         }
+
+        if (result.success) {
+          showMessage(`${showClearDialog.title}成功`, true)
+          if (showClearDialog.type === 'currentAccount' || showClearDialog.type === 'allAccounts') {
+            await loadConfig()
+          } else {
+            await loadCacheSize()
+          }
       } else {
         showMessage(result.error || `${showClearDialog.title}失败`, false)
       }
@@ -697,14 +751,12 @@ function SettingsPage() {
 
         if (result.success && result.key) {
           setDecryptKey(result.key)
-          await configService.setDecryptKey(result.key)
 
           if (dbPath) {
             const resolved = await window.electronAPI.wcdb.resolveValidWxid(dbPath, result.key)
             if (resolved.success && resolved.wxid) {
               setWxid(resolved.wxid)
               setIsAccountVerified(true)
-              await configService.setMyWxid(resolved.wxid)
               showMessage(`密钥获取成功！已验证账号: ${resolved.wxid}`, true)
               setKeyStatus('')
               return
@@ -714,7 +766,6 @@ function SettingsPage() {
           if (result.validatedWxid) {
             setWxid(result.validatedWxid)
             setIsAccountVerified(true)
-            await configService.setMyWxid(result.validatedWxid)
             showMessage(`密钥获取成功！已验证账号: ${result.validatedWxid}`, true)
             setKeyStatus('')
             return
@@ -730,7 +781,6 @@ function SettingsPage() {
           if (accountInfo) {
             setWxid(accountInfo.wxid)
             setIsAccountVerified(false)
-            await configService.setMyWxid(accountInfo.wxid)
             showMessage(`密钥获取成功！已识别候选账号: ${accountInfo.wxid}，请继续验证目录。`, true)
           } else {
             const wxids = await window.electronAPI.dbPath.scanWxids(dbPath)
@@ -798,7 +848,6 @@ function SettingsPage() {
 
       if (result.success && result.key) {
         setDecryptKey(result.key)
-        await configService.setDecryptKey(result.key)
 
         // 自动检测当前登录的微信账号
         setKeyStatus('正在检测当前登录账号...')
@@ -813,7 +862,6 @@ function SettingsPage() {
 
         if (accountInfo) {
           setWxid(accountInfo.wxid)
-          await configService.setMyWxid(accountInfo.wxid)
           showMessage(`密钥获取成功！已自动绑定账号: ${accountInfo.wxid}`, true)
         } else {
           showMessage('密钥获取成功，已自动保存！（未能自动检测账号，请手动输入 wxid）', true)
@@ -839,10 +887,150 @@ function SettingsPage() {
 
   const handleOpenWelcomeWindow = async () => {
     try {
-      await window.electronAPI.window.openWelcomeWindow()
+      await window.electronAPI.window.openWelcomeWindow('add-account')
     } catch (e) {
       showMessage('打开引导窗口失败', false)
     }
+  }
+
+  const handleSelectAccountForEdit = (account: AccountProfile) => {
+    applyAccountToForm(account)
+    setInitialConfig((prev: any) => prev ? {
+      ...prev,
+      decryptKey: account.decryptKey || '',
+      dbPath: account.dbPath || '',
+      wxid: account.wxid || '',
+      cachePath: account.cachePath || '',
+      imageXorKey: account.imageXorKey || '',
+      imageAesKey: account.imageAesKey || '',
+      editingAccountId: account.id
+    } : prev)
+    setHasUnsavedChanges(false)
+  }
+
+  const handleSwitchAccountAndReconnect = async () => {
+    if (!editingAccountId || editingAccountId === activeAccountId) {
+      showMessage('当前没有待切换账号', false)
+      return
+    }
+
+    if (hasUnsavedChanges) {
+      showMessage('请先保存当前账号表单，再执行切换', false)
+      return
+    }
+
+    const target = accountsList.find((item) => item.id === editingAccountId)
+    if (!target) {
+      showMessage('待切换账号不存在', false)
+      return
+    }
+
+    if (!target.dbPath || !target.decryptKey || !target.wxid) {
+      showMessage('待切换账号配置不完整，请先保存并补全账号信息', false)
+      return
+    }
+
+    setIsLoadingState(true)
+    setLoading(true, '正在切换账号...')
+    try {
+      const switched = await configService.setActiveAccount(target.id)
+      if (!switched) {
+        throw new Error('切换账号失败')
+      }
+
+      const result = await window.electronAPI.wcdb.testConnection(target.dbPath, target.decryptKey, target.wxid)
+      if (!result.success) {
+        throw new Error(result.error || '账号重连失败')
+      }
+
+      await window.electronAPI.chat.close()
+      await window.electronAPI.chat.refreshCache()
+      await window.electronAPI.chat.connect()
+      setDbConnected(true, target.dbPath)
+      setCurrentWxid(target.wxid)
+      await refreshAccountsState(target.id)
+      showMessage(`已切换到账号：${target.displayName}`, true)
+    } catch (e) {
+      showMessage(`切换账号失败: ${e}`, false)
+    } finally {
+      setIsLoadingState(false)
+      setLoading(false)
+    }
+  }
+
+  const handleDeleteAccount = (account: AccountProfile) => {
+    setSecurityConfirm({
+      show: true,
+      title: '删除账号',
+      message: `删除账号 ${account.displayName || account.wxid}？此操作仅删除配置，不删除本地解密数据。`,
+      onConfirm: async () => {
+        const result = await configService.deleteAccount(account.id, false)
+        if (result.success) {
+          await refreshAccountsState(result.nextActiveAccountId)
+          showMessage('账号已删除', true)
+        } else {
+          showMessage(result.error || '删除账号失败', false)
+        }
+        setSecurityConfirm(prev => ({ ...prev, show: false }))
+      }
+    })
+  }
+
+  const handleDeleteAccountWithLocalData = (account: AccountProfile) => {
+    setSecurityConfirm({
+      show: true,
+      title: '删除账号并清理本地数据',
+      message: `将删除账号 ${account.displayName || account.wxid} 的配置，并尝试删除该账号对应的本地解密数据库缓存。`,
+      onConfirm: async () => {
+        const result = await configService.deleteAccount(account.id, true)
+        if (result.success) {
+          await refreshAccountsState(result.nextActiveAccountId)
+          showMessage('账号及其本地数据已删除', true)
+        } else {
+          showMessage(result.error || '删除账号失败', false)
+        }
+        setSecurityConfirm(prev => ({ ...prev, show: false }))
+      }
+    })
+  }
+
+  const handleClearCurrentAccountConfig = (deleteLocalData = false) => {
+    setSecurityConfirm({
+      show: true,
+      title: deleteLocalData ? '清除当前账号并删除本地数据' : '清除当前账号',
+      message: deleteLocalData
+        ? '将清除当前账号配置，并尝试删除该账号对应的本地解密数据库缓存。'
+        : '将只清除当前账号配置，不影响其他账号和全局设置。',
+      onConfirm: async () => {
+        const result = await window.electronAPI.cache.clearCurrentAccount(deleteLocalData)
+        if (result.success) {
+          await refreshAccountsState(activeAccountId)
+          showMessage('当前账号配置已清除', true)
+        } else {
+          showMessage(result.error || '清除当前账号失败', false)
+        }
+        setSecurityConfirm(prev => ({ ...prev, show: false }))
+      }
+    })
+  }
+
+  const handleClearAllAccountConfigs = () => {
+    setSecurityConfirm({
+      show: true,
+      title: '清空全部账号配置',
+      message: '将删除所有账号配置和账号级密钥/路径信息，不会删除主题、AI、MCP、HTTP API 等通用设置。',
+      onConfirm: async () => {
+        const result = await window.electronAPI.cache.clearAllAccountConfigs()
+        if (result.success) {
+          await refreshAccountsState()
+          await loadConfig()
+          showMessage('已清空全部账号配置', true)
+        } else {
+          showMessage(result.error || '清空全部账号配置失败', false)
+        }
+        setSecurityConfirm(prev => ({ ...prev, show: false }))
+      }
+    })
   }
 
   const handleSelectDbPath = async () => {
@@ -971,7 +1159,6 @@ function SettingsPage() {
       const result = await window.electronAPI.wcdb.testConnection(dbPath, decryptKey, wxid)
       if (result.success) {
         setIsAccountVerified(true)
-        await configService.setMyWxid(wxid)
         showMessage(`账号目录验证成功：${wxid}`, true)
       } else {
         setIsAccountVerified(false)
@@ -1013,15 +1200,20 @@ function SettingsPage() {
 
     try {
       // 保存数据库相关配置
-      if (decryptKey) await configService.setDecryptKey(decryptKey)
-      if (dbPath) await configService.setDbPath(dbPath)
-      if (wxid) await configService.setMyWxid(wxid)
-      await configService.setCachePath(cachePath)
+      let savedAccount: AccountProfile | null = null
+      const accountPayload = buildAccountPayload()
+
+      if (editingAccountId) {
+        savedAccount = await configService.updateAccount(editingAccountId, accountPayload)
+      } else if (accountPayload.wxid || accountPayload.dbPath || accountPayload.decryptKey || accountPayload.cachePath) {
+        savedAccount = await configService.saveAccount(accountPayload)
+      }
+
+      if (savedAccount) {
+        setEditingAccountId(savedAccount.id)
+      }
 
       // 保存图片密钥（包括空值）
-      await configService.setImageXorKey(imageXorKey)
-      await configService.setImageAesKey(imageAesKey)
-
       // 保存导出路径
       if (exportPath) await configService.setExportPath(exportPath)
 
@@ -1060,6 +1252,8 @@ function SettingsPage() {
         setDbConnected(true, dbPath)
       }
 
+      await refreshAccountsState(savedAccount?.id || editingAccountId)
+
       showMessage('配置保存成功', true)
       
       // 保存成功后更新初始配置，重置变化状态
@@ -1090,7 +1284,8 @@ function SettingsPage() {
         aiCustomSystemPrompt,
         aiEnableThinking,
         aiMessageLimit,
-        closeToTray
+        closeToTray,
+        editingAccountId: savedAccount?.id || editingAccountId
       })
       setHasUnsavedChanges(false)
     } catch (e) {
@@ -1249,9 +1444,64 @@ function SettingsPage() {
       {/* 引导窗口按钮 */}
       <div className="form-group">
         <button className="btn btn-secondary" onClick={handleOpenWelcomeWindow}>
-          <Zap size={16} /> 打开配置引导窗口
+          <Zap size={16} /> 新增账号引导
         </button>
-        <span className="form-hint">使用引导窗口一步步完成配置</span>
+        <span className="form-hint">使用引导窗口一步步新增账号，不会覆盖其他已保存账号</span>
+      </div>
+
+      <h3 className="section-title">账号管理</h3>
+      <div className="form-group">
+        <div className="form-hint" style={{ marginBottom: '10px' }}>
+          当前激活账号：{accountsList.find(item => item.id === activeAccountId)?.displayName || '未设置'}
+        </div>
+        {accountsList.length > 0 ? (
+          <div className="wxid-options">
+            {accountsList.map((account) => (
+              <button
+                key={account.id}
+                className={`wxid-option ${editingAccountId === account.id ? 'is-selected' : ''}`}
+                onClick={() => handleSelectAccountForEdit(account)}
+              >
+                <div className="wxid-option-name">
+                  {account.displayName}
+                  {account.id === activeAccountId ? '（当前激活）' : ''}
+                </div>
+                <div className="field-hint">{account.wxid || '未设置 wxid'}</div>
+                <div className="field-hint">{account.dbPath || '未设置数据库路径'}</div>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="form-hint">当前还没有已保存账号，请先新增一个账号。</div>
+        )}
+        <div className="btn-row" style={{ marginTop: '12px' }}>
+          <button className="btn btn-secondary" onClick={handleSaveConfig} disabled={isLoading}>
+            <Save size={16} /> 使用当前表单更新此账号
+          </button>
+          <button className="btn btn-secondary" onClick={handleSwitchAccountAndReconnect} disabled={!editingAccountId || editingAccountId === activeAccountId || isLoading}>
+            <RefreshCw size={16} /> 切换并重连
+          </button>
+          <button
+            className="btn btn-danger"
+            onClick={() => {
+              const account = accountsList.find(item => item.id === editingAccountId)
+              if (account) handleDeleteAccount(account)
+            }}
+            disabled={!editingAccountId || isLoading}
+          >
+            <Trash2 size={16} /> 删除账号
+          </button>
+          <button
+            className="btn btn-danger"
+            onClick={() => {
+              const account = accountsList.find(item => item.id === editingAccountId)
+              if (account) handleDeleteAccountWithLocalData(account)
+            }}
+            disabled={!editingAccountId || isLoading}
+          >
+            <Trash2 size={16} /> 删除并清理数据
+          </button>
+        </div>
       </div>
 
       {/* 数据库解密部分 */}
@@ -1602,11 +1852,9 @@ function SettingsPage() {
         if (result.xorKey !== undefined) {
           const xorKeyHex = `0x${result.xorKey.toString(16).padStart(2, '0')}`
           setImageXorKey(xorKeyHex)
-          await configService.setImageXorKey(xorKeyHex)
         }
         if (result.aesKey) {
           setImageAesKey(result.aesKey)
-          await configService.setImageAesKey(result.aesKey)
         }
         showMessage('图片密钥获取成功！', true)
         setImageKeyStatus('')
@@ -2562,12 +2810,12 @@ function SettingsPage() {
               >
                 取消
               </button>
-              <button
-                className="btn btn-primary"
-                onClick={securityConfirm.onConfirm}
-              >
-                确定切换
-              </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={securityConfirm.onConfirm}
+                >
+                  确定
+                </button>
             </div>
           </div>
         </div>
@@ -2698,10 +2946,16 @@ function SettingsPage() {
                 <span className="cache-card-label">配置信息</span>
               </div>
               <div className="cache-card-desc">密钥、路径等</div>
-              <button type="button" className="btn btn-secondary cache-card-btn" onClick={handleClearConfig}>
-                <Trash2 size={14} /> 清除配置
-              </button>
-            </div>
+                <button type="button" className="btn btn-secondary cache-card-btn" onClick={handleClearCurrentAccount}>
+                  <Trash2 size={14} /> 清除当前账号
+                </button>
+                <button type="button" className="btn btn-secondary cache-card-btn" onClick={handleClearCurrentAccountConfig.bind(null, true)}>
+                  <Trash2 size={14} /> 删除当前账号并清理数据
+                </button>
+                <button type="button" className="btn btn-danger cache-card-btn" onClick={handleClearAllAccounts}>
+                  <Trash2 size={14} /> 清空全部账号配置
+                </button>
+              </div>
             <div className="cache-card cache-card-total">
               <div className="cache-card-header">
                 <Layers size={20} className="cache-card-icon" />

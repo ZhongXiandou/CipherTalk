@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useThemeStore } from '../stores/themeStore'
 import { useAppStore } from '../stores/appStore'
 import { dialog } from '../services/ipc'
@@ -27,7 +27,8 @@ interface WelcomePageProps {
 
 function WelcomePage({ standalone = false }: WelcomePageProps) {
   const navigate = useNavigate()
-  const { isDbConnected, setDbConnected } = useAppStore()
+  const location = useLocation()
+  const { isDbConnected, setDbConnected, setMyWxid: setCurrentWxid } = useAppStore()
   const appIcon = useThemeStore(state => state.appIcon)
   const { enableAuth, disableAuth, isAuthEnabled } = useAuthStore()
 
@@ -67,6 +68,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
 
   const isMac = platformInfo.platform === 'darwin'
   const biometricLabel = isMac ? 'Touch ID' : 'Windows Hello'
+  const isAddAccountMode = new URLSearchParams(location.search).get('mode') === 'add-account'
 
   useEffect(() => {
     const removeStatus = window.electronAPI.wxKey?.onStatus?.((payload) => {
@@ -95,6 +97,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
 
     // 从缓存加载配置
     const loadCachedConfig = () => {
+      if (isAddAccountMode) return
       try {
         const cached = localStorage.getItem('welcomeConfig')
         if (cached) {
@@ -144,7 +147,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
       removeStatus?.()
       removeImageProgress?.()
     }
-  }, [])
+  }, [isAddAccountMode])
 
   useEffect(() => {
     setWxidOptions([])
@@ -182,6 +185,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
 
   // 保存配置到缓存
   useEffect(() => {
+    if (isAddAccountMode) return
     const config = {
       dbPath,
       cachePath,
@@ -195,7 +199,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
     } catch (e) {
       console.error('保存配置到缓存失败:', e)
     }
-  }, [dbPath, cachePath, wxid, decryptKey, imageXorKey, imageAesKey])
+  }, [dbPath, cachePath, wxid, decryptKey, imageXorKey, imageAesKey, isAddAccountMode])
 
   const currentStep = steps[stepIndex]
   const rootClassName = `welcome-page${isClosing ? ' is-closing' : ''}${standalone ? ' is-standalone' : ''}`
@@ -548,16 +552,22 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
 
     try {
       // 先保存配置，因为 dataManagementService 需要从配置中读取这些信息
-      await configService.setDbPath(dbPath)
-      await configService.setDecryptKey(decryptKey)
-      await configService.setMyWxid(wxid)
-      await configService.setCachePath(cachePath)
-      if (imageXorKey) {
-        await configService.setImageXorKey(imageXorKey)
+      const savedAccount = await configService.saveAccount({
+        dbPath,
+        decryptKey,
+        wxid,
+        cachePath,
+        imageXorKey,
+        imageAesKey,
+        displayName: wxid || '未命名账号'
+      })
+
+      if (!savedAccount) {
+        throw new Error('保存账号配置失败')
       }
-      if (imageAesKey) {
-        await configService.setImageAesKey(imageAesKey)
-      }
+
+      await configService.setActiveAccount(savedAccount.id)
+      setCurrentWxid(wxid)
 
       setDecryptStatus('正在测试数据库连接...')
 
@@ -625,6 +635,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
 
       // 在跳转前设置连接状态
       setDbConnected(true, dbPath)
+      setCurrentWxid(wxid)
 
       if (standalone) {
         setIsClosing(true)

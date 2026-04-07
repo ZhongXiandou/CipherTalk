@@ -872,7 +872,7 @@ function createAgreementWindow() {
 /**
  * 创建首次引导窗口（独立无边框透明窗口）
  */
-function createWelcomeWindow() {
+function createWelcomeWindow(mode: 'default' | 'add-account' = 'default') {
   // 如果已存在，聚焦
   if (welcomeWindow && !welcomeWindow.isDestroyed()) {
     welcomeWindow.focus()
@@ -905,10 +905,12 @@ function createWelcomeWindow() {
     welcomeWindow?.show()
   })
 
+  const welcomeHash = mode === 'add-account' ? '/welcome-window?mode=add-account' : '/welcome-window'
+
   if (process.env.VITE_DEV_SERVER_URL) {
-    welcomeWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}#/welcome-window`)
+    welcomeWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}#${welcomeHash}`)
   } else {
-    welcomeWindow.loadFile(join(__dirname, '../dist/index.html'), { hash: '/welcome-window' })
+    welcomeWindow.loadFile(join(__dirname, '../dist/index.html'), { hash: welcomeHash })
   }
 
   welcomeWindow.on('closed', () => {
@@ -1291,6 +1293,48 @@ function registerIpcHandlers() {
 
   ipcMain.handle('config:setTldCache', async (_, tlds: string[]) => {
     return configService?.setTldCache(tlds)
+  })
+
+  ipcMain.handle('accounts:list', async () => {
+    return configService?.listAccounts() || []
+  })
+
+  ipcMain.handle('accounts:getActive', async () => {
+    return configService?.getActiveAccount() || null
+  })
+
+  ipcMain.handle('accounts:setActive', async (_, accountId: string) => {
+    return configService?.setActiveAccount(accountId) || null
+  })
+
+  ipcMain.handle('accounts:save', async (_, profile: any) => {
+    return configService?.saveAccount(profile) || null
+  })
+
+  ipcMain.handle('accounts:update', async (_, accountId: string, patch: any) => {
+    return configService?.updateAccount(accountId, patch) || null
+  })
+
+  ipcMain.handle('accounts:delete', async (_, accountId: string, deleteLocalData = false) => {
+    if (!configService) {
+      return { success: false, error: '配置服务未初始化' }
+    }
+
+    const deleted = configService.listAccounts().find((item) => item.id === accountId) || null
+    if (!deleted) {
+      return { success: false, error: '账号不存在' }
+    }
+
+    if (deleteLocalData) {
+      const cacheService = new (await import('./services/cacheService')).CacheService(configService)
+      const clearResult = await cacheService.clearAccountDatabases(deleted)
+      if (!clearResult.success) {
+        return { success: false, error: clearResult.error || '删除账号本地数据失败' }
+      }
+    }
+
+    const result = configService.deleteAccount(accountId)
+    return { success: true, deleted: result.deleted, nextActiveAccountId: result.nextActiveAccountId }
   })
 
   // HTTP API 管理
@@ -2910,8 +2954,8 @@ function registerIpcHandlers() {
   })
 
   // 打开引导窗口
-  ipcMain.handle('window:openWelcomeWindow', async () => {
-    createWelcomeWindow()
+  ipcMain.handle('window:openWelcomeWindow', async (_, mode?: 'default' | 'add-account') => {
+    createWelcomeWindow(mode || 'default')
     return true
   })
 
@@ -3112,6 +3156,28 @@ function registerIpcHandlers() {
       return result
     } catch (e) {
       logService?.error('Cache', '配置清除异常', { error: String(e) })
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('cache:clearCurrentAccount', async (_, deleteLocalData = false) => {
+    logService?.info('Cache', '开始清除当前账号配置', { deleteLocalData })
+    try {
+      const cacheService = new (await import('./services/cacheService')).CacheService(configService!)
+      return await cacheService.clearCurrentAccount(deleteLocalData)
+    } catch (e) {
+      logService?.error('Cache', '清除当前账号配置异常', { error: String(e) })
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('cache:clearAllAccountConfigs', async () => {
+    logService?.info('Cache', '开始清空全部账号配置')
+    try {
+      const cacheService = new (await import('./services/cacheService')).CacheService(configService!)
+      return await cacheService.clearAllAccountConfigs()
+    } catch (e) {
+      logService?.error('Cache', '清空全部账号配置异常', { error: String(e) })
       return { success: false, error: String(e) }
     }
   })
