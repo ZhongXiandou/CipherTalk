@@ -77,7 +77,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 文件操作
   file: {
     delete: (filePath: string) => ipcRenderer.invoke('file:delete', filePath),
-    copy: (sourcePath: string, destPath: string) => ipcRenderer.invoke('file:copy', sourcePath, destPath)
+    copy: (sourcePath: string, destPath: string) => ipcRenderer.invoke('file:copy', sourcePath, destPath),
+    writeBase64: (filePath: string, base64Data: string) => ipcRenderer.invoke('file:writeBase64', filePath, base64Data)
   },
 
   // Shell

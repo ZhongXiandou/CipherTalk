@@ -1458,6 +1458,16 @@ function registerIpcHandlers() {
     }
   })
 
+  ipcMain.handle('file:writeBase64', async (_, filePath: string, base64Data: string) => {
+    try {
+      const fs = await import('fs')
+      fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'))
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
   ipcMain.handle('shell:openPath', async (_, path: string) => {
     const { shell } = await import('electron')
     return shell.openPath(path)

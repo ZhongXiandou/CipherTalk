@@ -101,6 +101,7 @@ export interface ElectronAPI {
   file: {
     delete: (filePath: string) => Promise<{ success: boolean; error?: string }>
     copy: (sourcePath: string, destPath: string) => Promise<{ success: boolean; error?: string }>
+    writeBase64: (filePath: string, base64Data: string) => Promise<{ success: boolean; error?: string }>
   }
   shell: {
     openPath: (path: string) => Promise<string>

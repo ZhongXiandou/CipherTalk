@@ -46,7 +46,7 @@ const sttModelTypeOptions = [
 function SettingsPage() {
   const [searchParams] = useSearchParams()
   const location = useLocation()
-  const { setDbConnected, setLoading, setMyWxid: setCurrentWxid } = useAppStore()
+  const { setDbConnected, setLoading, setMyWxid: setCurrentWxid, userInfo } = useAppStore()
   const { currentTheme, themeMode, setTheme, setThemeMode, appIcon, setAppIcon } = useThemeStore()
   const { status: activationStatus, checkStatus: checkActivationStatus } = useActivationStore()
 
@@ -201,15 +201,36 @@ function SettingsPage() {
   const isMac = platformInfo.platform === 'darwin'
   const biometricLabel = isMac ? 'Touch ID' : 'Windows Hello'
 
-  const buildAccountPayload = () => ({
-    wxid: wxid.trim(),
-    dbPath: dbPath.trim(),
-    decryptKey: decryptKey.trim(),
-    cachePath: cachePath.trim(),
-    imageXorKey: imageXorKey.trim(),
-    imageAesKey: imageAesKey.trim(),
-    displayName: wxid.trim() || '未命名账号'
-  })
+  const getAccountDisplayName = (account?: AccountProfile | null) => {
+    if (!account) return '未命名账号'
+
+    const activeNickname = account.id === activeAccountId ? userInfo?.nickName?.trim() : ''
+    if (activeNickname) return activeNickname
+
+    const savedName = account.displayName?.trim()
+    if (savedName && savedName !== '未命名账号') return savedName
+
+    return account.wxid?.trim() || '未命名账号'
+  }
+
+  const buildAccountPayload = () => {
+    const currentAccount = accountsList.find(item => item.id === editingAccountId)
+    const currentDisplayName = currentAccount?.displayName?.trim()
+    const preferredDisplayName = userInfo?.nickName?.trim()
+      || (currentDisplayName && currentDisplayName !== '未命名账号' ? currentDisplayName : '')
+      || wxid.trim()
+      || '未命名账号'
+
+    return {
+      wxid: wxid.trim(),
+      dbPath: dbPath.trim(),
+      decryptKey: decryptKey.trim(),
+      cachePath: cachePath.trim(),
+      imageXorKey: imageXorKey.trim(),
+      imageAesKey: imageAesKey.trim(),
+      displayName: preferredDisplayName
+    }
+  }
 
   const applyAccountToForm = (account: AccountProfile | null) => {
     setEditingAccountId(account?.id || '')
@@ -235,6 +256,26 @@ function SettingsPage() {
     applyAccountToForm(editingAccount)
     return { accounts, activeAccount, editingAccount }
   }
+
+  useEffect(() => {
+    const syncActiveAccountDisplayName = async () => {
+      const activeNickname = userInfo?.nickName?.trim()
+      if (!activeNickname || !activeAccountId) return
+
+      const activeAccount = accountsList.find(item => item.id === activeAccountId)
+      if (!activeAccount) return
+
+      const savedName = activeAccount.displayName?.trim()
+      if (savedName && savedName !== activeAccount.wxid && savedName !== '未命名账号') return
+
+      const updated = await configService.updateAccount(activeAccount.id, { displayName: activeNickname })
+      if (!updated) return
+
+      await refreshAccountsState(editingAccountId || activeAccount.id)
+    }
+
+    void syncActiveAccountDisplayName()
+  }, [userInfo?.nickName, activeAccountId, accountsList])
 
   useEffect(() => {
     loadConfig()
@@ -949,7 +990,7 @@ function SettingsPage() {
       setDbConnected(true, target.dbPath)
       setCurrentWxid(target.wxid)
       await refreshAccountsState(target.id)
-      showMessage(`已切换到账号：${target.displayName}`, true)
+      showMessage(`已切换到账号：${getAccountDisplayName(target)}`, true)
     } catch (e) {
       showMessage(`切换账号失败: ${e}`, false)
     } finally {
@@ -962,7 +1003,7 @@ function SettingsPage() {
     setSecurityConfirm({
       show: true,
       title: '删除账号',
-      message: `删除账号 ${account.displayName || account.wxid}？此操作仅删除配置，不删除本地解密数据。`,
+      message: `删除账号 ${getAccountDisplayName(account)}？此操作仅删除配置，不删除本地解密数据。`,
       onConfirm: async () => {
         const result = await configService.deleteAccount(account.id, false)
         if (result.success) {
@@ -980,7 +1021,7 @@ function SettingsPage() {
     setSecurityConfirm({
       show: true,
       title: '删除账号并清理本地数据',
-      message: `将删除账号 ${account.displayName || account.wxid} 的配置，并尝试删除该账号对应的本地解密数据库缓存。`,
+      message: `将删除账号 ${getAccountDisplayName(account)} 的配置，并尝试删除该账号对应的本地解密数据库缓存。`,
       onConfirm: async () => {
         const result = await configService.deleteAccount(account.id, true)
         if (result.success) {
@@ -1452,7 +1493,7 @@ function SettingsPage() {
       <h3 className="section-title">账号管理</h3>
       <div className="form-group">
         <div className="form-hint" style={{ marginBottom: '10px' }}>
-          当前激活账号：{accountsList.find(item => item.id === activeAccountId)?.displayName || '未设置'}
+          当前激活账号：{getAccountDisplayName(accountsList.find(item => item.id === activeAccountId) || null) || '未设置'}
         </div>
         {accountsList.length > 0 ? (
           <div className="wxid-options">
@@ -1463,10 +1504,10 @@ function SettingsPage() {
                 onClick={() => handleSelectAccountForEdit(account)}
               >
                 <div className="wxid-option-name">
-                  {account.displayName}
+                  {getAccountDisplayName(account)}
                   {account.id === activeAccountId ? '（当前激活）' : ''}
                 </div>
-                <div className="field-hint">{account.wxid || '未设置 wxid'}</div>
+                <div className="field-hint">微信 ID：{account.wxid || '未设置'}</div>
                 <div className="field-hint">{account.dbPath || '未设置数据库路径'}</div>
               </button>
             ))}

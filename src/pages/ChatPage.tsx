@@ -293,7 +293,7 @@ function ChatPage(_props: ChatPageProps) {
   }, [])
   const [selectedMessages, setSelectedMessages] = useState<Set<number>>(new Set())
   const [showEnlargeView, setShowEnlargeView] = useState<{ message: Message; content: string } | null>(null)
-  const [copyToast, setCopyToast] = useState(false)
+  const [topToast, setTopToast] = useState<{ text: string; success: boolean } | null>(null)
   const [showMessageInfo, setShowMessageInfo] = useState<Message | null>(null) // 消息信息弹窗
   const [showDatePicker, setShowDatePicker] = useState(false) // 日期选择器弹窗
   const [selectedDate, setSelectedDate] = useState<string>('') // 选中的日期 (YYYY-MM-DD)
@@ -326,15 +326,63 @@ function ChatPage(_props: ChatPageProps) {
   const [batchImageDates, setBatchImageDates] = useState<string[]>([])
   const [batchImageSelectedDates, setBatchImageSelectedDates] = useState<Set<string>>(new Set())
 
+  const showTopToast = useCallback((text: string, success = true) => {
+    setTopToast({ text, success })
+    setTimeout(() => setTopToast(null), 2000)
+  }, [])
+
   const copyText = useCallback(async (text: string) => {
     try {
       await navigator.clipboard.writeText(text || '')
-      setCopyToast(true)
-      setTimeout(() => setCopyToast(false), 2000)
+      showTopToast('已复制', true)
     } catch (e) {
       console.error('复制失败:', e)
     }
-  }, [])
+  }, [showTopToast])
+
+  const exportVoiceMessage = useCallback(async (message: Message, session: ChatSession) => {
+    try {
+      const voiceResult = await window.electronAPI.chat.getVoiceData(
+        session.username,
+        String(message.localId),
+        message.createTime
+      )
+
+      if (!voiceResult.success || !voiceResult.data) {
+        alert(voiceResult.error || '获取语音数据失败')
+        return
+      }
+
+      const downloadsPath = await window.electronAPI.app.getDownloadsPath()
+      const safeSessionName = String(session.displayName || session.username || 'voice')
+        .replace(/[<>:"/\\|?*]/g, '_')
+        .replace(/\s+/g, ' ')
+        .trim() || 'voice'
+      const timestamp = new Date(message.createTime * 1000)
+      const pad = (value: number) => String(value).padStart(2, '0')
+      const fileName = `${safeSessionName}_${timestamp.getFullYear()}${pad(timestamp.getMonth() + 1)}${pad(timestamp.getDate())}_${pad(timestamp.getHours())}${pad(timestamp.getMinutes())}${pad(timestamp.getSeconds())}_${message.localId}.wav`
+
+      const saveResult = await window.electronAPI.dialog.saveFile({
+        title: '导出语音文件',
+        defaultPath: `${downloadsPath}\\${fileName}`,
+        filters: [{ name: 'WAV 音频', extensions: ['wav'] }]
+      })
+
+      if (saveResult.canceled || !saveResult.filePath) {
+        return
+      }
+
+      const writeResult = await window.electronAPI.file.writeBase64(saveResult.filePath, voiceResult.data)
+      if (!writeResult.success) {
+        alert(writeResult.error || '导出语音文件失败')
+        return
+      }
+
+      showTopToast('语音文件导出成功', true)
+    } catch (e) {
+      showTopToast(`导出语音文件失败: ${String(e)}`, false)
+    }
+  }, [showTopToast])
 
   // 检查图片密钥配置（XOR 和 AES 都需要配置）
   useEffect(() => {
@@ -1910,7 +1958,23 @@ function ChatPage(_props: ChatPageProps) {
 
                             // 计算菜单位置，确保不超出屏幕
                             const menuWidth = 160
-                            const menuHeight = 120
+                            let menuItemCount = 1
+                            if (message.localType !== 34 && message.localType !== 3 && message.localType !== 43) {
+                              menuItemCount += 2
+                            }
+                            if (message.localType !== 3 && message.localType !== 43) {
+                              menuItemCount += 1
+                            }
+                            if (message.localType === 34) {
+                              menuItemCount += 1
+                            }
+                            if (handlers?.reTranscribe) {
+                              menuItemCount += 1
+                            }
+                            if (handlers?.editStt) {
+                              menuItemCount += 1
+                            }
+                            const menuHeight = menuItemCount * 38 + 12
                             let x = e.clientX
                             let y = e.clientY
 
@@ -2097,8 +2161,7 @@ function ChatPage(_props: ChatPageProps) {
                     try {
                       await navigator.clipboard.writeText(contextMenu.message.parsedContent || '')
                       closeContextMenu()
-                      setCopyToast(true)
-                      setTimeout(() => setCopyToast(false), 2000)
+                      showTopToast('已复制', true)
                     } catch (e) {
                       console.error('复制失败:', e)
                       closeContextMenu()
@@ -2142,6 +2205,19 @@ function ChatPage(_props: ChatPageProps) {
               <CheckSquare size={16} />
               <span>多选</span>
             </div>
+            )}
+
+            {contextMenu.message.localType === 34 && (
+              <div
+                className="context-menu-item"
+                onClick={() => {
+                  closeContextMenu()
+                  void exportVoiceMessage(contextMenu.message, contextMenu.session)
+                }}
+              >
+                <Download size={16} />
+                <span>导出语音文件</span>
+              </div>
             )}
 
             {/* 语音消息：重新转文字 */}
@@ -2284,11 +2360,11 @@ function ChatPage(_props: ChatPageProps) {
         document.body
       )}
 
-      {/* 复制成功提示 */}
-      {copyToast && createPortal(
-        <div className="copy-toast">
-          <Check size={16} />
-          <span>已复制</span>
+      {/* 顶部气泡提示 */}
+      {topToast && createPortal(
+        <div className={`copy-toast top-toast ${topToast.success ? 'success' : 'error'}`}>
+          {topToast.success ? <Check size={16} /> : <AlertCircle size={16} />}
+          <span>{topToast.text}</span>
         </div>,
         document.body
       )}
