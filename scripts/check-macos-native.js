@@ -8,6 +8,7 @@ const requiredArtifacts = [
   { name: 'libwx_key.dylib', type: 'file', generated: true },
   { name: 'xkey_helper', type: 'file', generated: true },
   { name: 'image_scan_helper', type: 'file', generated: true },
+  { name: 'libWCDB.dylib', type: 'file', generated: true },
   { name: 'libwcdb_api.dylib', type: 'file', generated: true },
   { name: 'libwcdb_decrypt.dylib', type: 'file', generated: true },
   { name: 'entitlements.mac.plist', type: 'file', generated: false },

@@ -1,6 +1,6 @@
 {
   "name": "ciphertalk",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "description": "密语 - 微信聊天记录查看工具",
   "author": "ILoveBingLu",
   "license": "CC-BY-NC-SA-4.0",
@@ -8,12 +8,14 @@
   "scripts": {
     "dev": "vite",
     "icon:mac": "bash scripts/build-macos-icon.sh",
+    "native:macos": "bash native-dlls/build-macos.sh",
+    "native:macos:check": "node scripts/check-macos-native.js",
     "build:prepare:mac": "node scripts/patch-dmg-builder.cjs",
     "build:prepare": "node scripts/update-readme-version.js && node scripts/prepare-release-announcement.js",
     "prebuild": "node scripts/update-readme-version.js && node scripts/prepare-release-announcement.js",
     "build": "tsc && vite build && electron-builder && node scripts/add-size-to-yml.js",
     "build:win": "npm run build:prepare && tsc && vite build && node scripts/run-electron-builder.cjs win && node scripts/generate-update-manifest.js win && node scripts/add-size-to-yml.js",
-    "build:mac": "npm run build:prepare && npm run build:prepare:mac && tsc && vite build && node scripts/run-electron-builder.cjs mac && node scripts/generate-update-manifest.js mac && node scripts/add-size-to-yml.js",
+    "build:mac": "npm run build:prepare && npm run native:macos:check && npm run build:prepare:mac && tsc && vite build && node scripts/run-electron-builder.cjs mac && node scripts/generate-update-manifest.js mac && node scripts/add-size-to-yml.js",
     "build:ci": "node scripts/prepare-release-announcement.js && tsc && vite build && electron-builder --publish never && node scripts/generate-update-manifest.js && node scripts/add-size-to-yml.js",
     "build:mcp": "tsc && vite build",
     "build:force-update-manifest": "node scripts/generate-force-update-manifest.js",

@@ -12,6 +12,7 @@
 - `libwx_key.dylib`
 - `xkey_helper`
 - `image_scan_helper`
+- `libWCDB.dylib`
 - `libwcdb_api.dylib`
 - `libwcdb_decrypt.dylib`
 
