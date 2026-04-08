@@ -32,7 +32,8 @@
 
   &.variant-standalone.is-mac {
     display: grid;
-    grid-template-columns: minmax(calc(var(--window-controls-left-safe) - 16px), 1fr) auto minmax(0, 1fr);
+    grid-template-columns: calc(var(--window-controls-left-safe) - 16px) minmax(0, 1fr) auto;
+    padding-left: 16px;
     padding-right: var(--window-controls-right-safe);
   }
 }
@@ -129,8 +130,7 @@
 
   .title-bar-right {
     flex-shrink: 0;
-    max-width: min(56vw, 520px);
-    overflow: hidden;
+    overflow: visible;
   }
 
   .titles {
@@ -154,8 +154,24 @@
 }
 
 .title-bar.variant-standalone.is-mac {
+  .title-bar-left {
+    width: calc(var(--window-controls-left-safe) - 16px);
+    min-width: calc(var(--window-controls-left-safe) - 16px);
+  }
+
+  .title-bar-center {
+    justify-self: stretch;
+    overflow: hidden;
+  }
+
+  .title-bar-right {
+    overflow: visible;
+    flex-shrink: 0;
+    justify-self: end;
+  }
+
   .title-bar-center .titles {
-    max-width: 320px;
+    max-width: min(100%, 320px);
   }
 }
 

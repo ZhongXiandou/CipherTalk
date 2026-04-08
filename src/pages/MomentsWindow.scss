@@ -1244,6 +1244,8 @@
   gap: var(--window-toolbar-gap);
   min-width: 0;
   max-width: 100%;
+  width: max-content;
+  flex-shrink: 0;
 
   .export-btn {
     display: flex;
