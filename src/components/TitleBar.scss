@@ -20,6 +20,7 @@
   }
 
   &.variant-standalone {
+    --title-bar-right-safe: var(--window-controls-right-safe);
     height: var(--window-chrome-height);
     min-height: var(--window-chrome-height);
     display: flex;
@@ -27,14 +28,14 @@
     justify-content: space-between;
     gap: var(--window-toolbar-gap);
     padding-left: 16px;
-    padding-right: var(--window-controls-right-safe);
+    padding-right: var(--title-bar-right-safe);
   }
 
   &.variant-standalone.is-mac {
     display: grid;
     grid-template-columns: calc(var(--window-controls-left-safe) - 16px) minmax(0, 1fr) auto;
     padding-left: 16px;
-    padding-right: var(--window-controls-right-safe);
+    padding-right: var(--title-bar-right-safe);
   }
 }
 

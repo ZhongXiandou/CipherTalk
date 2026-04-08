@@ -7,17 +7,21 @@ import { useThemeStore } from '../stores/themeStore'
 import './TitleBar.scss'
 
 interface TitleBarProps {
+  className?: string
   rightContent?: ReactNode
   title?: string
   variant?: 'app' | 'standalone'
 }
 
-function TitleBar({ rightContent, title, variant = 'app' }: TitleBarProps) {
+function TitleBar({ className, rightContent, title, variant = 'app' }: TitleBarProps) {
   const storeRightContent = useTitleBarStore(state => state.rightContent)
   const displayContent = rightContent ?? storeRightContent
   const isUpdating = useUpdateStatusStore(state => state.isUpdating)
   const appIcon = useThemeStore(state => state.appIcon)
   const { isMac } = usePlatformInfo()
+  const titleBarClassName = ['title-bar', `variant-${variant}`, isMac ? 'is-mac' : 'is-win', className]
+    .filter(Boolean)
+    .join(' ')
 
   const updateStatusNode = isUpdating ? (
     <div className="update-status">
@@ -38,7 +42,7 @@ function TitleBar({ rightContent, title, variant = 'app' }: TitleBarProps) {
   )
 
   return (
-    <div className={`title-bar variant-${variant} ${isMac ? 'is-mac' : 'is-win'}`}>
+    <div className={titleBarClassName}>
       <div className="title-bar-left">
         {isMac ? (
           <div className="title-bar-traffic-spacer" aria-hidden="true" />

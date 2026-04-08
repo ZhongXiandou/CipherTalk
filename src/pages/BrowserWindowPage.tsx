@@ -74,7 +74,7 @@ const BrowserWindowPage = () => {
 
     return (
         <div className="browser-window" style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#fff' }}>
-            <TitleBar title={pageTitle} variant="standalone" />
+            <TitleBar className="browser-window-title-bar" title={pageTitle} variant="standalone" />
 
             {/* 简单的进度条 */}
             {isLoading && (
