@@ -10,6 +10,16 @@
 ### 变更
 - 暂无
 
+## [4.1.8] - 2026-04-09
+
+### 新增
+- 为 `get_messages`、`get_session_context`、`search_messages`、`get_moments_timeline` 等 MCP 内容工具补充更可读的文本预览，并为弱宿主保留最多 3 条正文摘要
+
+### 变更
+- MCP 内容类工具补充 `outputSchema`，继续保留结构化 `structuredContent`，同时让只读 `content` 的宿主也能稳定获得消息和朋友圈正文线索
+- `ct-mcp-copilot` Skill 调整为优先消费 `items[].text`、`hits[].message.text`、`items[].contentDesc` 等结构化字段，并固化“先解析联系人真实 `contactId` 再查朋友圈”的查询路线
+- `scripts/mcp-probe.js` 支持指定工具名和 JSON 参数，并同时输出 `content` 与 `structuredContent` 便于回归验证
+
 ## [4.1.7] - 2026-04-08
 
 ### 修复
