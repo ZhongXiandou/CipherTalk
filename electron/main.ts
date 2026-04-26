@@ -191,6 +191,7 @@ async function startSessionVectorIndexJob(sessionId: string, sender: WebContents
     cancelRequested: false
   }
   sessionVectorIndexJobs.set(sessionId, job)
+  dataManagementService.pauseForAi()
 
   worker.on('message', (message: SessionVectorIndexWorkerMessage) => {
     const currentJob = sessionVectorIndexJobs.get(sessionId)
@@ -219,6 +220,7 @@ async function startSessionVectorIndexJob(sessionId: string, sender: WebContents
   })
 
   worker.on('exit', (code) => {
+    dataManagementService.resumeFromAi()
     const currentJob = sessionVectorIndexJobs.get(sessionId)
     if (!currentJob) return
     sessionVectorIndexJobs.delete(sessionId)

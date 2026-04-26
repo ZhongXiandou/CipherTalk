@@ -8,6 +8,7 @@ import type {
   SessionQAStartResult
 } from '../../../src/types/ai'
 import type { SessionQAOptions } from './aiService'
+import { dataManagementService } from '../dataManagementService'
 
 type SessionQAJob = {
   requestId: string
@@ -54,6 +55,7 @@ class SessionQAJobService {
       seq: 0
     }
     this.jobs.set(requestId, job)
+    dataManagementService.pauseForAi()
     this.warmupVectorIndex(workerOptions.sessionId)
 
     worker.on('message', (message) => {
@@ -69,6 +71,7 @@ class SessionQAJobService {
     })
 
     worker.on('exit', (code) => {
+      dataManagementService.resumeFromAi()
       const current = this.jobs.get(requestId)
       if (!current) return
       if (code !== 0) {
@@ -141,6 +144,7 @@ class SessionQAJobService {
       workerData: { sessionId }
     })
     this.vectorWarmupJobs.set(sessionId, worker)
+    dataManagementService.pauseForAi()
 
     worker.on('message', (message: { type?: string; error?: string }) => {
       if (message?.type === 'error') {
@@ -152,6 +156,7 @@ class SessionQAJobService {
       this.vectorWarmupJobs.delete(sessionId)
     })
     worker.on('exit', () => {
+      dataManagementService.resumeFromAi()
       this.vectorWarmupJobs.delete(sessionId)
     })
   }

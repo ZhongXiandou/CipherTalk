@@ -140,7 +140,7 @@ type VectorTask = {
 }
 
 const INDEX_DB_NAME = 'chat_search_index.db'
-const INDEX_SCHEMA_VERSION = '3'
+const INDEX_SCHEMA_VERSION = '4'
 const INDEX_BATCH_SIZE = 800
 const MAX_INDEX_TEXT_CHARS = 8000
 const MAX_EXCERPT_RADIUS = 48
@@ -602,7 +602,7 @@ export class ChatSearchIndexService {
           session_key INTEGER PARTITION KEY,
           session_id TEXT,
           vector_model TEXT,
-          embedding FLOAT[${dim}]
+          embedding FLOAT[${dim}] distance_metric=cosine
         );
       `)
     }
@@ -1564,13 +1564,6 @@ export class ChatSearchIndexService {
     const senderUsername = normalizeSearchText(options.senderUsername)
     const direction = options.direction
     const scanLimit = Math.max(options.limit * VECTOR_SEARCH_OVERFETCH, options.limit + 20)
-    const sqlFilters: string[] = [
-      'vec.embedding MATCH @queryEmbedding',
-      'vec.session_key = CAST(@sessionKey AS INTEGER)',
-      'vec.session_id = @sessionId',
-      'vec.vector_model = @vectorModel',
-      'k = @scanLimit'
-    ]
     const params: Record<string, unknown> = {
       sessionId: options.sessionId,
       sessionKey: vectorSessionKey(options.sessionId),
@@ -1579,29 +1572,37 @@ export class ChatSearchIndexService {
       scanLimit: scanLimit + 1
     }
 
+    const postFilters: string[] = []
     if (startTime) {
-      sqlFilters.push('m.create_time >= @startTime')
+      postFilters.push('m.create_time >= @startTime')
       params.startTime = startTime
     }
     if (endTime) {
-      sqlFilters.push('m.create_time <= @endTime')
+      postFilters.push('m.create_time <= @endTime')
       params.endTime = endTime
     }
     if (direction) {
-      sqlFilters.push(direction === 'out' ? 'm.is_send = 1' : '(m.is_send IS NULL OR m.is_send != 1)')
+      postFilters.push(direction === 'out' ? 'm.is_send = 1' : '(m.is_send IS NULL OR m.is_send != 1)')
     }
     if (senderUsername) {
-      sqlFilters.push('lower(COALESCE(m.sender_username, \'\')) = @senderUsername')
+      postFilters.push('lower(COALESCE(m.sender_username, \'\')) = @senderUsername')
       params.senderUsername = senderUsername
     }
+    const postWhere = postFilters.length > 0 ? `AND ${postFilters.join(' AND ')}` : ''
 
     const rows = db.prepare(`
-      SELECT m.*, vec.distance
-      FROM message_embedding_vec vec
-      JOIN message_vector_index v ON v.id = vec.vector_id
-      JOIN message_index m ON m.id = v.message_id
-      WHERE ${sqlFilters.join(' AND ')}
-      ORDER BY vec.distance ASC
+      SELECT m.*, sub.distance
+      FROM (
+        SELECT vector_id, distance
+        FROM message_embedding_vec
+        WHERE embedding MATCH @queryEmbedding
+          AND session_key = CAST(@sessionKey AS INTEGER)
+          AND k = @scanLimit
+      ) sub
+      JOIN message_vector_index v ON v.id = sub.vector_id AND v.vector_model = @vectorModel
+      JOIN message_index m ON m.id = v.message_id AND m.session_id = @sessionId
+      ${postWhere}
+      ORDER BY sub.distance ASC
     `).all(params) as MessageVectorRow[]
     const scored = rows
       .map((row) => {

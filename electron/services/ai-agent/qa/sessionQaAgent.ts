@@ -89,8 +89,9 @@ const MAX_SEARCH_HITS = 8
 const MAX_CONTEXT_WINDOWS = 4
 const SEARCH_CONTEXT_BEFORE = 6
 const SEARCH_CONTEXT_AFTER = 6
-const MAX_TOOL_CALLS = 8
-const MAX_TOOL_DECISION_ATTEMPTS = 10
+const MAX_TOOL_CALLS = 10
+const MAX_TOOL_DECISION_ATTEMPTS = 14
+const MAX_SEARCH_RETRIES = 2
 const MAX_HISTORY_MESSAGES = 8
 const MAX_SUMMARY_CHARS = 3000
 const MAX_STRUCTURED_CHARS = 4000
@@ -334,10 +335,91 @@ function normalizeSearchQuery(value: string, limit = 32): string {
     .trim()
 }
 
+function normalizeCompactQuestion(value: string): string {
+  return normalizeSearchQuery(value, 120).replace(/\s+/g, '')
+}
+
 function isGenericSearchQuery(value: string): boolean {
   const normalized = normalizeSearchQuery(value).replace(/\s+/g, '')
   if (!normalized) return true
   return /^(什么|哪个|哪些|什么时候|为什么|怎么|如何|最近|刚刚|刚才|我们|他们|对方|是否|有没有|是不是|可以|看到|知道|消息|聊天|内容|问题|回复|回答)$/.test(normalized)
+}
+
+function isQuestionLikeSearchQuery(value: string): boolean {
+  const normalized = normalizeCompactQuestion(value)
+  if (!normalized) return true
+  return /^(谁|哪个人|哪位|有没有人|有没有谁|有没有|是否|是否有人|我们|他们|大家|群里|这个聊天|这段聊天|当前|现在|最近)/.test(normalized)
+    || /(吗|么|呢|啊|呀|吧|没有|没|是什么|怎么回事|多少|几次|哪条)$/.test(normalized)
+}
+
+function stripSearchTermNoise(value: string): string {
+  let text = normalizeSearchQuery(value, 48).replace(/\s+/g, '')
+  text = text
+    .replace(/^(关于|有关|围绕|那个|这个|一下|下|用过|使用过|使用|提到过|提到|提及|聊过|聊到|聊起|说过|说起|发过|分享过|讨论过|问过|了解|会不会|会|懂|试过|推荐过|出现过|包含)/, '')
+    .replace(/(的人|的情况|的消息|这件事|这事|相关内容|相关消息|吗|么|呢|啊|呀|吧|了|没有|没)$/g, '')
+    .replace(/(谁|哪个人|哪位|什么时候|多少|几次|次数|频率|排行|最多|最少).*$/g, '')
+  return normalizeSearchQuery(text, 48)
+}
+
+function pushSearchTerm(target: string[], value: string) {
+  const term = stripSearchTermNoise(value)
+  if (!term || isGenericSearchQuery(term) || isQuestionLikeSearchQuery(term)) return
+  target.push(term)
+}
+
+function extractConcreteSearchTerms(question: string): string[] {
+  const normalized = normalizeSearchQuery(question, 160)
+  const terms: string[] = []
+
+  const quotedPattern = /["“'‘]([^"”'’]{2,48})["”'’]/g
+  let quotedMatch: RegExpExecArray | null
+  while ((quotedMatch = quotedPattern.exec(question))) {
+    pushSearchTerm(terms, quotedMatch[1])
+  }
+
+  const latinPattern = /[A-Za-z][A-Za-z0-9._+#-]{1,}/g
+  let latinMatch: RegExpExecArray | null
+  while ((latinMatch = latinPattern.exec(normalized))) {
+    const token = latinMatch[0]
+    if (/^(http|https|www)$/i.test(token)) continue
+    pushSearchTerm(terms, token)
+  }
+
+  const compact = normalizeCompactQuestion(question)
+  const verbPattern = /(用过|使用过|使用|提到过|提到|提及|聊过|聊到|聊起|说过|说起|发过|分享过|讨论过|问过|了解|会不会|会|懂|试过|推荐过|出现过|包含)(.{2,32})/g
+  let verbMatch: RegExpExecArray | null
+  while ((verbMatch = verbPattern.exec(compact))) {
+    pushSearchTerm(terms, verbMatch[2])
+  }
+
+  const aboutPattern = /(关于|有关|围绕)(.{2,32})/g
+  let aboutMatch: RegExpExecArray | null
+  while ((aboutMatch = aboutPattern.exec(compact))) {
+    pushSearchTerm(terms, aboutMatch[2])
+  }
+
+  const seen = new Set<string>()
+  return terms.filter((term) => {
+    const key = term.toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  }).slice(0, MAX_SEARCH_QUERIES)
+}
+
+function scoreSearchQuery(query: string, question: string): number {
+  const normalized = normalizeCompactQuestion(query)
+  const normalizedQuestion = normalizeCompactQuestion(question)
+  if (!normalized || isGenericSearchQuery(query)) return -100
+
+  let score = 0
+  if (/[A-Za-z0-9]/.test(normalized)) score += 8
+  if (/^[\u4e00-\u9fa5A-Za-z0-9._+#-]{2,20}$/.test(normalized)) score += 4
+  if (normalizedQuestion.includes(normalized)) score += 2
+  if (normalized.length >= 2 && normalized.length <= 16) score += 2
+  if (isQuestionLikeSearchQuery(query)) score -= 8
+  if (normalized === normalizedQuestion) score -= 10
+  return score
 }
 
 function expandSearchQueries(question: string, modelQueries: string[]): string[] {
@@ -355,6 +437,10 @@ function expandSearchQueries(question: string, modelQueries: string[]): string[]
       push(compact.slice(-2))
       push(compact.slice(-3))
     }
+  }
+
+  for (const query of extractConcreteSearchTerms(question)) {
+    push(query)
   }
 
   for (const query of extractHeuristicQueries(question)) {
@@ -377,10 +463,48 @@ function expandSearchQueries(question: string, modelQueries: string[]): string[]
   }
 
   return unique
+    .sort((a, b) => scoreSearchQuery(b, question) - scoreSearchQuery(a, question))
+    .slice(0, MAX_SEARCH_QUERIES)
 }
 
 function shouldUseRecentFallback(question: string): boolean {
   return /(最近|刚刚|刚才|今天|昨天|前面|上面|最后|最新|刚聊|recent|latest)/i.test(question)
+}
+
+function mergeSearchQueriesForQuestion(question: string, ...groups: string[][]): string[] {
+  const seen = new Set<string>()
+  const queries: string[] = []
+  for (const group of groups) {
+    for (const query of expandSearchQueries(question, group)) {
+      const key = query.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      queries.push(query)
+    }
+  }
+  return queries
+    .sort((a, b) => scoreSearchQuery(b, question) - scoreSearchQuery(a, question))
+    .slice(0, MAX_SEARCH_QUERIES)
+}
+
+function isConcreteEvidenceQuestion(question: string, queries: string[]): boolean {
+  if (!queries.some((query) => !isGenericSearchQuery(query) && !isQuestionLikeSearchQuery(query))) return false
+  const compact = normalizeCompactQuestion(question)
+  return /(谁|哪个人|哪位|有没有人|有没有谁|有没有|是否|是否有人|哪条|原文)/.test(compact)
+    || /(用过|使用过|使用|提到过|提到|提及|聊过|聊到|聊起|说过|说起|发过|分享过|讨论过|问过|了解|会不会|会|懂|试过|推荐过|出现过|包含)/.test(compact)
+}
+
+function getFirstConcreteQuery(question: string, queries: string[]): string {
+  return mergeSearchQueriesForQuestion(question, queries).find((query) => !isGenericSearchQuery(query) && !isQuestionLikeSearchQuery(query)) || ''
+}
+
+function isKeywordEvidenceStatisticsQuestion(question: string, firstQuery: string): boolean {
+  if (!firstQuery) return false
+  const compact = normalizeCompactQuestion(question)
+  if (/(图片|照片|语音|视频|表情|文件|链接|红包|转账|说话最多|发言最多|谁.*最多|谁.*最少|活跃|几点|什么时候|多少条|总共|总量|类型)/.test(compact)) {
+    return false
+  }
+  return /(关键词|这个词|这个短语|出现|提到|提及|说过|包含|几次|次数|频率|谁.*(用过|使用|提到|提及|聊过|说过|发过|分享过|讨论过|问过|了解|会|懂|试过|推荐过)|哪个人.*(用过|使用|提到|提及|聊过|说过|发过|分享过|讨论过|问过|了解|会|懂|试过|推荐过)|哪位.*(用过|使用|提到|提及|聊过|说过|发过|分享过|讨论过|问过|了解|会|懂|试过|推荐过)|有没有.*(用过|使用|提到|提及|聊过|说过|发过|分享过|讨论过|问过|了解|会|懂|试过|推荐过)|是否.*(用过|使用|提到|提及|聊过|说过|发过|分享过|讨论过|问过|了解|会|懂|试过|推荐过))/.test(compact)
 }
 
 function extractHeuristicQueries(question: string): string[] {
@@ -388,6 +512,11 @@ function extractHeuristicQueries(question: string): string[] {
     .replace(/[？?！!。，,；;：:"“”‘’()（）【】\[\]{}]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+
+  const concreteTerms = extractConcreteSearchTerms(question)
+  if (concreteTerms.length > 0) {
+    return concreteTerms
+  }
 
   const words = normalized
     .split(' ')
@@ -603,7 +732,7 @@ function buildDefaultPreferredPlan(intent: SessionQAIntentType): ToolLoopAction[
     case 'summary_answerable':
       return ['read_summary_facts', 'answer']
     case 'recent_status':
-      return ['read_latest', 'answer']
+      return ['read_summary_facts', 'get_session_statistics', 'read_latest', 'answer']
     case 'time_range':
       return ['read_by_time_range', 'aggregate_messages', 'answer']
     case 'participant_focus':
@@ -613,27 +742,32 @@ function buildDefaultPreferredPlan(intent: SessionQAIntentType): ToolLoopAction[
     case 'media_or_file':
       return ['search_messages', 'read_context', 'answer']
     case 'broad_summary':
-      return ['read_summary_facts', 'read_latest', 'answer']
+      return ['read_summary_facts', 'get_session_statistics', 'read_latest', 'aggregate_messages', 'answer']
     case 'stats_or_count':
       return ['get_session_statistics', 'answer']
     default:
-      return ['read_summary_facts', 'read_latest', 'answer']
+      return ['read_summary_facts', 'get_session_statistics', 'read_latest', 'answer']
   }
 }
 
 function routeFromHeuristics(question: string, summaryText?: string): IntentRoute {
   const timeRange = inferTimeRangeFromQuestion(question)
   const hasSummary = Boolean(stripThinkBlocks(summaryText || '').trim())
-  const queries = expandSearchQueries(question, extractHeuristicQueries(question))
+  const queries = mergeSearchQueriesForQuestion(question, extractHeuristicQueries(question))
+  const firstQuery = getFirstConcreteQuery(question, queries)
+  const concreteEvidenceQuestion = isConcreteEvidenceQuestion(question, queries)
+  const keywordEvidenceStats = isKeywordEvidenceStatisticsQuestion(question, firstQuery)
   const participantHints = extractHeuristicQueries(question)
     .filter((item) => item.length >= 2 && item.length <= 12)
     .slice(0, 2)
 
   let intent: SessionQAIntentType = 'unclear'
-  if (/(谁.*(最多|最少|发言|说话|次数)|多少条|几条|统计|次数|频率|排行)/.test(question)) {
+  if (keywordEvidenceStats) {
     intent = 'stats_or_count'
-  } else if (/(最近|刚刚|刚才|最新|现在|当前|前面|上面|最后)/.test(question)) {
-    intent = 'recent_status'
+  } else if (/(谁.*(最多|最少|发言|说话|次数)|多少条|几条|统计|次数|频率|排行)/.test(question)) {
+    intent = 'stats_or_count'
+  } else if (concreteEvidenceQuestion) {
+    intent = 'exact_evidence'
   } else if (timeRange) {
     intent = 'time_range'
   } else if (/(总结|概括|关系|变化|趋势|梳理|复盘)/.test(question)) {
@@ -644,6 +778,10 @@ function routeFromHeuristics(question: string, summaryText?: string): IntentRout
     intent = 'exact_evidence'
   } else if (/(谁|哪个人|他说|她说|发了什么|说了什么)/.test(question)) {
     intent = 'participant_focus'
+  } else if (!firstQuery && /(最近|刚刚|刚才|最新|现在|当前|前面|上面|最后)/.test(question)) {
+    intent = 'recent_status'
+  } else if (firstQuery) {
+    intent = 'exact_evidence'
   } else if (hasSummary) {
     intent = 'summary_answerable'
   }
@@ -655,8 +793,44 @@ function routeFromHeuristics(question: string, summaryText?: string): IntentRout
     timeRange,
     participantHints,
     searchQueries: queries,
-    needsSearch: intent === 'exact_evidence',
-    preferredPlan: buildDefaultPreferredPlan(intent)
+    needsSearch: intent === 'exact_evidence' || keywordEvidenceStats,
+    preferredPlan: keywordEvidenceStats
+      ? ['get_keyword_statistics', 'search_messages', 'read_context', 'answer']
+      : buildDefaultPreferredPlan(intent)
+  }
+}
+
+function enforceConcreteEvidenceRoute(route: IntentRoute, question: string): IntentRoute {
+  const searchQueries = mergeSearchQueriesForQuestion(question, route.searchQueries, extractHeuristicQueries(question))
+  const firstQuery = getFirstConcreteQuery(question, searchQueries)
+  const concreteEvidenceQuestion = isConcreteEvidenceQuestion(question, searchQueries)
+  const keywordEvidenceStats = isKeywordEvidenceStatisticsQuestion(question, firstQuery)
+
+  if (!concreteEvidenceQuestion && !keywordEvidenceStats) {
+    return {
+      ...route,
+      searchQueries
+    }
+  }
+
+  const preferredPlan: ToolLoopAction['action'][] = keywordEvidenceStats
+    ? ['get_keyword_statistics', 'search_messages', 'read_context', 'answer']
+    : ['search_messages', 'read_context', 'answer']
+  const intent: SessionQAIntentType = keywordEvidenceStats
+    ? 'stats_or_count'
+    : route.intent === 'media_or_file'
+      ? 'media_or_file'
+      : 'exact_evidence'
+
+  return {
+    ...route,
+    intent,
+    reason: route.intent === intent
+      ? route.reason
+      : `${route.reason || '模型路由'}；检测到具体关键词/实体问题，强制检索证据`,
+    searchQueries,
+    needsSearch: true,
+    preferredPlan
   }
 }
 
@@ -691,23 +865,35 @@ async function routeQuestionIntent(
 是否有当前摘要：${stripThinkBlocks(input.summaryText || '').trim() ? '有' : '无'}
 结构化摘要预览：${compactText(input.structuredContext || '', 1200) || '无'}
 
-可选 intent：
-summary_answerable, recent_status, time_range, participant_focus, exact_evidence, media_or_file, broad_summary, stats_or_count, unclear
+可选 intent（按推荐优先级排列）：
+exact_evidence — 问题包含可检索的具体关键词、实体名、产品名、技术名、人名
+stats_or_count — 统计计数类问题（谁最多/最少、次数、频率、排行）
+time_range — 明确指定时间段
+participant_focus — 围绕特定参与者
+media_or_file — 询问文件、链接、图片、视频等媒体
+broad_summary — 宏观总结/趋势/复盘（无具体实体）
+summary_answerable — 当前摘要已可回答
+recent_status — 仅当问题只是笼统地问”最近怎样/在聊什么”且不包含任何可检索实体时
+unclear — 完全无法判断
+
+重要：recent_status 是最低优先级 intent。只有当问题明确仅询问最近对话进展、且不包含任何可检索的实体/关键词/人名/话题时才使用。如果问题同时包含”最近”和具体实体（如产品名、技术名、人名、话题），应路由为 exact_evidence 或 stats_or_count。
 
 输出 JSON：
 {
-  "intent":"recent_status",
-  "confidence":"high|medium|low",
-  "reason":"一句话原因",
-  "timeRange":{"startTime":秒级时间戳,"endTime":秒级时间戳,"label":"昨天晚上"},
-  "participantHints":["张三"],
-  "searchQueries":["关键词"],
-  "needsSearch":false,
-  "preferredPlan":["read_latest","answer"]
+  “intent”:”exact_evidence”,
+  “confidence”:”high|medium|low”,
+  “reason”:”一句话原因”,
+  “timeRange”:{“startTime”:秒级时间戳,”endTime”:秒级时间戳,”label”:”昨天晚上”},
+  “participantHints”:[“张三”],
+  “searchQueries”:[“关键词”],
+  “needsSearch”:true,
+  “preferredPlan”:[“search_messages”,”read_context”,”answer”]
 }
 
 preferredPlan 可选动作：read_summary_facts, read_latest, read_by_time_range, resolve_participant, search_messages, read_context, aggregate_messages, get_session_statistics, get_keyword_statistics, answer
-统计计数类问题优先 get_session_statistics；询问某个词/短语出现次数时优先 get_keyword_statistics。`
+统计计数类问题优先 get_session_statistics；询问某个词/短语出现次数时优先 get_keyword_statistics。
+只要问题包含具体关键词/产品名/技术名/人名/实体名，尤其是”谁用过/谁提到/谁说过 X””有没有人聊过 X”，必须走 get_keyword_statistics 或 search_messages，不能只读最近消息。
+分析类问题（趋势、变化、讨论了什么话题）应使用 get_session_statistics + read_latest + aggregate_messages 组合，而非单独 read_latest。`
       }
     ], {
       model,
@@ -734,18 +920,18 @@ preferredPlan 可选动作：read_summary_facts, read_latest, read_by_time_range
         'answer'
       ].includes(item))
 
-    return {
+    return enforceConcreteEvidenceRoute({
       intent,
       confidence: normalizeConfidence(parsed.confidence),
       reason: compactText(String(parsed.reason || fallback.reason || ''), 160),
       timeRange,
       participantHints: normalizeStringArray(parsed.participantHints, 4).concat(fallback.participantHints).slice(0, 4),
-      searchQueries: normalizeStringArray(parsed.searchQueries, 4).concat(fallback.searchQueries).slice(0, MAX_SEARCH_QUERIES),
+      searchQueries: mergeSearchQueriesForQuestion(input.question, normalizeStringArray(parsed.searchQueries, 4), fallback.searchQueries),
       needsSearch: typeof parsed.needsSearch === 'boolean' ? parsed.needsSearch : fallback.needsSearch,
       preferredPlan: preferredPlan.length > 0 ? preferredPlan : buildDefaultPreferredPlan(intent)
-    }
+    }, input.question)
   } catch {
-    return fallback
+    return enforceConcreteEvidenceRoute(fallback, input.question)
   }
 }
 
@@ -923,7 +1109,23 @@ function buildToolDecisionPrompt(input: {
   aggregateText?: string
   summaryFactsRead: boolean
   toolCallsUsed: number
+  evidenceQuality: EvidenceQuality
+  searchRetries: number
+  searchPayloads: SearchPayloadWithQuery[]
 }): string {
+  const totalSearchHits = input.searchPayloads.reduce((sum, item) => sum + item.payload.hits.length, 0)
+  const searchedKeywords = input.searchPayloads.map((item) => item.query).join('、') || '无'
+
+  const evidenceAssessment = input.evidenceQuality === 'none'
+    ? '当前没有任何证据。必须先收集证据才能回答。'
+    : input.evidenceQuality === 'weak'
+      ? `当前证据不充分（搜索命中 ${totalSearchHits} 条）。如果还有工具预算，应尝试不同策略继续收集证据。`
+      : `当前证据充分（搜索命中 ${totalSearchHits} 条），可以考虑回答。`
+
+  const retryGuidance = input.evidenceQuality !== 'sufficient' && input.searchRetries < MAX_SEARCH_RETRIES && input.searchPayloads.length > 0 && totalSearchHits === 0
+    ? `\n重要：之前用关键词”${searchedKeywords}”搜索了但 0 命中。你应该尝试：(1) 换更短或更宽泛的同义词重新 search_messages；(2) 去掉限定词只保留核心实体；(3) 用 read_by_time_range 按时间范围读取。不要直接放弃回答。`
+    : ''
+
   return `你是 CipherTalk 的本地聊天记录问答 Agent。你需要决定下一步工具动作，不能直接编造事实。
 
 会话：${input.sessionName}
@@ -942,7 +1144,6 @@ ${input.structuredContext || '无'}
 
 意图路由：
 intent=${input.route.intent}, confidence=${input.route.confidence}, reason=${input.route.reason || '无'}
-preferredPlan=${input.route.preferredPlan.join(' -> ')}
 timeRange=${input.route.timeRange?.label || '无'} ${input.route.timeRange?.startTime || ''}-${input.route.timeRange?.endTime || ''}
 participantHints=${input.route.participantHints.join('、') || '无'}
 searchQueries=${input.route.searchQueries.join('、') || '无'}
@@ -958,33 +1159,37 @@ ${input.aggregateText || '无'}
 
 已知搜索命中：
 ${buildKnownHitsText(input.knownHits)}
+已搜索关键词：${searchedKeywords}
+
+证据评估：${evidenceAssessment}${retryGuidance}
 
 工具观察：
 ${buildObservationText(input.observations)}
 
 工具预算：已使用 ${input.toolCallsUsed}/${MAX_TOOL_CALLS} 次。只允许以下动作：
-1. {"action":"read_summary_facts","reason":"先用摘要/结构化事实判断"}
-2. {"action":"read_latest","limit":40,"reason":"读取最近消息"}
-3. {"action":"read_by_time_range","startTime":秒级时间戳,"endTime":秒级时间戳,"label":"昨天晚上","limit":80,"participantName":"张三","reason":"按时间读取"}
-4. {"action":"resolve_participant","name":"张三","reason":"解析昵称/备注到 senderUsername"}
-5. {"action":"search_messages","query":"关键词或短语","reason":"只在需要精确证据时搜索"}
-6. {"action":"read_context","hitId":"h1","reason":"读取命中前后文"}
-7. {"action":"aggregate_messages","metric":"speaker_count|message_count|kind_count|timeline|summary","reason":"整理统计/趋势"}
-8. {"action":"get_session_statistics","startTime":秒级时间戳,"endTime":秒级时间戳,"participantLimit":20,"reason":"全量统计当前会话"}
-9. {"action":"get_keyword_statistics","keywords":["关键词"],"matchMode":"substring","startTime":秒级时间戳,"endTime":秒级时间戳,"reason":"统计关键词出现次数"}
-10. {"action":"answer","reason":"证据足够或预算即将耗尽"}
+1. {“action”:”read_summary_facts”,”reason”:”先用摘要/结构化事实判断”}
+2. {“action”:”read_latest”,”limit”:40,”reason”:”读取最近消息”}
+3. {“action”:”read_by_time_range”,”startTime”:秒级时间戳,”endTime”:秒级时间戳,”label”:”昨天晚上”,”limit”:80,”participantName”:”张三”,”reason”:”按时间读取”}
+4. {“action”:”resolve_participant”,”name”:”张三”,”reason”:”解析昵称/备注到 senderUsername”}
+5. {“action”:”search_messages”,”query”:”关键词或短语”,”reason”:”用不同关键词检索”}
+6. {“action”:”read_context”,”hitId”:”h1”,”reason”:”读取命中前后文”}
+7. {“action”:”aggregate_messages”,”metric”:”speaker_count|message_count|kind_count|timeline|summary”,”reason”:”整理统计/趋势”}
+8. {“action”:”get_session_statistics”,”startTime”:秒级时间戳,”endTime”:秒级时间戳,”participantLimit”:20,”reason”:”全量统计当前会话”}
+9. {“action”:”get_keyword_statistics”,”keywords”:[“关键词”],”matchMode”:”substring”,”startTime”:秒级时间戳,”endTime”:秒级时间戳,”reason”:”统计关键词出现次数”}
+10. {“action”:”answer”,”reason”:”证据足够或预算即将耗尽”}
 
 决策规则：
-- 摘要可答时优先 read_summary_facts，然后 answer，不要搜索。
-- 最近/刚刚/当前进展类问题优先 read_latest，不要先搜索。
+- 证据为”不充分”或”没有”时，不要选 answer，应继续收集证据。
+- 搜索 0 命中后必须用不同的关键词（更短、同义词、核心实体）重新 search_messages，不要放弃。
+- 摘要可答时优先 read_summary_facts，然后 answer。
+- read_latest 是信息最少的工具，仅在其他工具都无法提供证据时使用。
 - 时间类问题优先 read_by_time_range。
 - 人物类问题先 resolve_participant，再按 sender 或时间读取。
-- 只有原话、具体事项、媒体/文件/链接、是否提到某词时才 search_messages。
-- 搜索命中后再 read_context；搜索 0 命中时才改写关键词继续搜。
-- 当前会话总数、谁说话最多、消息类型、活跃时间等统计类问题优先 get_session_statistics。
-- 某个词/短语出现次数、谁最常提某词的问题优先 get_keyword_statistics。
-- aggregate_messages 只用于整理已读取消息的轻量兜底。
-- 没有任何摘要事实、上下文、聚合结果或搜索命中前，不要 answer。
+- 含具体关键词/产品名/技术名/人名/实体名的问题必须 search_messages。
+- 原话、具体事项、媒体/文件/链接、是否提到某词时必须 search_messages。
+- 搜索命中后再 read_context；搜索 0 命中时必须换关键词继续搜。
+- 统计类问题优先 get_session_statistics 或 get_keyword_statistics。
+- 分析类问题应先 get_session_statistics，再 aggregate_messages。
 - 只输出一个 JSON 对象，不要 Markdown，不要解释。`
 }
 
@@ -997,7 +1202,7 @@ async function chooseNextToolAction(
     const response = await provider.chat([
       {
         role: 'system',
-        content: '你只输出一个严格 JSON 对象，用于选择本地聊天记录问答工具。'
+        content: '你只输出一个严格 JSON 对象，用于选择本地聊天记录问答工具。证据不充分时不要选 answer，应继续用不同策略收集。'
       },
       {
         role: 'user',
@@ -1005,7 +1210,7 @@ async function chooseNextToolAction(
       }
     ], {
       model,
-      temperature: 0.1,
+      temperature: 0.15,
       maxTokens: 260,
       enableThinking: false
     })
@@ -1016,20 +1221,60 @@ async function chooseNextToolAction(
   }
 }
 
+type EvidenceQuality = 'none' | 'weak' | 'sufficient'
+
+function assessEvidenceQuality(input: {
+  searchPayloads: SearchPayloadWithQuery[]
+  contextWindows: ContextWindow[]
+  summaryFactsRead: boolean
+  aggregateText?: string
+  intent: SessionQAIntentType
+}): EvidenceQuality {
+  const summaryHasFacts = input.summaryFactsRead
+  const aggregateText = compactText(input.aggregateText || '', 120)
+  const aggregateHasFacts = Boolean(aggregateText) && !/^没有可聚合的消息/.test(aggregateText)
+  const totalSearchHits = input.searchPayloads.reduce((sum, item) => sum + item.payload.hits.length, 0)
+  const totalContextMessages = input.contextWindows.reduce((sum, window) => sum + window.messages.length, 0)
+  const hasSearchHits = totalSearchHits > 0
+  const hasContext = totalContextMessages > 0
+
+  if (!summaryHasFacts && !aggregateHasFacts && !hasSearchHits && !hasContext) {
+    return 'none'
+  }
+
+  const needsSearchEvidence = input.intent === 'exact_evidence'
+    || input.intent === 'media_or_file'
+    || input.intent === 'stats_or_count'
+
+  if (needsSearchEvidence) {
+    if (hasSearchHits && totalSearchHits >= 2) return 'sufficient'
+    if (hasSearchHits || aggregateHasFacts) return 'weak'
+    if (summaryHasFacts && !hasSearchHits) return 'weak'
+    return hasContext ? 'weak' : 'none'
+  }
+
+  if (summaryHasFacts || aggregateHasFacts) return 'sufficient'
+  if (hasSearchHits) return 'sufficient'
+  if (hasContext) return 'weak'
+  return 'none'
+}
+
 function hasAnswerEvidence(input: {
   searchPayloads: SearchPayloadWithQuery[]
   contextWindows: ContextWindow[]
   summaryFactsRead: boolean
   aggregateText?: string
 }): boolean {
-  const summaryHasFacts = input.summaryFactsRead
-  const aggregateText = compactText(input.aggregateText || '', 120)
-  const aggregateHasFacts = Boolean(aggregateText) && !/^没有可聚合的消息/.test(aggregateText)
+  return assessEvidenceQuality({ ...input, intent: 'unclear' }) !== 'none'
+}
 
-  return summaryHasFacts
-    || aggregateHasFacts
-    || input.searchPayloads.some((item) => item.payload.hits.length > 0)
-    || input.contextWindows.some((window) => window.messages.length > 0)
+function isRequiredEvidenceAction(action: ToolLoopAction): boolean {
+  return action.action === 'search_messages'
+    || action.action === 'read_context'
+    || action.action === 'get_session_statistics'
+    || action.action === 'get_keyword_statistics'
+    || action.action === 'read_by_time_range'
+    || action.action === 'aggregate_messages'
 }
 
 function findKnownHitForAction(action: Extract<ToolLoopAction, { action: 'read_context' }>, knownHits: KnownSearchHit[]): KnownSearchHit | null {
@@ -1156,81 +1401,6 @@ async function searchSessionMessages(sessionId: string, query: string, filters: 
     ...(filters.senderUsername ? { senderUsername: filters.senderUsername } : {}),
     ...(filters.startTime ? { startTime: filters.startTime } : {}),
     ...(filters.endTime ? { endTime: filters.endTime } : {})
-  }
-  const indexState = chatSearchIndexService.getSessionSearchIndexState(sessionId)
-  const shouldUseIndex = Boolean(indexState?.isComplete)
-  if (!shouldUseIndex) {
-    chatSearchIndexService.ensureSessionIndexedInBackground(sessionId)
-    const fallbackResult = await executeMcpTool('get_messages', {
-      sessionId,
-      keyword: query,
-      limit: Math.max(filters.limit || MAX_SEARCH_HITS, MAX_SEARCH_HITS),
-      order: 'desc',
-      includeRaw: false,
-      ...(filters.startTime ? { startTime: filters.startTime } : {}),
-      ...(filters.endTime ? { endTime: filters.endTime } : {})
-    })
-    const messagesPayload = fallbackResult.payload as McpMessagesPayload
-    const session = {
-      sessionId,
-      displayName: filters.sessionName || sessionId,
-      kind: sessionId.includes('@chatroom') ? 'group' : 'friend'
-    } as const
-    const vectorState = chatSearchIndexService.getSessionVectorIndexState(sessionId)
-    const hits = (messagesPayload.items || [])
-      .filter((message) => !filters.senderUsername || message.sender.username === filters.senderUsername)
-      .slice(0, filters.limit || MAX_SEARCH_HITS)
-      .map((message, index) => ({
-        session,
-        message,
-        excerpt: compactText(message.text, 180) || `[${message.kind}]`,
-        matchedField: 'text' as const,
-        score: 520 - index,
-        retrievalSource: 'scan' as const
-      }))
-    const payload: McpSearchMessagesPayload = {
-      hits,
-      limit: filters.limit || MAX_SEARCH_HITS,
-      sessionsScanned: 1,
-      messagesScanned: messagesPayload.items.length,
-      truncated: messagesPayload.hasMore,
-      source: 'scan',
-      indexStatus: {
-        ready: false,
-        indexedSessions: 0,
-        indexedMessages: indexState?.indexedCount || 0
-      },
-      vectorSearch: {
-        requested: Boolean(filters.semanticQuery),
-        attempted: false,
-        providerAvailable: Boolean(vectorState.vectorProviderAvailable),
-        indexComplete: vectorState.isVectorComplete,
-        hitCount: 0,
-        indexedMessages: vectorState.indexedCount || indexState?.indexedCount || 0,
-        vectorizedMessages: vectorState.vectorizedCount || 0,
-        model: vectorState.vectorModelName || vectorState.vectorModel,
-        skippedReason: 'search_index_not_ready'
-      },
-      sessionSummaries: [{
-        session,
-        hitCount: hits.length,
-        topScore: hits[0]?.score || 0,
-        sampleExcerpts: hits.slice(0, 3).map((hit) => hit.excerpt)
-      }]
-    }
-    return {
-      payload,
-      toolCall: {
-        toolName: 'search_messages',
-        args: {
-          ...args,
-          mode: 'quick_scan_background_index'
-        },
-        summary: `搜索索引未就绪，已使用快速扫描命中 ${hits.length} 条，并在后台准备索引。\n${formatVectorSearchLine(payload)}`,
-        status: 'completed',
-        evidenceCount: hits.length
-      }
-    }
   }
 
   const result = await executeMcpTool('search_messages', args)
@@ -1526,16 +1696,11 @@ function getRouteLabel(intent: SessionQAIntentType): string {
 }
 
 function shouldUseKeywordStatistics(question: string, firstQuery: string): boolean {
-  if (!firstQuery) return false
-  if (!/(关键词|这个词|这个短语|出现|提到|提及|说过|包含|几次|次数|频率)/.test(question)) return false
-  if (/(图片|照片|语音|视频|表情|文件|链接|红包|转账|说话最多|发言最多|谁.*最多|谁.*最少|活跃|几点|什么时候|多少条|总共|总量|类型)/.test(question)) return false
-  return true
+  return isKeywordEvidenceStatisticsQuestion(question, firstQuery)
 }
 
 function buildInitialActionQueue(route: IntentRoute, question: string): ToolLoopAction[] {
-  const firstQuery = route.searchQueries.find((query) => !isGenericSearchQuery(query))
-    || expandSearchQueries(question, [])[0]
-    || ''
+  const firstQuery = getFirstConcreteQuery(question, route.searchQueries)
   const participantName = route.participantHints[0]
   const range = route.timeRange
   const useKeywordStatistics = route.intent === 'stats_or_count' && shouldUseKeywordStatistics(question, firstQuery)
@@ -1636,6 +1801,12 @@ function buildInitialActionQueue(route: IntentRoute, question: string): ToolLoop
           reason: '统计关键词出现次数和发送者分布'
         })
       }
+      if (!actions.some((item) => item.action === 'search_messages') && firstQuery) {
+        insertBeforeAnswer({ action: 'search_messages', query: firstQuery, reason: '检索关键词样例证据' })
+      }
+      if (actions.some((item) => item.action === 'search_messages') && !actions.some((item) => item.action === 'read_context')) {
+        insertBeforeAnswer({ action: 'read_context', reason: '读取关键词命中的前后文' })
+      }
     } else if (!actions.some((item) => item.action === 'get_session_statistics')) {
       insertBeforeAnswer({
         action: 'get_session_statistics',
@@ -1674,7 +1845,11 @@ function buildInitialActionQueue(route: IntentRoute, question: string): ToolLoop
     actions.push({ action: 'answer', reason: '基于已有证据回答' })
   }
 
-  return actions
+  const answer = actions.find((item): item is Extract<ToolLoopAction, { action: 'answer' }> => item.action === 'answer')
+  const orderedActions = actions.filter((item) => item.action !== 'answer')
+  orderedActions.push(answer || { action: 'answer', reason: '基于已有证据回答' })
+
+  return orderedActions
 }
 
 function participantMatches(query: string, message: McpMessageItem): boolean {
@@ -1950,14 +2125,15 @@ export async function answerSessionQuestionWithAgent(
     historyText
   })
   const pendingActions = buildInitialActionQueue(route, options.question)
+  const actualPlan = pendingActions.map((action) => action.action)
 
   emitProgress(options, {
     id: 'intent',
     stage: 'intent',
     status: 'completed',
     title: `识别意图：${getRouteLabel(route.intent)}`,
-    detail: `路线：${route.preferredPlan.join(' -> ')}${route.reason ? `；${route.reason}` : ''}`,
-    count: route.preferredPlan.length
+    detail: `路线：${actualPlan.join(' -> ')}${route.reason ? `；${route.reason}` : ''}`,
+    count: actualPlan.length
   })
 
   const ensureSearchIndexReady = async () => {
@@ -2040,19 +2216,34 @@ export async function answerSessionQuestionWithAgent(
     }
   }
 
-  const currentEvidenceState = () => hasAnswerEvidence({
+  const currentEvidenceQuality = () => assessEvidenceQuality({
     searchPayloads,
     contextWindows,
     summaryFactsRead,
-    aggregateText
+    aggregateText,
+    intent: route.intent
   })
+
+  const currentEvidenceState = () => currentEvidenceQuality() !== 'none'
 
   let toolCallsUsed = 0
   let decisionAttempts = 0
+  let searchRetries = 0
+  let planItemsConsumed = 0
+  const MAX_PLAN_ITEMS_BEFORE_LLM = 3
 
   while (toolCallsUsed < MAX_TOOL_CALLS && decisionAttempts < MAX_TOOL_DECISION_ATTEMPTS) {
     decisionAttempts += 1
-    let action = pendingActions.shift() || await chooseNextToolAction(options.provider, options.model, {
+
+    const evidenceQuality = currentEvidenceQuality()
+    const usePlan = planItemsConsumed < MAX_PLAN_ITEMS_BEFORE_LLM && pendingActions.length > 0
+
+    let action: ToolLoopAction
+    if (usePlan) {
+      action = pendingActions.shift()!
+      planItemsConsumed += 1
+    } else {
+      action = await chooseNextToolAction(options.provider, options.model, {
         sessionName: options.sessionName || options.sessionId,
         question: options.question,
         route,
@@ -2064,10 +2255,14 @@ export async function answerSessionQuestionWithAgent(
         resolvedParticipants,
         aggregateText,
         summaryFactsRead,
-        toolCallsUsed
+        toolCallsUsed,
+        evidenceQuality,
+        searchRetries,
+        searchPayloads
       })
+    }
 
-    if (!currentEvidenceState() && toolCallsUsed >= MAX_TOOL_CALLS - 1 && action.action !== 'read_latest') {
+    if (evidenceQuality === 'none' && toolCallsUsed >= MAX_TOOL_CALLS - 1 && action.action !== 'read_latest') {
       action = {
         action: 'read_latest',
         limit: MAX_CONTEXT_MESSAGES,
@@ -2076,17 +2271,49 @@ export async function answerSessionQuestionWithAgent(
     }
 
     if (action.action === 'answer') {
-      if (currentEvidenceState()) {
+      if (evidenceQuality === 'none') {
+        const pendingEvidenceIndex = pendingActions.findIndex(isRequiredEvidenceAction)
+        if (pendingEvidenceIndex >= 0) {
+          action = pendingActions.splice(pendingEvidenceIndex, 1)[0]
+        } else {
+          action = summaryFactsRead
+            ? { action: 'read_latest', limit: MAX_CONTEXT_MESSAGES, reason: '摘要事实不足，回答前读取最近上下文' }
+            : { action: 'read_summary_facts', reason: '尚无可用证据，先检查摘要事实' }
+        }
+      } else if (evidenceQuality === 'weak' && toolCallsUsed < MAX_TOOL_CALLS - 2) {
+        const hasSearchedWithNoHits = searchPayloads.length > 0
+          && searchPayloads.every((item) => item.payload.hits.length === 0)
+        if (hasSearchedWithNoHits && searchRetries < MAX_SEARCH_RETRIES) {
+          action = {
+            action: 'search_messages',
+            query: '',
+            reason: '之前的搜索没有命中，需要用不同关键词重试'
+          }
+        } else if (!searchPayloads.length && route.searchQueries.length > 0) {
+          const nextQuery = route.searchQueries.find((q) => !searchedQueries.has(q.toLowerCase()))
+          if (nextQuery) {
+            action = { action: 'search_messages', query: nextQuery, reason: '证据不充分，尝试搜索更多关键词' }
+          } else {
+            observations.push({
+              title: '开始回答',
+              detail: action.reason || '证据有限但已尝试多种策略，进入回答生成。'
+            })
+            break
+          }
+        } else {
+          observations.push({
+            title: '开始回答',
+            detail: action.reason || '证据有限但已尝试多种策略，进入回答生成。'
+          })
+          break
+        }
+      } else {
         observations.push({
           title: '开始回答',
           detail: action.reason || '已有可用证据，进入回答生成。'
         })
         break
       }
-
-      action = summaryFactsRead
-        ? { action: 'read_latest', limit: MAX_CONTEXT_MESSAGES, reason: '摘要事实不足，回答前读取最近上下文' }
-        : { action: 'read_summary_facts', reason: '尚无可用证据，先检查摘要事实' }
     }
 
     if (action.action === 'read_summary_facts') {
@@ -2527,6 +2754,20 @@ export async function answerSessionQuestionWithAgent(
           title: '搜索相关消息',
           detail: summarizeSearchObservation(query, search.payload, knownHits)
         })
+
+        if ((search.payload?.hits.length || 0) === 0 && searchRetries < MAX_SEARCH_RETRIES && toolCallsUsed < MAX_TOOL_CALLS - 1) {
+          searchRetries += 1
+          const dropCount = pendingActions.filter((a) => a.action === 'read_context').length
+          if (dropCount > 0) {
+            const filtered = pendingActions.filter((a) => a.action !== 'read_context')
+            pendingActions.length = 0
+            pendingActions.push(...filtered)
+          }
+          observations.push({
+            title: '搜索策略调整',
+            detail: `关键词"${query}"搜索 0 命中（第 ${searchRetries} 次重试机会）。下一步将由 LLM 决定更优的检索策略（换关键词、缩短词、按时间范围读取等）。`
+          })
+        }
       } catch (error) {
         toolCalls.push({
           toolName: 'search_messages',
