@@ -4410,6 +4410,46 @@ function registerIpcHandlers() {
     }
   })
 
+  ipcMain.handle('ai:getSessionProfileMemoryState', async (_, sessionId: string) => {
+    try {
+      const { aiService } = await import('./services/ai/aiService')
+      aiService.init()
+      return {
+        success: true,
+        result: aiService.getSessionProfileMemoryState(String(sessionId || '').trim())
+      }
+    } catch (e) {
+      console.error('[AI] 获取会话画像记忆状态失败:', e)
+      logService?.error('AI', '获取会话画像记忆状态失败', { error: String(e) })
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('ai:buildSessionProfileMemory', async (_, options: {
+    sessionId: string
+    sessionName?: string
+    provider: string
+    apiKey: string
+    model: string
+  }) => {
+    try {
+      const { aiService } = await import('./services/ai/aiService')
+      aiService.init()
+      const result = await aiService.buildSessionProfileMemory({
+        sessionId: options.sessionId,
+        sessionName: options.sessionName,
+        provider: options.provider,
+        apiKey: options.apiKey,
+        model: options.model
+      })
+      return { success: true, result }
+    } catch (e) {
+      console.error('[AI] 构建会话画像记忆失败:', e)
+      logService?.error('AI', '构建会话画像记忆失败', { error: String(e) })
+      return { success: false, error: String(e) }
+    }
+  })
+
   ipcMain.handle('ai:getEmbeddingModelProfiles', async () => {
     try {
       const { localEmbeddingModelService } = await import('./services/search/embeddingModelService')

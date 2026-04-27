@@ -337,6 +337,24 @@ export interface SessionMemoryBuildProgressEvent {
   factCount: number
 }
 
+export interface SessionProfileMemoryState {
+  sessionId: string
+  profileCount: number
+  memoryId?: number
+  memoryUid?: string
+  updatedAt?: number
+  isRunning: boolean
+  lastError?: string
+}
+
+export interface SessionProfileMemoryBuildResult extends SessionProfileMemoryState {
+  content: string
+  provider: string
+  model: string
+  tokensUsed: number
+  cost: number
+}
+
 export interface EmbeddingModelProfile {
   id: string
   displayName: string

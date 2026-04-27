@@ -44,6 +44,8 @@ import {
 } from '../ai-agent/qa/sessionQaAgent'
 import { hashMemoryContent, memoryDatabase } from '../memory/memoryDatabase'
 import { memoryBuildService } from '../memory/memoryBuildService'
+import { memoryProfileService } from '../memory/memoryProfileService'
+import type { SessionProfileMemoryState } from '../memory/memoryProfileService'
 import type { MemoryEvidenceRef, MemoryItem, MemoryItemInput, MemorySourceType } from '../memory/memorySchema'
 import type {
   SessionQAConversationDetail,
@@ -124,6 +126,22 @@ export interface SessionQAResult {
   provider: string
   model: string
   createdAt: number
+}
+
+export interface SessionProfileMemoryBuildOptions {
+  sessionId: string
+  sessionName?: string
+  provider?: string
+  apiKey?: string
+  model?: string
+}
+
+export type SessionProfileMemoryBuildResult = SessionProfileMemoryState & {
+  content: string
+  provider: string
+  model: string
+  tokensUsed: number
+  cost: number
 }
 
 interface StructuredAnalysisAttempt {
@@ -963,6 +981,44 @@ ${detailInstructions[detail as keyof typeof detailInstructions] || detailInstruc
       provider: provider.name,
       model,
       createdAt
+    }
+  }
+
+  getSessionProfileMemoryState(sessionId: string): SessionProfileMemoryState {
+    if (!this.initialized) {
+      this.init()
+    }
+    return memoryProfileService.getSessionProfileState(sessionId)
+  }
+
+  async buildSessionProfileMemory(options: SessionProfileMemoryBuildOptions): Promise<SessionProfileMemoryBuildResult> {
+    if (!this.initialized) {
+      this.init()
+    }
+
+    const sessionId = String(options.sessionId || '').trim()
+    if (!sessionId) {
+      throw new Error('sessionId 不能为空')
+    }
+
+    const provider = this.getProvider(options.provider, options.apiKey)
+    const model = options.model || provider.models[0]
+    const result = await memoryProfileService.buildSessionProfileMemory({
+      sessionId,
+      sessionName: options.sessionName,
+      provider,
+      model
+    })
+    const tokensUsed = this.estimateTokens(result.content)
+    const cost = (tokensUsed / 1000) * provider.pricing.input
+    aiDatabase.updateUsageStats(provider.name, model, tokensUsed, cost)
+
+    return {
+      ...result,
+      provider: provider.name,
+      model,
+      tokensUsed,
+      cost
     }
   }
 

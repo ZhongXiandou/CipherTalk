@@ -41,6 +41,7 @@ import {
   type SessionQAMessageRecord,
   type SessionQAProgressEvent,
   type SessionQAResult,
+  type SessionProfileMemoryState,
   type SummaryEvidenceRef,
   type SummaryResult,
   type SummaryStructuredAnalysis
@@ -580,6 +581,9 @@ function AISummaryWindow() {
   const [expandedQAProgressIds, setExpandedQAProgressIds] = useState<Set<string>>(() => new Set())
   const [expandedQAEvidenceIds, setExpandedQAEvidenceIds] = useState<Set<string>>(() => new Set())
   const [qaError, setQaError] = useState('')
+  const [profileMemoryState, setProfileMemoryState] = useState<SessionProfileMemoryState | null>(null)
+  const [isBuildingProfileMemory, setIsBuildingProfileMemory] = useState(false)
+  const [profileMemoryMessage, setProfileMemoryMessage] = useState('')
   const [copiedEvidenceKey, setCopiedEvidenceKey] = useState('')
   const [evidenceContext, setEvidenceContext] = useState<EvidenceContextState | null>(null)
   const [evidenceMessageMap, setEvidenceMessageMap] = useState<Record<string, Message>>({})
@@ -1503,6 +1507,7 @@ function AISummaryWindow() {
       // 加载历史记录
       loadHistory(sid)
       loadQAConversations(sid)
+      loadProfileMemoryState(sid)
     } else {
       setError('未能获取会话信息，请重新打开窗口')
     }
@@ -1617,6 +1622,17 @@ function AISummaryWindow() {
       }
     } catch (e) {
       console.error('加载历史记录失败:', e)
+    }
+  }
+
+  const loadProfileMemoryState = async (sid: string) => {
+    try {
+      const result = await window.electronAPI.ai.getSessionProfileMemoryState(sid)
+      if (result.success && result.result) {
+        setProfileMemoryState(result.result)
+      }
+    } catch (e) {
+      console.error('加载画像记忆状态失败:', e)
     }
   }
 
@@ -1891,6 +1907,52 @@ function AISummaryWindow() {
       console.error('[AISummaryWindow] 生成异常:', e)
       setError('生成摘要失败: ' + String(e))
       setIsGenerating(false)
+    }
+  }
+
+  const handleBuildProfileMemory = async () => {
+    if (!sessionId || isBuildingProfileMemory) return
+
+    setIsBuildingProfileMemory(true)
+    setProfileMemoryMessage('')
+    setError('')
+    setQaError('')
+
+    try {
+      const { getAiApiKey, getAiProvider, getAiModel } = await import('../services/config')
+      const provider = await getAiProvider()
+      const apiKey = await getAiApiKey()
+      const model = await getAiModel()
+
+      if (!apiKey && provider !== 'ollama') {
+        throw new Error('请先在设置中配置 AI API 密钥')
+      }
+
+      const response = await window.electronAPI.ai.buildSessionProfileMemory({
+        sessionId,
+        sessionName,
+        provider: provider || 'zhipu',
+        apiKey: apiKey || '',
+        model: model || 'glm-4.5-flash'
+      })
+
+      if (!response.success || !response.result) {
+        throw new Error(response.error || '生成画像失败')
+      }
+
+      setProfileMemoryState(response.result)
+      setProfileMemoryMessage(`画像已更新：${new Date(response.result.updatedAt || Date.now()).toLocaleString('zh-CN')}`)
+    } catch (e) {
+      const message = String(e)
+      setProfileMemoryMessage(message)
+      setProfileMemoryState(prev => prev ? { ...prev, isRunning: false, lastError: message } : prev)
+      if (workspaceMode === 'ask') {
+        setQaError(`画像生成失败：${message}`)
+      } else {
+        setError(`画像生成失败：${message}`)
+      }
+    } finally {
+      setIsBuildingProfileMemory(false)
     }
   }
 
@@ -2396,6 +2458,26 @@ function AISummaryWindow() {
         </div>
 
         <div className="title-actions">
+          <button
+            className="title-btn"
+            onClick={handleBuildProfileMemory}
+            disabled={!sessionId || isGenerating || isAsking || isBuildingProfileMemory}
+            data-tooltip={isBuildingProfileMemory
+              ? '正在生成数字分身画像'
+              : profileMemoryState?.profileCount
+                ? '更新数字分身画像'
+                : '生成数字分身画像'}
+          >
+            {isBuildingProfileMemory ? <Loader2 className="spinner" size={14} /> : <User size={14} />}
+          </button>
+          {profileMemoryMessage && !isBuildingProfileMemory && (
+            <div
+              className={`profile-memory-status ${profileMemoryState?.lastError ? 'error' : 'success'}`}
+              data-tooltip={profileMemoryMessage}
+            >
+              {profileMemoryState?.lastError ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
+            </div>
+          )}
           {isGenerating && (
             <div className="generating-status" data-tooltip="正在生成摘要...">
               <Loader2 className="spinner" size={16} />

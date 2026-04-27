@@ -149,6 +149,38 @@
       }
     }
 
+    .profile-memory-status {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      position: relative;
+      color: var(--success, #16a34a);
+
+      &.error {
+        color: var(--danger, #dc2626);
+      }
+
+      &:hover::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        top: 100%;
+        right: 0;
+        transform: translateY(8px);
+        max-width: 280px;
+        padding: 4px 8px;
+        background: var(--bg-tooltip, rgba(0, 0, 0, 0.8));
+        color: white;
+        font-size: 11px;
+        border-radius: 4px;
+        white-space: normal;
+        pointer-events: none;
+        z-index: 1000;
+        animation: tooltipFadeIn 0.2s;
+      }
+    }
+
     .title-btn {
       width: 28px;
       height: 28px;
@@ -165,6 +197,15 @@
       &:hover {
         background: var(--bg-hover);
         color: var(--primary);
+      }
+
+      &:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .spinner {
+        animation: spin 1s linear infinite;
       }
     }
   }

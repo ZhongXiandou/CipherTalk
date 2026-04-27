@@ -623,6 +623,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     cancelSessionVectorIndex: (sessionId: string) => ipcRenderer.invoke('ai:cancelSessionVectorIndex', sessionId),
     getSessionMemoryBuildState: (sessionId: string) => ipcRenderer.invoke('ai:getSessionMemoryBuildState', sessionId),
     prepareSessionMemory: (options: { sessionId: string }) => ipcRenderer.invoke('ai:prepareSessionMemory', options),
+    getSessionProfileMemoryState: (sessionId: string) => ipcRenderer.invoke('ai:getSessionProfileMemoryState', sessionId),
+    buildSessionProfileMemory: (options: {
+      sessionId: string
+      sessionName?: string
+      provider: string
+      apiKey: string
+      model: string
+    }) => ipcRenderer.invoke('ai:buildSessionProfileMemory', options),
     getEmbeddingModelProfiles: () => ipcRenderer.invoke('ai:getEmbeddingModelProfiles'),
     setEmbeddingModelProfile: (profileId: string) => ipcRenderer.invoke('ai:setEmbeddingModelProfile', profileId),
     setEmbeddingVectorDim: (profileId: string, dim: number) => ipcRenderer.invoke('ai:setEmbeddingVectorDim', profileId, dim),

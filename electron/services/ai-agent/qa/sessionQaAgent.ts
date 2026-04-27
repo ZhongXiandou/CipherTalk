@@ -112,6 +112,10 @@ const MAX_HISTORY_MESSAGES = 8
 const MAX_SUMMARY_CHARS = 3000
 const MAX_STRUCTURED_CHARS = 4000
 const MAX_MESSAGE_TEXT = 220
+const MAX_REWRITE_INPUT_CHARS = 800
+const MAX_REWRITE_KEYWORD_QUERIES = 4
+const MAX_REWRITE_SEMANTIC_QUERIES = 3
+const MAX_RETRIEVAL_EXPLAIN_TOP_K = 5
 
 type SearchPayloadWithQuery = { query: string; payload: McpSearchMessagesPayload }
 type SearchHitWithQuery = McpSearchMessagesPayload['hits'][number] & { query: string }
@@ -126,6 +130,14 @@ type ContextWindow = {
 type ToolObservation = {
   title: string
   detail: string
+}
+type QueryRewriteResult = {
+  applied: boolean
+  semanticQuery?: string
+  keywordQueries: string[]
+  semanticQueries: string[]
+  reason?: string
+  diagnostics: string[]
 }
 type SessionQAIntentType =
   | 'summary_answerable'
@@ -1592,6 +1604,167 @@ function buildRetrievalDiagnostics(result: RetrievalEngineResult): string[] {
   ]
 }
 
+function formatQueryListForDiagnostics(queries: string[], limit = 4): string {
+  const items = queries.slice(0, limit).map((query) => `"${compactText(query, 48)}"`)
+  const rest = queries.length > limit ? `,+${queries.length - limit}` : ''
+  return `[${items.join(',')}${rest}]`
+}
+
+function formatSourceStatsForDiagnostics(result: RetrievalEngineResult): string {
+  return result.sourceStats.map((stat) => {
+    if (!stat.attempted) return `${stat.name} skipped=${stat.skippedReason || 'unknown'}`
+    const error = stat.error ? ` error=${compactText(stat.error, 60)}` : ''
+    return `${stat.name} hits=${stat.hitCount}${error}`
+  }).join('; ')
+}
+
+function formatSourceRankMapForDiagnostics(hit: RetrievalHit): string {
+  return hit.sources
+    .map((source) => {
+      const rank = hit.sourceRanks[source]
+      const score = hit.sourceScores[source]
+      const scoreText = typeof score === 'number' ? `/${Number(score).toFixed(3)}` : ''
+      return `${source}:${rank ?? '?'}${scoreText}`
+    })
+    .join(',')
+}
+
+function buildRetrievalExplainDiagnostics(input: {
+  result: RetrievalEngineResult
+  keywordQueries: string[]
+  semanticQueries: string[]
+  topK?: number
+}): string[] {
+  const { result, keywordQueries, semanticQueries } = input
+  const topK = Math.max(1, Math.min(input.topK || MAX_RETRIEVAL_EXPLAIN_TOP_K, MAX_RETRIEVAL_EXPLAIN_TOP_K))
+  const lines: string[] = [
+    `retrieval_plan: query="${compactText(result.query, 80)}" semantic="${compactText(result.semanticQuery, 80)}" keywords=${formatQueryListForDiagnostics(keywordQueries)} semantics=${formatQueryListForDiagnostics(semanticQueries, 3)}`,
+    `retrieval_sources: ${formatSourceStatsForDiagnostics(result) || 'none'}`,
+    `retrieval_ranking: rerank=${result.rerank.applied ? 'applied' : result.rerank.attempted ? 'attempted' : `skipped=${result.rerank.skippedReason || 'unknown'}`} top=${Math.min(topK, result.hits.length)}`
+  ]
+
+  for (const hit of result.hits.slice(0, topK)) {
+    const memory = hit.memory
+    const preview = compactText(memory.title || memory.content || '', 120)
+    const rerank = typeof hit.rerankScore === 'number' ? ` rerank=${hit.rerankScore.toFixed(4)}` : ''
+    lines.push(
+      `top${hit.rank}: ${memory.sourceType}#${memory.id} sources=${hit.sources.join('/')} ranks=${formatSourceRankMapForDiagnostics(hit)} score=${hit.score.toFixed(4)}${rerank} text="${preview}"`
+    )
+  }
+
+  return lines
+}
+
+function uniqueCompactQueries(values: Array<string | undefined>, limit: number, maxLength: number): string[] {
+  const seen = new Set<string>()
+  const queries: string[] = []
+  for (const value of values) {
+    const query = compactText(String(value || ''), maxLength)
+    const key = query.toLowerCase()
+    if (!query || seen.has(key)) continue
+    seen.add(key)
+    queries.push(query)
+    if (queries.length >= limit) break
+  }
+  return queries
+}
+
+function normalizeRewriteArray(value: unknown, limit: number, maxLength: number): string[] {
+  if (!Array.isArray(value)) return []
+  return uniqueCompactQueries(value.map((item) => String(item || '')), limit, maxLength)
+}
+
+async function rewriteRetrievalQuery(
+  provider: AIProvider | undefined,
+  model: string | undefined,
+  input: {
+    question: string
+    searchQuery: string
+    sessionName?: string
+    senderUsername?: string
+    startTime?: number
+    endTime?: number
+  }
+): Promise<QueryRewriteResult> {
+  if (!provider || !model) {
+    return {
+      applied: false,
+      keywordQueries: [],
+      semanticQueries: [],
+      diagnostics: ['query_rewrite: skipped, reason=missing_provider_or_model']
+    }
+  }
+
+  try {
+    const question = compactText(input.question, MAX_REWRITE_INPUT_CHARS)
+    const response = await provider.chat([
+      {
+        role: 'system',
+        content: '你是 CipherTalk 会话问答的检索查询改写器。只输出严格 JSON，不要解释，不要 Markdown。'
+      },
+      {
+        role: 'user',
+        content: `请把用户关于单个微信会话的问题改写为更适合混合检索的查询。必须保留人名、时间、地点、产品名、技术名、专有名词；不要编造事实；统计、计数、时间范围类问题不要改写成摘要型问题。输出 JSON 字段：semanticQuery, keywordQueries, semanticQueries, reason。
+
+会话：${input.sessionName || '当前会话'}
+用户原问题：${question}
+当前工具关键词：${input.searchQuery || '无'}
+senderUsername 过滤：${input.senderUsername || '无'}
+开始时间秒：${input.startTime || '无'}
+结束时间秒：${input.endTime || '无'}
+
+约束：
+- semanticQuery 必须是 1 个适合语义检索的完整短句。
+- keywordQueries 最多 4 个，适合 substring/FTS 检索，避免泛词和完整长问句。
+- semanticQueries 最多 3 个，可包含同义表达或补充语义问法。
+- reason 一句话说明改写原因。
+
+JSON 示例：
+{"semanticQuery":"查找大家是否讨论过 Qwen3 Embedding 的使用和效果","keywordQueries":["Qwen3","Embedding","向量"],"semanticQueries":["谁提到过 Qwen3 Embedding","关于向量模型的讨论"],"reason":"保留技术实体并补充语义表达"}`
+      }
+    ], {
+      model,
+      temperature: 0.1,
+      maxTokens: 500,
+      enableThinking: false
+    })
+
+    const parsed = JSON.parse(stripJsonFence(stripThinkBlocks(response))) as Record<string, unknown>
+    const semanticQuery = compactText(String(parsed.semanticQuery || ''), 180)
+    const keywordQueries = normalizeRewriteArray(parsed.keywordQueries, MAX_REWRITE_KEYWORD_QUERIES, 48)
+    const semanticQueries = normalizeRewriteArray(parsed.semanticQueries, MAX_REWRITE_SEMANTIC_QUERIES, 160)
+    const reason = compactText(String(parsed.reason || ''), 160)
+
+    if (!semanticQuery && keywordQueries.length === 0 && semanticQueries.length === 0) {
+      return {
+        applied: false,
+        keywordQueries: [],
+        semanticQueries: [],
+        reason,
+        diagnostics: ['query_rewrite: failed, reason=empty_rewrite_result']
+      }
+    }
+
+    return {
+      applied: true,
+      semanticQuery: semanticQuery || semanticQueries[0],
+      keywordQueries,
+      semanticQueries,
+      reason,
+      diagnostics: [
+        `query_rewrite: applied, semanticQuery=${compactText(semanticQuery || semanticQueries[0] || '', 120)}`
+      ]
+    }
+  } catch (error) {
+    return {
+      applied: false,
+      keywordQueries: [],
+      semanticQueries: [],
+      diagnostics: [`query_rewrite: failed, reason=${compactText(String(error), 120)}`]
+    }
+  }
+}
+
 function retrievalResultToSearchPayload(
   sessionId: string,
   sessionName: string,
@@ -1648,6 +1821,9 @@ function retrievalResultToSearchPayload(
 }
 
 async function searchSessionMessages(sessionId: string, query: string, filters: {
+  provider?: AIProvider
+  model?: string
+  originalQuestion?: string
   semanticQuery?: string
   senderUsername?: string
   startTime?: number
@@ -1660,13 +1836,35 @@ async function searchSessionMessages(sessionId: string, query: string, filters: 
   contextWindows?: ContextWindow[]
   diagnostics?: string[]
 }> {
+  const retrievalQuery = filters.originalQuestion || query
+  const rewrite = await rewriteRetrievalQuery(filters.provider, filters.model, {
+    question: retrievalQuery,
+    searchQuery: query,
+    sessionName: filters.sessionName || sessionId,
+    senderUsername: filters.senderUsername,
+    startTime: filters.startTime,
+    endTime: filters.endTime
+  })
+  const fallbackSemanticQuery = filters.semanticQuery || `${query} ${retrievalQuery}`.trim()
+  const semanticQuery = rewrite.semanticQuery || fallbackSemanticQuery
+  const keywordQueries = uniqueCompactQueries([
+    query,
+    retrievalQuery,
+    ...rewrite.keywordQueries
+  ], MAX_REWRITE_KEYWORD_QUERIES + 2, 80)
+  const semanticQueries = uniqueCompactQueries([
+    semanticQuery,
+    fallbackSemanticQuery,
+    ...rewrite.semanticQueries
+  ], MAX_REWRITE_SEMANTIC_QUERIES + 2, 180)
+
   try {
     const retrieval = await retrievalEngine.search({
       sessionId,
-      query,
-      semanticQuery: filters.semanticQuery || query,
-      keywordQueries: [query],
-      semanticQueries: [filters.semanticQuery || query],
+      query: retrievalQuery,
+      semanticQuery,
+      keywordQueries,
+      semanticQueries,
       startTimeMs: filters.startTime ? filters.startTime * 1000 : undefined,
       endTimeMs: filters.endTime ? filters.endTime * 1000 : undefined,
       senderUsername: filters.senderUsername,
@@ -1686,7 +1884,15 @@ async function searchSessionMessages(sessionId: string, query: string, filters: 
         .slice(0, MAX_CONTEXT_WINDOWS)
         .map((hit) => retrievalEvidenceToContextWindow(sessionId, query, hit))
         .filter((window): window is ContextWindow => Boolean(window))
-      const diagnostics = buildRetrievalDiagnostics(retrieval)
+      const diagnostics = [
+        ...rewrite.diagnostics,
+        ...buildRetrievalDiagnostics(retrieval),
+        ...buildRetrievalExplainDiagnostics({
+          result: retrieval,
+          keywordQueries,
+          semanticQueries
+        })
+      ]
       return {
         payload,
         contextWindows,
@@ -1697,7 +1903,10 @@ async function searchSessionMessages(sessionId: string, query: string, filters: 
             sessionId,
             query,
             retrievalEngine: 'memory_hybrid',
-            semanticQuery: filters.semanticQuery || query,
+            semanticQuery,
+            keywordQueries,
+            semanticQueries,
+            queryRewrite: rewrite.applied ? 'applied' : 'fallback',
             limit: filters.limit || MAX_SEARCH_HITS
           },
           summary: `新记忆检索命中 ${payload.hits.length} 条；${diagnostics.join('；')}`,
@@ -1726,10 +1935,11 @@ async function searchSessionMessages(sessionId: string, query: string, filters: 
   const result = await executeMcpTool('search_messages', args)
   return {
     payload: result.payload as McpSearchMessagesPayload,
+    diagnostics: rewrite.diagnostics,
     toolCall: {
       toolName: 'search_messages',
       args,
-      summary: result.summary,
+      summary: rewrite.diagnostics.length ? `${result.summary}；${rewrite.diagnostics.join('；')}` : result.summary,
       status: 'completed',
       evidenceCount: ((result.payload as McpSearchMessagesPayload)?.hits || []).length
     }
@@ -3099,6 +3309,9 @@ export async function answerSessionQuestionWithAgent(
       try {
         await ensureSearchIndexReady()
         const search = await searchSessionMessages(options.sessionId, query, {
+          provider: options.provider,
+          model: options.model,
+          originalQuestion: options.question,
           sessionName: options.sessionName || options.sessionId,
           semanticQuery: `${query} ${options.question}`,
           startTime: route.timeRange?.startTime,
