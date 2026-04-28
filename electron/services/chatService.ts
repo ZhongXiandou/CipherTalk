@@ -478,7 +478,7 @@ class ChatService extends EventEmitter {
   /**
    * 获取会话列表
    */
-  async getSessions(): Promise<{ success: boolean; sessions?: ChatSession[]; error?: string }> {
+  async getSessions(offset?: number, limit?: number): Promise<{ success: boolean; sessions?: ChatSession[]; error?: string }> {
     try {
       if (!this.sessionDb) {
         const connectResult = await this.connect()
@@ -512,10 +512,12 @@ class ChatService extends EventEmitter {
       ).all() as any[]
       const columnNames = columns.map((c: any) => c.name)
 
-      // 查询所有数据
+      // 查询数据（支持分页）
+      const safeOffset = Math.max(0, Math.floor(Number(offset) || 0))
+      const safeLimit = Math.max(1, Math.floor(Number(limit) || 999999))
       const rows = this.sessionDb!.prepare(
-        `SELECT * FROM ${sessionTableName} ORDER BY sort_timestamp DESC`
-      ).all() as any[]
+        `SELECT * FROM ${sessionTableName} ORDER BY sort_timestamp DESC LIMIT ? OFFSET ?`
+      ).all(safeLimit, safeOffset) as any[]
 
       // 转换为 ChatSession
       const sessions: ChatSession[] = []
