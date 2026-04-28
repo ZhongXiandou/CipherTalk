@@ -27,6 +27,7 @@ import {
   MAX_TOOL_CALLS,
   MAX_TOOL_DECISION_ATTEMPTS,
   MAX_SEARCH_RETRIES,
+  DEFAULT_TIMEOUT_MS,
   DEFAULT_TOKEN_BUDGET
 } from './types'
 import { AgentLogger } from './logger'
@@ -126,7 +127,7 @@ export class AgentContext {
 
   /** 检查是否超时 */
   get isTimedOut(): boolean {
-    const timeout = this.options.timeoutMs || 120_000
+    const timeout = this.options.timeoutMs || DEFAULT_TIMEOUT_MS
     return (Date.now() - this.startTime) > timeout
   }
 

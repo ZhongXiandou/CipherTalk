@@ -7,10 +7,12 @@ import type {
   ParticipantResolution,
   SearchPayloadWithQuery
 } from '../types'
-import { MAX_SUMMARY_CHARS } from '../types'
+import { MAX_CONTEXT_WINDOWS, MAX_SUMMARY_CHARS } from '../types'
 import { compactText, stripThinkBlocks } from '../utils/text'
 import { formatMessageLine } from '../utils/message'
 import { getRouteLabel } from '../intent/router'
+
+const MAX_ANSWER_SEARCH_HITS_PER_QUERY = 8
 
 export interface BuildAnswerPromptInput {
   sessionName: string
@@ -31,8 +33,9 @@ export interface BuildAnswerPromptInput {
  * 构建最终回答 prompt
  */
 export function buildAnswerPrompt(input: BuildAnswerPromptInput): string {
-  const contextText = input.contextWindows.length > 0
-    ? input.contextWindows.map((window, index) => {
+  const contextWindows = input.contextWindows.slice(0, MAX_CONTEXT_WINDOWS)
+  const contextText = contextWindows.length > 0
+    ? contextWindows.map((window, index) => {
       const heading = window.source === 'search'
         ? `上下文窗口 ${index + 1}（关键词：${window.query || '未知'}，围绕命中消息）`
         : window.source === 'time_range'
@@ -43,12 +46,16 @@ export function buildAnswerPrompt(input: BuildAnswerPromptInput): string {
         : '无上下文消息。'
       return `${heading}\n${lines}`
     }).join('\n\n')
+      + (input.contextWindows.length > contextWindows.length
+        ? `\n\n已省略 ${input.contextWindows.length - contextWindows.length} 个额外上下文窗口。`
+        : '')
     : '无可用上下文。'
 
   const searchContext = input.searchPayloads.length > 0
     ? input.searchPayloads.map(({ query, payload }) => {
       const lines = payload.hits.length > 0
-        ? payload.hits.map((hit) => formatMessageLine(hit.message)).join('\n')
+        ? payload.hits.slice(0, MAX_ANSWER_SEARCH_HITS_PER_QUERY).map((hit) => formatMessageLine(hit.message)).join('\n')
+          + (payload.hits.length > MAX_ANSWER_SEARCH_HITS_PER_QUERY ? `\n... 另有 ${payload.hits.length - MAX_ANSWER_SEARCH_HITS_PER_QUERY} 条命中未展开。` : '')
         : '无命中。'
       return `关键词：${query}\n${lines}`
     }).join('\n\n')

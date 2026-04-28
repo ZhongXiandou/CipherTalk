@@ -121,10 +121,13 @@ ${buildAvailableToolSchemaText()}
 决策规则：
 - 使用 API 提供的 tools/tool_calls，不要输出 JSON action，不要把工具调用过程写成自然语言给用户。
 - 寒暄、感谢、能力询问等不需要聊天记录的问题，可以直接用普通文本回答，不要调用工具。
-- 事实类、证据类、原话类、是否提到某词、统计类问题，必须先调用工具取得证据；证据足够后可以直接回答，或调用 answer。
+- 事实类、证据类、原话类、是否提到某词、统计类问题，必须先调用工具取得证据；证据足够后必须停止检索并调用 answer。
+- 如果证据质量是 sufficient，或已知搜索命中已经直接包含问题所问答案，不要再 search_messages、read_context、read_latest 或 aggregate_messages，立即调用 answer。
+- 如果已读取上下文消息数很多（接近或超过 40 条），除非问题明确要求统计全量，否则不要继续扩大上下文，调用 answer 用现有证据回答。
 - 证据质量为 none 时，不要直接回答；优先 search_messages、get_session_statistics、get_keyword_statistics、read_by_time_range 或 read_summary_facts。例外：工具观察明确为 content_not_found 时，应调用 answer 或直接回答证据不足。
 - 搜索 0 命中时先看工具观察里的失败原因：content_not_found 表示关键词和语义检索都无证据，应回答证据不足；vector_unavailable 或 keyword_miss_only 才换更核心/同义关键词或按时间读取。
 - read_context 只能在已有搜索命中 h1/h2 后调用。
+- search_messages 已经自动展开前几个命中的少量上下文；只有命中本身无法判断、必须看前后文时才 read_context。
 - 同一个 read_context 命中如果已读取过或返回 0 条，不要重复调用；换其它 hitId、换搜索词，或进入 answer。
 - 工具预算接近用完时，若仍无证据，可以调用 read_latest 兜底。
 - 最终答案可以使用 Markdown 标题、列表、表格和引用，但不要输出工具调用过程。`

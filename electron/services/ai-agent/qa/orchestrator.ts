@@ -16,6 +16,7 @@ import type {
 } from './types'
 import {
   MAX_CONTEXT_MESSAGES,
+  MAX_CONTEXT_WINDOWS,
   MAX_SUMMARY_CHARS,
   MAX_STRUCTURED_CHARS,
   MAX_HISTORY_MESSAGES,
@@ -51,6 +52,9 @@ import type { SummaryEvidenceRef } from '../types/analysis'
 import { getAgentNodeName } from './nodeNames'
 
 // ─── 辅助函数 ────────────────────────────────────────────────
+
+const AUTO_FINAL_CONTEXT_MESSAGE_LIMIT = MAX_CONTEXT_MESSAGES
+const AUTO_FINAL_TOOL_CALLS_WITH_EVIDENCE = 8
 
 function buildStructuredContext(analysis?: StructuredAnalysis): string {
   if (!analysis) return ''
@@ -92,6 +96,55 @@ function buildToolCall(input: Omit<SessionQAToolCall, 'displayName' | 'nodeName'
   return { ...input, displayName: nodeName, nodeName }
 }
 
+function getContextMessageCount(ctx: AgentContext): number {
+  return ctx.contextWindows.reduce((sum, window) => sum + window.messages.length, 0)
+}
+
+function appendContextWindow(ctx: AgentContext, window: ContextWindow): boolean {
+  if (ctx.contextWindows.length >= MAX_CONTEXT_WINDOWS) return false
+  ctx.contextWindows.push(window)
+  return true
+}
+
+function appendContextWindows(ctx: AgentContext, windows: ContextWindow[]): number {
+  let appended = 0
+  for (const window of windows) {
+    if (!appendContextWindow(ctx, window)) break
+    appended += 1
+  }
+  return appended
+}
+
+function hasStatsEvidence(ctx: AgentContext): boolean {
+  return Boolean(ctx.aggregateText)
+    || ctx.toolCalls.some((call) =>
+      (call.toolName === 'get_session_statistics'
+        || call.toolName === 'get_keyword_statistics'
+        || call.toolName === 'aggregate_messages')
+      && call.status !== 'failed'
+    )
+}
+
+function getAutoFinalizeReason(ctx: AgentContext, action: ToolLoopAction): string | null {
+  if (action.action === 'answer') return '模型已请求进入最终回答。'
+  if (hasConclusiveSearchFailure(ctx.searchPayloads)) return '检索已明确没有相关内容，继续找数据只会扩大上下文。'
+
+  if (ctx.evidenceQuality === 'sufficient') {
+    if (ctx.route.intent === 'stats_or_count' && !hasStatsEvidence(ctx)) return null
+    return '当前证据质量已足够回答用户问题。'
+  }
+
+  if (ctx.hasEvidence && getContextMessageCount(ctx) >= AUTO_FINAL_CONTEXT_MESSAGE_LIMIT) {
+    return `已读取 ${getContextMessageCount(ctx)} 条上下文消息，进入回答以避免上下文继续膨胀。`
+  }
+
+  if (ctx.hasEvidence && ctx.toolCallsUsed >= AUTO_FINAL_TOOL_CALLS_WITH_EVIDENCE) {
+    return `已有证据且工具调用已达 ${ctx.toolCallsUsed} 次，停止继续检索。`
+  }
+
+  return null
+}
+
 // ─── 工具执行器（每个分支独立函数）─────────────────────────────
 
 async function executeSummaryFacts(ctx: AgentContext, action: ToolLoopAction & { action: 'read_summary_facts' }) {
@@ -127,6 +180,14 @@ async function executeResolveParticipant(ctx: AgentContext, action: ToolLoopActi
 }
 
 async function executeReadByTimeRange(ctx: AgentContext, action: ToolLoopAction & { action: 'read_by_time_range' }) {
+  if (ctx.contextWindows.length >= MAX_CONTEXT_WINDOWS && ctx.hasEvidence) {
+    ctx.toolCallsUsed += 1
+    const progressId = `tool-loop-${ctx.toolCallsUsed}-time`
+    emitProgress(ctx.options, { id: progressId, stage: 'tool', status: 'completed', title: '按时间读取消息', detail: `上下文窗口已达 ${MAX_CONTEXT_WINDOWS} 个，跳过继续读取`, toolName: 'read_by_time_range', count: 0 })
+    ctx.observations.push({ title: '跳过按时间读取', detail: `已有证据且上下文窗口已达 ${MAX_CONTEXT_WINDOWS} 个，请进入回答。` })
+    return
+  }
+
   ctx.toolCallsUsed += 1
   const inferredRange = ctx.route.timeRange || inferTimeRangeFromQuestion(ctx.question)
   const range = { startTime: action.startTime || inferredRange?.startTime, endTime: action.endTime || inferredRange?.endTime, label: action.label || inferredRange?.label }
@@ -142,8 +203,11 @@ async function executeReadByTimeRange(ctx: AgentContext, action: ToolLoopAction 
     const payload = await loadMessagesByTimeRange(ctx.sessionId, { startTime: range.startTime, endTime: range.endTime, keyword: action.keyword, senderUsername, limit, order: hasRange ? 'asc' : 'desc' })
     if (payload.toolCall) ctx.toolCalls.push(payload.toolCall)
     const messages = payload.payload?.items || []
-    ctx.contextWindows.push({ source: 'time_range', label, messages })
-    ctx.addContextEvidence(messages)
+    if (appendContextWindow(ctx, { source: 'time_range', label, messages })) {
+      ctx.addContextEvidence(messages)
+    } else {
+      ctx.observations.push({ title: '跳过追加上下文', detail: `上下文窗口已达 ${MAX_CONTEXT_WINDOWS} 个，未继续追加按时间读取结果。` })
+    }
     emitProgress(ctx.options, { id: progressId, stage: 'tool', status: 'completed', title: hasRange ? '按时间读取消息' : '读取最近消息', detail: `读取到 ${messages.length} 条消息`, toolName: 'read_by_time_range', count: messages.length })
     ctx.observations.push({ title: hasRange ? '按时间读取消息' : '读取最近消息', detail: `${label}，读取到 ${messages.length} 条。\n${messages.slice(0, 12).map(formatMessageLine).join('\n') || '无消息。'}` })
   } catch (error) {
@@ -280,9 +344,13 @@ async function executeSearchMessages(ctx: AgentContext, action: ToolLoopAction &
       ctx.addKnownHits(query, search.payload)
     }
     if (search.contextWindows?.length) {
-      for (const w of search.contextWindows) {
-        ctx.contextWindows.push(w)
+      const windowsToAppend = search.contextWindows.slice(0, Math.max(0, MAX_CONTEXT_WINDOWS - ctx.contextWindows.length))
+      const appended = appendContextWindows(ctx, windowsToAppend)
+      for (const w of windowsToAppend.slice(0, appended)) {
         ctx.addContextEvidence(w.messages)
+      }
+      if (appended < search.contextWindows.length) {
+        ctx.observations.push({ title: '限制上下文扩展', detail: `搜索命中已展开 ${appended} 个上下文窗口，剩余命中不再展开以控制上下文长度。` })
       }
     }
     emitProgress(ctx.options, { id: progressId, stage: 'tool', status: 'completed', title: '搜索相关消息', detail: `关键词：${query}，命中 ${search.payload?.hits.length || 0} 条`, toolName: 'search_messages', query, count: search.payload?.hits.length || 0, diagnostics: [...(search.diagnostics || []), ...getSearchDiagnostics(search.payload)] })
@@ -321,6 +389,14 @@ async function executeSearchMessages(ctx: AgentContext, action: ToolLoopAction &
 }
 
 async function executeReadContext(ctx: AgentContext, action: ToolLoopAction & { action: 'read_context' }) {
+  if (ctx.contextWindows.length >= MAX_CONTEXT_WINDOWS && ctx.hasEvidence) {
+    ctx.toolCallsUsed += 1
+    const progressId = `tool-loop-${ctx.toolCallsUsed}-context`
+    emitProgress(ctx.options, { id: progressId, stage: 'tool', status: 'completed', title: '读取命中上下文', detail: `上下文窗口已达 ${MAX_CONTEXT_WINDOWS} 个，跳过继续读取`, toolName: 'read_context', count: 0 })
+    ctx.observations.push({ title: '跳过读取上下文', detail: `已有证据且上下文窗口已达 ${MAX_CONTEXT_WINDOWS} 个，请进入回答。` })
+    return
+  }
+
   const target = findKnownHitForAction(action, ctx.knownHits)
   if (!target) {
     ctx.toolCallsUsed += 1
@@ -352,10 +428,13 @@ async function executeReadContext(ctx: AgentContext, action: ToolLoopAction & { 
     if (messages.length > 0) {
       ctx.readContextKeys.add(contextKey)
     }
-    ctx.contextWindows.push({ source: 'search', query: target.query, anchor: target.message, messages })
-    for (const m of messages) {
-      const ref = toEvidenceRef(ctx.sessionId, m)
-      if (ref) ctx.evidenceCandidates.push(ref)
+    if (appendContextWindow(ctx, { source: 'search', query: target.query, anchor: target.message, messages })) {
+      for (const m of messages) {
+        const ref = toEvidenceRef(ctx.sessionId, m)
+        if (ref) ctx.evidenceCandidates.push(ref)
+      }
+    } else {
+      ctx.observations.push({ title: '跳过追加上下文', detail: `上下文窗口已达 ${MAX_CONTEXT_WINDOWS} 个，未继续追加 ${target.hitId} 的前后文。` })
     }
     emitProgress(ctx.options, { id: progressId, stage: 'tool', status: 'completed', title: '读取命中上下文', detail: `${target.hitId}，读取到 ${messages.length} 条`, toolName: 'read_context', count: messages.length })
     ctx.observations.push({ title: '读取命中上下文', detail: `${target.hitId}，读取到 ${messages.length} 条。\n${messages.slice(0, 10).map(formatMessageLine).join('\n')}` })
@@ -367,6 +446,14 @@ async function executeReadContext(ctx: AgentContext, action: ToolLoopAction & { 
 
 async function executeReadLatest(ctx: AgentContext, action: ToolLoopAction & { action: 'read_latest' }) {
   ctx.usedRecentFallback = true
+  if (ctx.contextWindows.length >= MAX_CONTEXT_WINDOWS && ctx.hasEvidence) {
+    ctx.toolCallsUsed += 1
+    const progressId = `tool-loop-${ctx.toolCallsUsed}-latest`
+    emitProgress(ctx.options, { id: progressId, stage: 'tool', status: 'completed', title: '读取最近上下文', detail: `上下文窗口已达 ${MAX_CONTEXT_WINDOWS} 个，跳过继续读取`, toolName: 'read_latest', count: 0 })
+    ctx.observations.push({ title: '跳过读取最近上下文', detail: `已有证据且上下文窗口已达 ${MAX_CONTEXT_WINDOWS} 个，请进入回答。` })
+    return
+  }
+
   if (ctx.contextWindows.some((w) => w.source === 'latest')) {
     ctx.toolCallsUsed += 1
     const progressId = `tool-loop-${ctx.toolCallsUsed}-latest`
@@ -384,10 +471,13 @@ async function executeReadLatest(ctx: AgentContext, action: ToolLoopAction & { a
     const latest = await loadLatestContext(ctx.sessionId, latestLimit)
     if (latest.toolCall) ctx.toolCalls.push(latest.toolCall)
     const latestMessages = latest.payload?.items || []
-    ctx.contextWindows.push({ source: 'latest', messages: latestMessages })
-    for (const m of latestMessages.slice(-8)) {
-      const ref = toEvidenceRef(ctx.sessionId, m)
-      if (ref) ctx.evidenceCandidates.push(ref)
+    if (appendContextWindow(ctx, { source: 'latest', messages: latestMessages })) {
+      for (const m of latestMessages.slice(-8)) {
+        const ref = toEvidenceRef(ctx.sessionId, m)
+        if (ref) ctx.evidenceCandidates.push(ref)
+      }
+    } else {
+      ctx.observations.push({ title: '跳过追加上下文', detail: `上下文窗口已达 ${MAX_CONTEXT_WINDOWS} 个，未继续追加最近消息。` })
     }
     emitProgress(ctx.options, { id: progressId, stage: 'tool', status: 'completed', title: '读取最近上下文', detail: `读取到 ${latestMessages.length} 条`, toolName: 'read_latest', count: latestMessages.length })
     ctx.observations.push({ title: '读取最近上下文', detail: `读取到 ${latestMessages.length} 条最近消息。\n${latestMessages.slice(0, 10).map(formatMessageLine).join('\n')}` })
@@ -753,6 +843,13 @@ export async function answerSessionQuestionWithAgent(
             shouldGenerateFinalAnswer = true
             break
           }
+
+          const autoFinalizeReason = getAutoFinalizeReason(ctx, action)
+          if (autoFinalizeReason) {
+            ctx.observations.push({ title: '停止继续检索', detail: autoFinalizeReason })
+            shouldGenerateFinalAnswer = true
+            break
+          }
         }
 
         if (shouldGenerateFinalAnswer) {
@@ -779,6 +876,11 @@ export async function answerSessionQuestionWithAgent(
         }
         const fallbackResult = await executeNativeToolAction(ctx, fallbackAction, { ...fallbackAction })
         appendLocalFallbackResultMessage(toolLoopMessages, fallbackAction, fallbackResult)
+        const autoFinalizeReason = getAutoFinalizeReason(ctx, fallbackAction)
+        if (autoFinalizeReason) {
+          ctx.observations.push({ title: '停止继续检索', detail: autoFinalizeReason })
+          break
+        }
         continue
       }
 
@@ -789,6 +891,11 @@ export async function answerSessionQuestionWithAgent(
       }
       const fallbackResult = await executeNativeToolAction(ctx, fallbackAction, { ...fallbackAction })
       appendLocalFallbackResultMessage(toolLoopMessages, fallbackAction, fallbackResult)
+      const autoFinalizeReason = getAutoFinalizeReason(ctx, fallbackAction)
+      if (autoFinalizeReason) {
+        ctx.observations.push({ title: '停止继续检索', detail: autoFinalizeReason })
+        break
+      }
     }
 
     // ── 循环结束后的兜底读取 ──
