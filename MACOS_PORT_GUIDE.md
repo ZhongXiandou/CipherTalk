@@ -251,6 +251,33 @@ Electron 打包时通过 `package.json -> build.extraResources` 带入整个 `re
 - 这只是为后续打包接入准备
 - 当前计划不包含执行 Electron 整包构建
 
+### 10.1 WCDB.framework 自动构造（afterPack）
+
+`libwcdb_api.dylib` 编译时硬链接 `@rpath/WCDB.framework/Versions/<ver>/WCDB`，
+但当前 native 产物把 WCDB 主二进制扁平化为 `libWCDB.dylib` 放在
+`resources/macos/`，`extraResources` 复制后落在 `Contents/Resources/resources/macos/`。
+
+dyld 在运行时按 framework 路径找不到主二进制，会抛出：
+
+```
+Library not loaded: @rpath/WCDB.framework/Versions/<ver>/WCDB
+Reason: tried: '<App>/Contents/Frameworks/WCDB.framework/Versions/<ver>/WCDB' (no such file)
+```
+
+GUI 解密入口随之报 `WCDB 初始化异常: Failed to load shared library`，
+App 实际无法工作。
+
+为了让 mac 装包后开箱即用，`scripts/clean-locales.js` 的 `afterPack`
+钩子会调用 `scripts/setup-macos-wcdb-framework.js`，在打包后自动：
+
+1. 从 `Contents/Resources/resources/macos/libWCDB.dylib` 读取 `install_name`，
+   解析出期望的 framework 版本号（如 `2.1.15`），失败则回退 `A`。
+2. 在 `Contents/Frameworks/WCDB.framework/Versions/<ver>/WCDB` 处放置同一个二进制。
+3. 创建 `Versions/Current` → `<ver>` 与 `WCDB` → `Versions/Current/WCDB` 软链。
+4. 对 framework 内主二进制和 framework 目录做 ad-hoc 重签名。
+
+不删除原 `libWCDB.dylib`，保留作为后向兼容来源。
+
 ## 11. 推荐开发流程
 
 ### 11.1 只开发 native
