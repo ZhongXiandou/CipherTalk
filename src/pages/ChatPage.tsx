@@ -2636,16 +2636,16 @@ function ChatPage(_props: ChatPageProps) {
       {showMessageInfo && createPortal(
         <div className="message-info-overlay" onClick={() => setShowMessageInfo(null)}>
           <div className="message-info-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="header-title">
+            <div className="message-info-header">
+              <div className="message-info-title">
                 <Info size={18} />
                 <h3>消息详细信息</h3>
               </div>
-              <button className="close-btn" onClick={() => setShowMessageInfo(null)}>
+              <button className="message-info-close-btn" onClick={() => setShowMessageInfo(null)} aria-label="关闭消息详情">
                 <X size={18} />
               </button>
             </div>
-            <div className="modal-body">
+            <div className="message-info-body">
               <div className="info-section">
                 <h4>基础字段</h4>
                 <div className="info-grid">

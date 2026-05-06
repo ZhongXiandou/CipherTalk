@@ -23,7 +23,7 @@
   overflow: hidden;
 }
 
-.modal-header {
+.whats-new-header {
   padding: 32px 32px 24px;
   border-bottom: 1px solid var(--border-color);
   display: flex;
@@ -66,7 +66,7 @@
   }
 }
 
-.modal-content {
+.whats-new-content {
   padding: 24px 32px;
   overflow-y: auto;
   flex: 1;
@@ -197,7 +197,7 @@
   font-style: italic;
 }
 
-.modal-footer {
+.whats-new-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -265,13 +265,13 @@
     border-radius: 16px;
   }
 
-  .modal-header,
-  .modal-content {
+  .whats-new-header,
+  .whats-new-content {
     padding-left: 20px;
     padding-right: 20px;
   }
 
-  .modal-footer {
+  .whats-new-footer {
     flex-direction: column;
     align-items: stretch;
     padding: 16px 20px 20px;

@@ -67,7 +67,7 @@ function WhatsNewModal({ onClose, version }: WhatsNewModalProps) {
   return (
     <div className="whats-new-overlay">
       <div className="whats-new-modal">
-        <div className="modal-header">
+        <div className="whats-new-header">
           <span className="version-tag">开发者手记 · v{version}</span>
           <h2>开发者愿景</h2>
           <p className="vision-lead">这不是一个只会读取聊天记录的工具。</p>
@@ -76,7 +76,7 @@ function WhatsNewModal({ onClose, version }: WhatsNewModalProps) {
           </p>
         </div>
 
-        <div className="modal-content">
+        <div className="whats-new-content">
           <div className="vision-opening">
             <div className="opening-mark" aria-hidden="true" />
             <p>
@@ -121,7 +121,7 @@ function WhatsNewModal({ onClose, version }: WhatsNewModalProps) {
           </div>
         </div>
 
-        <div className="modal-footer">
+        <div className="whats-new-footer">
           <div className="footer-copy">
             <span className="footer-label">CipherTalk</span>
             <p>愿每一段被留住的记录，都能在需要的时候成为温度、力量与归属。</p>

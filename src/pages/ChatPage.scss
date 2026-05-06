@@ -4106,14 +4106,15 @@ video::-webkit-media-controls-fullscreen-button {
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
   overflow: hidden;
 
-  .modal-header {
+  .message-info-header {
     padding: 16px 20px;
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex: 0 0 auto;
 
-    .header-title {
+    .message-info-title {
       display: flex;
       align-items: center;
       gap: 10px;
@@ -4127,7 +4128,7 @@ video::-webkit-media-controls-fullscreen-button {
       }
     }
 
-    .close-btn {
+    .message-info-close-btn {
       width: 32px;
       height: 32px;
       border-radius: 50%;
@@ -4148,7 +4149,7 @@ video::-webkit-media-controls-fullscreen-button {
     }
   }
 
-  .modal-body {
+  .message-info-body {
     padding: 20px;
     overflow-y: auto;
     display: flex;
