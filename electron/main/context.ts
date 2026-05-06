@@ -68,6 +68,7 @@ export interface MainProcessContext {
   setStartupDbConnected(connected: boolean): void
   getIsInstallingUpdate(): boolean
   setIsInstallingUpdate(installing: boolean): void
+  broadcastToWindows(channel: string, ...args: any[]): void
   getWindowManager(): WindowManager
   setWindowManager(manager: WindowManager): void
 }

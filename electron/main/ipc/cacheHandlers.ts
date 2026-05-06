@@ -1,0 +1,127 @@
+import { ipcMain } from 'electron'
+import type { MainProcessContext } from '../context'
+
+/**
+ * 缓存清理 IPC。
+ * CacheService 依赖当前 ConfigService，执行时从 context 读取以避免注册阶段空引用。
+ */
+export function registerCacheHandlers(ctx: MainProcessContext): void {
+  ipcMain.handle('cache:clearImages', async () => {
+    ctx.getLogService()?.info('Cache', '开始清除图片缓存')
+    try {
+      const cacheService = new (await import('../../services/cacheService')).CacheService(ctx.getConfigService()!)
+      const result = await cacheService.clearImages()
+      if (result.success) {
+        ctx.getLogService()?.info('Cache', '图片缓存清除成功')
+      } else {
+        ctx.getLogService()?.error('Cache', '图片缓存清除失败', { error: result.error })
+      }
+      return result
+    } catch (e) {
+      ctx.getLogService()?.error('Cache', '图片缓存清除异常', { error: String(e) })
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('cache:clearEmojis', async () => {
+    ctx.getLogService()?.info('Cache', '开始清除表情包缓存')
+    try {
+      const cacheService = new (await import('../../services/cacheService')).CacheService(ctx.getConfigService()!)
+      const result = await cacheService.clearEmojis()
+      if (result.success) {
+        ctx.getLogService()?.info('Cache', '表情包缓存清除成功')
+      } else {
+        ctx.getLogService()?.error('Cache', '表情包缓存清除失败', { error: result.error })
+      }
+      return result
+    } catch (e) {
+      ctx.getLogService()?.error('Cache', '表情包缓存清除异常', { error: String(e) })
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('cache:clearDatabases', async () => {
+    ctx.getLogService()?.info('Cache', '开始清除数据库缓存')
+    try {
+      const cacheService = new (await import('../../services/cacheService')).CacheService(ctx.getConfigService()!)
+      const result = await cacheService.clearDatabases()
+      if (result.success) {
+        ctx.getLogService()?.info('Cache', '数据库缓存清除成功')
+      } else {
+        ctx.getLogService()?.error('Cache', '数据库缓存清除失败', { error: result.error })
+      }
+      return result
+    } catch (e) {
+      ctx.getLogService()?.error('Cache', '数据库缓存清除异常', { error: String(e) })
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('cache:clearAll', async () => {
+    ctx.getLogService()?.info('Cache', '开始清除所有缓存')
+    try {
+      const cacheService = new (await import('../../services/cacheService')).CacheService(ctx.getConfigService()!)
+      const result = await cacheService.clearAll()
+      if (result.success) {
+        ctx.getLogService()?.info('Cache', '所有缓存清除成功')
+      } else {
+        ctx.getLogService()?.error('Cache', '所有缓存清除失败', { error: result.error })
+      }
+      return result
+    } catch (e) {
+      ctx.getLogService()?.error('Cache', '所有缓存清除异常', { error: String(e) })
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('cache:clearConfig', async () => {
+    ctx.getLogService()?.info('Cache', '开始清除配置')
+    try {
+      const cacheService = new (await import('../../services/cacheService')).CacheService(ctx.getConfigService()!)
+      const result = await cacheService.clearConfig()
+      if (result.success) {
+        ctx.getLogService()?.info('Cache', '配置清除成功')
+      } else {
+        ctx.getLogService()?.error('Cache', '配置清除失败', { error: result.error })
+      }
+      return result
+    } catch (e) {
+      ctx.getLogService()?.error('Cache', '配置清除异常', { error: String(e) })
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('cache:clearCurrentAccount', async (_, deleteLocalData = false) => {
+    ctx.getLogService()?.info('Cache', '开始清除当前账号配置', { deleteLocalData })
+    try {
+      const cacheService = new (await import('../../services/cacheService')).CacheService(ctx.getConfigService()!)
+      return await cacheService.clearCurrentAccount(deleteLocalData)
+    } catch (e) {
+      ctx.getLogService()?.error('Cache', '清除当前账号配置异常', { error: String(e) })
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('cache:clearAllAccountConfigs', async () => {
+    ctx.getLogService()?.info('Cache', '开始清空全部账号配置')
+    try {
+      const cacheService = new (await import('../../services/cacheService')).CacheService(ctx.getConfigService()!)
+      return await cacheService.clearAllAccountConfigs()
+    } catch (e) {
+      ctx.getLogService()?.error('Cache', '清空全部账号配置异常', { error: String(e) })
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('cache:getCacheSize', async () => {
+    try {
+      const cacheService = new (await import('../../services/cacheService')).CacheService(ctx.getConfigService()!)
+      return await cacheService.getCacheSize()
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  })
+
+  // 日志管理
+
+}
