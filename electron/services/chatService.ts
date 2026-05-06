@@ -170,6 +170,7 @@ class ChatService extends EventEmitter {
   // 自动同步相关
   private syncTimer: NodeJS.Timeout | null = null
   private lastDbCheckTime: number = 0
+  private isCheckingUpdates: boolean = false
 
   // 增量同步相关
   private currentSessionId: string | null = null
@@ -5544,13 +5545,16 @@ class ChatService extends EventEmitter {
    * @param force 是否强制触发（跳过时间检查）
    */
   async checkUpdates(force: boolean = false) {
-    // 确保已连接
-    if (!this.sessionDb || !this.dbDir) {
-      // 如果数据库已关闭，不要尝试重新连接（可能正在同步）
-      return
-    }
+    if (this.isCheckingUpdates) return
+    this.isCheckingUpdates = true
 
+    // 确保已连接
     try {
+      if (!this.sessionDb || !this.dbDir) {
+        // 如果数据库已关闭，不要尝试重新连接（可能正在同步）
+        return
+      }
+
       const sessionPath = path.join(this.dbDir!, 'session.db')
       const walPath = path.join(this.dbDir!, 'session.db-wal')
 
@@ -5598,6 +5602,8 @@ class ChatService extends EventEmitter {
       }
     } catch (e) {
       console.error('[ChatService] 检查更新出错:', e)
+    } finally {
+      this.isCheckingUpdates = false
     }
   }
 

@@ -155,9 +155,6 @@ app.whenReady().then(async () => {
 
   registerModularIpcHandlers(ctx)
 
-  // 监听增量更新事件
-  startBackgroundSync(ctx)
-
   const shouldShowSplash = await checkAndConnectOnStartup(ctx)
 
   // 启动本地 HTTP API（默认 127.0.0.1:5031）
@@ -170,6 +167,9 @@ app.whenReady().then(async () => {
     // 创建系统托盘
     ctx.getWindowManager().createTray()
   }
+
+  // 启动后台同步放在窗口编排之后，避免启动连接数据库时抢占磁盘 IO。
+  startBackgroundSync(ctx)
 
   // 如果显示了启动屏，主窗口会在启动屏关闭后自动显示（通过 ready-to-show 事件）
   // 如果没有显示启动屏，主窗口会正常显示（通过 ready-to-show 事件）

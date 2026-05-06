@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
-import { existsSync, readFileSync } from 'fs'
+import { existsSync } from 'fs'
+import { readFile } from 'fs/promises'
 import { imageDecryptService } from '../../services/imageDecryptService'
 import { imageKeyService } from '../../services/imageKeyService'
 import { videoService } from '../../services/videoService'
@@ -73,7 +74,8 @@ export function registerMediaHandlers(ctx: MainProcessContext): void {
       if (!existsSync(videoPath)) {
         return { success: false, error: '视频文件不存在' }
       }
-      const buffer = readFileSync(videoPath)
+      // 视频文件可能很大，必须异步读取，避免阻塞主进程事件循环。
+      const buffer = await readFile(videoPath)
       const base64 = buffer.toString('base64')
       return { success: true, data: `data:video/mp4;base64,${base64}` }
     } catch (e) {

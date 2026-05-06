@@ -152,22 +152,25 @@ export function startBackgroundSync(ctx: MainProcessContext): void {
     }
   })
 
-  dataManagementService.checkForUpdates().then(result => {
-    if (result.hasUpdate) {
-      dataManagementService.autoIncrementalUpdate(true).then(res => {
-        if (res.success && res.updated) {
-          chatService.connect().then(connectResult => {
-            if (connectResult.success) {
-              chatService.startAutoSync(5000)
-              chatService.checkUpdates(true)
-            }
-          })
-        }
-      }).catch(console.error)
-    }
-  })
+  // 首次全量扫描可能触发较多同步 IO，延后到窗口启动后再跑，避免抢占首屏。
+  setTimeout(() => {
+    dataManagementService.checkForUpdates().then(result => {
+      if (result.hasUpdate) {
+        dataManagementService.autoIncrementalUpdate(true).then(res => {
+          if (res.success && res.updated) {
+            chatService.connect().then(connectResult => {
+              if (connectResult.success) {
+                chatService.startAutoSync(5000)
+                chatService.checkUpdates(true)
+              }
+            })
+          }
+        }).catch(console.error)
+      }
+    })
 
-  dataManagementService.enableAutoUpdate(60)
+    dataManagementService.enableAutoUpdate(60)
+  }, 3000)
 }
 
 /**

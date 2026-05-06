@@ -4,7 +4,7 @@ import type { MainProcessContext } from '../context'
 
 /**
  * 数据管理 IPC。
- * 保留手动解密、增量更新和 dataManagement:updateAvailable 事件推送。
+ * 保留手动解密和增量更新；自动同步事件由 startup.ts 统一广播，避免重复监听。
  */
 export function registerDataManagementHandlers(ctx: MainProcessContext): void {
   ipcMain.handle('dataManagement:scanDatabases', async () => {
@@ -68,12 +68,4 @@ export function registerDataManagementHandlers(ctx: MainProcessContext): void {
   ipcMain.handle('dataManagement:autoIncrementalUpdate', async (_, silent?: boolean) => {
     return dataManagementService.autoIncrementalUpdate(silent)
   })
-
-  // 监听更新可用事件
-  dataManagementService.onUpdateAvailable((hasUpdate) => {
-    ctx.broadcastToWindows('dataManagement:updateAvailable', hasUpdate)
-  })
-
-  // 图片解密相关
-
 }
