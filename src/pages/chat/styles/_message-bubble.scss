@@ -1,0 +1,141 @@
+// 消息包裹器 - 控制整行对齐
+.message-wrapper {
+  display: flex;
+  flex-direction: column;
+  animation: message-entry 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  will-change: transform, opacity;
+
+  &.sent {
+    align-items: flex-end;
+  }
+
+  &.received {
+    align-items: flex-start;
+  }
+
+  &.system {
+    align-items: center;
+    animation: fadeIn 0.5s ease-out both; // 系统消息使用简单的淡入
+  }
+}
+
+.load-more-trigger {
+  text-align: center;
+  padding: 12px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+
+  &.loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+}
+
+// 消息气泡
+.message-bubble {
+  display: flex;
+  gap: 10px;
+  max-width: 70%;
+  align-items: flex-start;
+
+  // 自己发送的消息 - 右侧绿色
+  &.sent {
+    flex-direction: row-reverse;
+
+    .bubble-content {
+      background: var(--primary);
+      color: white;
+      border-radius: 18px 18px 4px 18px;
+    }
+
+    .bubble-body {
+      align-items: flex-end;
+    }
+  }
+
+  // 对方发送的消息 - 左侧白色
+  &.received {
+    .bubble-content {
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      border-radius: 18px 18px 18px 4px;
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--border-color);
+    }
+
+    .bubble-body {
+      align-items: flex-start;
+    }
+  }
+
+  &.system {
+    max-width: 85%;
+
+    .bubble-avatar {
+      display: none;
+    }
+
+    .bubble-body {
+      width: 100%;
+    }
+
+    .bubble-content {
+      background: rgba(0, 0, 0, 0.04);
+      color: var(--text-tertiary);
+      font-size: 12px;
+      text-align: center;
+      padding: 8px 16px;
+      border-radius: 16px;
+    }
+  }
+}
+
+.bubble-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .avatar-letter {
+    font-size: 14px;
+    font-weight: 600;
+    color: white;
+  }
+
+  .avatar-skeleton-wrapper {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    background: var(--bg-tertiary);
+
+    .avatar-skeleton {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.05) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: inherit;
+    }
+  }
+}
+
+.bubble-content {
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: break-word;
+}
