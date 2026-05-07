@@ -12,6 +12,23 @@ jobs:
   report:
     runs-on: ubuntu-latest
     steps:
+      - name: 关闭旧的 oosmetrics Issue
+        run: |
+          # 查找旧 Issue，按标题关键词匹配
+          OLD_ISSUES=$(gh issue list \
+            --search "OosMetrics" \
+            --state open \
+            --json number \
+            --jq '.[].number' \
+            --limit 20)
+          for NUM in $OLD_ISSUES; do
+            echo "关闭旧 Issue #$NUM"
+            gh issue unpin "$NUM" 2>/dev/null || true
+            gh issue close "$NUM" 2>/dev/null || true
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: oosmetrics/health-check-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
