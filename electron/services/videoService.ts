@@ -3,7 +3,7 @@ import { existsSync, readdirSync, statSync, readFileSync, mkdirSync, createWrite
 import { writeFile } from 'fs/promises'
 import { ConfigService } from './config'
 import { getDefaultCachePath as getPlatformDefaultCachePath } from './platformService'
-import Database from 'better-sqlite3'
+import { dbAdapter } from './dbAdapter'
 import { Isaac64 } from './isaac64'
 import https from 'https'
 import http from 'http'
@@ -334,31 +334,27 @@ class VideoService {
     return hardlinkDbPath
   }
 
-  private queryVideoFileNames(md5Candidates: string[]): {
+  private async queryVideoFileNames(md5Candidates: string[]): Promise<{
     fileKeys: string[]
     hardlinkDbPath?: string
     hardlinkMatchedMd5?: string
-  } {
+  }> {
     const hardlinkDbPath = this.resolveHardlinkDbPath()
     if (!hardlinkDbPath || md5Candidates.length === 0) {
       return { fileKeys: [], hardlinkDbPath }
     }
 
-    let db: Database.Database | null = null
-
     try {
-      db = new Database(hardlinkDbPath, { readonly: true })
-      const stmt = db.prepare(`
-        SELECT file_name, md5 FROM video_hardlink_info_v4
-        WHERE md5 = ?
-        LIMIT 1
-      `)
-
       const fileKeys: string[] = []
       let hardlinkMatchedMd5: string | undefined
 
       for (const md5 of md5Candidates) {
-        const row = stmt.get(md5) as { file_name?: string; md5?: string } | undefined
+        const row = await dbAdapter.get<{ file_name?: string; md5?: string }>(
+          'hardlink',
+          '',
+          'SELECT file_name, md5 FROM video_hardlink_info_v4 WHERE md5 = ? LIMIT 1',
+          [md5]
+        )
         const normalizedFileKey = this.normalizeVideoFileKey(row?.file_name)
         if (!normalizedFileKey) continue
 
@@ -384,8 +380,6 @@ class VideoService {
         error: String(error)
       })
       return { fileKeys: [], hardlinkDbPath }
-    } finally {
-      db?.close()
     }
   }
 
@@ -407,7 +401,7 @@ class VideoService {
    * 视频存放�? {数据库根目录}/{用户wxid}/msg/video/{年月}/
    * 文件命名: {md5}.mp4, {md5}.jpg, {md5}_thumb.jpg
    */
-  getVideoInfo(videoMd5: string, rawContent?: string): VideoInfo {
+  async getVideoInfo(videoMd5: string, rawContent?: string): Promise<VideoInfo> {
     const dbPath = this.getDbPath()
     const wxid = this.getMyWxid()
     const requestedMd5 = this.normalizeMd5(videoMd5)
@@ -460,7 +454,7 @@ class VideoService {
     const videoBaseDir = join(accountDir, 'msg', 'video')
     diagnostics.videoBaseDir = videoBaseDir
 
-    const hardlinkResult = this.queryVideoFileNames(candidateMd5s)
+    const hardlinkResult = await this.queryVideoFileNames(candidateMd5s)
     diagnostics.hardlinkDbPath = hardlinkResult.hardlinkDbPath
     diagnostics.hardlinkMatchedMd5 = hardlinkResult.hardlinkMatchedMd5
 

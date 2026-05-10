@@ -1,13 +1,11 @@
-import { wcdbService } from './wcdbService'
 import { ConfigService } from './config'
 import { existsSync, mkdirSync } from 'fs'
 import { readFile, writeFile } from 'fs/promises'
-import { join, dirname } from 'path'
+import { join } from 'path'
 import crypto from 'crypto'
 import zlib from 'zlib'
 import { chatService } from './chatService'
-import Database from 'better-sqlite3'
-import { app } from 'electron'
+import { dbAdapter } from './dbAdapter'
 import { WasmService } from './wasmService'
 import { Isaac64 } from './isaac64'
 
@@ -290,159 +288,9 @@ const extractShareInfo = (xml: string): SnsShareInfo | undefined => {
 class SnsService {
     private configService: ConfigService
     private imageCache = new Map<string, string>()
-    private snsDb: Database.Database | null = null
 
     constructor() {
         this.configService = new ConfigService()
-    }
-
-    /**
-     * 获取解密后的数据库目录
-     */
-    private getDecryptedDbDir(): string {
-        const cachePath = this.configService.get('cachePath')
-        if (cachePath) return cachePath
-
-        // 开发环境使用文档目录
-        if (process.env.VITE_DEV_SERVER_URL) {
-            const documentsPath = app.getPath('documents')
-            return join(documentsPath, 'CipherTalkData')
-        }
-
-        // 生产环境
-        const exePath = app.getPath('exe')
-        const installDir = dirname(exePath)
-
-        // 检查是否安装在 C 盘
-        const isOnCDrive = /^[cC]:/i.test(installDir) || installDir.startsWith('\\')
-
-        if (isOnCDrive) {
-            const documentsPath = app.getPath('documents')
-            return join(documentsPath, 'CipherTalkData')
-        }
-
-        return join(installDir, 'CipherTalkData')
-    }
-
-    /**
-     * 清理账号目录名
-     */
-    private cleanAccountDirName(dirName: string): string {
-        const trimmed = dirName.trim()
-        if (!trimmed) return trimmed
-
-        // wxid_ 开头的标准格式: wxid_xxx_yyyy -> wxid_xxx
-        if (trimmed.toLowerCase().startsWith('wxid_')) {
-            const match = trimmed.match(/^(wxid_[a-zA-Z0-9]+)/i)
-            if (match) return match[1]
-            return trimmed
-        }
-
-        // 自定义微信号格式: xxx_yyyy (4位后缀) -> xxx
-        const suffixMatch = trimmed.match(/^(.+)_([a-zA-Z0-9]{4})$/)
-        if (suffixMatch) return suffixMatch[1]
-
-        return trimmed
-    }
-
-    /**
-     * 查找账号对应的实际目录名
-     */
-    private findAccountDir(baseDir: string, wxid: string): string | null {
-        if (!existsSync(baseDir)) return null
-
-        const cleanedWxid = this.cleanAccountDirName(wxid)
-
-        // 1. 直接匹配原始 wxid
-        const directPath = join(baseDir, wxid)
-        if (existsSync(directPath)) {
-            return wxid
-        }
-
-        // 2. 直接匹配清理后的 wxid
-        if (cleanedWxid !== wxid) {
-            const cleanedPath = join(baseDir, cleanedWxid)
-            if (existsSync(cleanedPath)) {
-                return cleanedWxid
-            }
-        }
-
-        // 3. 遍历目录查找匹配
-        try {
-            const entries = require('fs').readdirSync(baseDir)
-            for (const entry of entries) {
-                const entryPath = join(baseDir, entry)
-                const stat = require('fs').statSync(entryPath)
-                if (!stat.isDirectory()) continue
-
-                const cleanedEntry = this.cleanAccountDirName(entry)
-                if (cleanedEntry === cleanedWxid || cleanedEntry === wxid) {
-                    return entry
-                }
-            }
-        } catch (e) {
-            console.error('[SnsService] 遍历目录失败:', e)
-        }
-
-        return null
-    }
-
-    /**
-     * 打开 SNS 数据库（解密后的）
-     */
-    private openSnsDatabase(): boolean {
-        if (this.snsDb) return true
-
-        try {
-            const wxid = this.configService.get('myWxid')
-
-            if (!wxid) {
-                console.error('[SnsService] wxid 未配置')
-                return false
-            }
-
-            // 获取解密后的数据库目录
-            const baseDir = this.getDecryptedDbDir()
-            const accountDir = this.findAccountDir(baseDir, wxid)
-
-            if (!accountDir) {
-                console.error('[SnsService] 未找到账号目录:', wxid)
-                return false
-            }
-
-            const snsDbPath = join(baseDir, accountDir, 'sns.db')
-
-            if (!existsSync(snsDbPath)) {
-                console.error('[SnsService] SNS 数据库不存在:', snsDbPath)
-                return false
-            }
-
-            // 打开解密后的数据库（不需要密钥）
-            this.snsDb = new Database(snsDbPath, { readonly: true })
-
-            // 测试连接
-            this.snsDb.prepare('SELECT COUNT(*) as count FROM SnsTimeLine').get()
-
-            return true
-        } catch (error) {
-            console.error('[SnsService] 打开 SNS 数据库失败:', error)
-            this.snsDb = null
-            return false
-        }
-    }
-
-    /**
-     * 关闭 SNS 数据库连接，释放文件锁
-     */
-    closeSnsDb(): void {
-        if (this.snsDb) {
-            try {
-                this.snsDb.close()
-            } catch (e) {
-                // 忽略关闭错误
-            }
-            this.snsDb = null
-        }
     }
 
     /**
@@ -1326,98 +1174,8 @@ class SnsService {
     }
 
     async getTimeline(limit: number = 20, offset: number = 0, usernames?: string[], keyword?: string, startTime?: number, endTime?: number): Promise<{ success: boolean; timeline?: SnsPost[]; error?: string }> {
-        // 优先尝试使用 DLL execQuery 直接查 SnsTimeLine 表（获取完整 XML，包含评论/点赞/表情包）
         try {
-            let sql = 'SELECT tid, user_name, content FROM SnsTimeLine WHERE 1=1'
-
-            if (usernames && usernames.length > 0) {
-                const escaped = usernames.map(u => `'${u.replace(/'/g, "''")}'`).join(',')
-                sql += ` AND user_name IN (${escaped})`
-            }
-            if (keyword) {
-                sql += ` AND content LIKE '%${keyword.replace(/'/g, "''")}%'`
-            }
-
-            // 时间范围过滤
-            if (startTime) {
-                sql += ` AND CAST(SUBSTR(CAST(content AS TEXT), INSTR(CAST(content AS TEXT), '<createTime>') + 12, 10) AS INTEGER) >= ${startTime}`
-            }
-            if (endTime) {
-                sql += ` AND CAST(SUBSTR(CAST(content AS TEXT), INSTR(CAST(content AS TEXT), '<createTime>') + 12, 10) AS INTEGER) <= ${endTime}`
-            }
-
-            sql += ' ORDER BY tid DESC LIMIT ' + limit + ' OFFSET ' + offset
-
-            const queryResult = await wcdbService.execQuery('sns', '', sql)
-
-            if (queryResult.success && queryResult.rows && queryResult.rows.length > 0) {
-                const timeline: SnsPost[] = await Promise.all(queryResult.rows.map(async (row: any) => {
-                    const xmlContent = row.content || ''
-                    const contact = await chatService.getContact(row.user_name)
-                    const avatarInfo = await chatService.getContactAvatar(row.user_name)
-
-                    const { media, videoKey } = this.parseMediaFromXml(xmlContent)
-
-                    // 提取基本信息
-                    const createTimeMatch = xmlContent.match(/<createTime>(\d+)<\/createTime>/i)
-                    const idMatch = xmlContent.match(/<id>(\d+)<\/id>/i)
-                    const contentDescMatch = xmlContent.match(/<contentDesc(?:\s+[^>]*)?>([^<]*)<\/contentDesc>/i)
-                    const typeMatch = xmlContent.match(/<type>(\d+)<\/type>/i)
-
-                    const fixedMedia = media.map((m) => {
-                        const isMediaVideo = isVideoUrl(m.url)
-                        return {
-                            url: fixSnsUrl(m.url, m.token, isMediaVideo),
-                            thumb: fixSnsUrl(m.thumb, m.token, false),
-                            md5: m.md5,
-                            token: m.token,
-                            key: isMediaVideo ? (videoKey || m.key) : m.key,
-                            encIdx: m.encIdx,
-                            width: m.width,
-                            height: m.height,
-                            livePhoto: m.livePhoto ? {
-                                url: fixSnsUrl(m.livePhoto.url, m.livePhoto.token, true),
-                                thumb: fixSnsUrl(m.livePhoto.thumb, m.livePhoto.token, false),
-                                token: m.livePhoto.token,
-                                key: videoKey || m.livePhoto.key || m.key,
-                                md5: m.livePhoto.md5,
-                                encIdx: m.livePhoto.encIdx
-                            } : undefined
-                        }
-                    })
-
-                    const likes = this.parseLikesFromXml(xmlContent)
-                    const comments = this.normalizeComments(this.parseCommentsFromXml(xmlContent))
-
-                    return {
-                        id: idMatch ? idMatch[1] : String(row.tid),
-                        username: row.user_name,
-                        nickname: contact?.remark || contact?.nickName || contact?.alias || row.user_name,
-                        avatarUrl: avatarInfo?.avatarUrl,
-                        createTime: createTimeMatch ? parseInt(createTimeMatch[1]) : 0,
-                        contentDesc: contentDescMatch ? contentDescMatch[1] : '',
-                        type: typeMatch ? parseInt(typeMatch[1]) : 1,
-                        media: fixedMedia,
-                        shareInfo: extractShareInfo(xmlContent),
-                        likes,
-                        comments,
-                        rawXml: xmlContent
-                    }
-                }))
-
-                return { success: true, timeline }
-            }
-        } catch (dllError) {
-            console.warn('[SnsService] execQuery 读取失败，尝试使用解密后的数据库:', dllError)
-        }
-
-        // 回退：使用解密后的数据库（数据可能不是最新的）
-        if (!this.openSnsDatabase()) {
-            return { success: false, error: 'SNS 数据库打开失败，请先在设置中解密数据库' }
-        }
-
-        try {
-            // 构建 SQL 查询
+            // 构建 SQL 查询（参数化）
             let sql = 'SELECT tid, user_name, content FROM SnsTimeLine WHERE 1=1'
             const params: any[] = []
 
@@ -1447,8 +1205,7 @@ class SnsService {
             sql += ' ORDER BY tid DESC LIMIT ? OFFSET ?'
             params.push(limit, offset)
 
-            const stmt = this.snsDb!.prepare(sql)
-            const rows = stmt.all(...params) as any[]
+            const rows = await dbAdapter.all<any>('sns', '', sql, params)
 
             // 解析每条记录
             const timeline: SnsPost[] = await Promise.all(rows.map(async (row) => {
@@ -1489,9 +1246,6 @@ class SnsService {
                     type = parseInt(typeMatch[1])
                 }
 
-                // 判断是否为视频动态
-                const isVideoPost = type === 15
-
                 // 修正媒体 URL
                 const fixedMedia = media.map((m) => {
                     const isMediaVideo = isVideoUrl(m.url)
@@ -1504,6 +1258,8 @@ class SnsService {
                         // 视频用 XML 的 key，图片用 media 的 key
                         key: isMediaVideo ? (videoKey || m.key) : m.key,
                         encIdx: m.encIdx,
+                        width: m.width,
+                        height: m.height,
                         livePhoto: m.livePhoto ? {
                             url: fixSnsUrl(m.livePhoto.url, m.livePhoto.token, true),
                             thumb: fixSnsUrl(m.livePhoto.thumb, m.livePhoto.token, false),
@@ -1539,7 +1295,7 @@ class SnsService {
             return { success: true, timeline }
         } catch (error: any) {
             console.error('[SnsService] 查询 SNS 数据失败:', error)
-            return { success: false, error: error.message }
+            return { success: false, error: error?.message || String(error) }
         }
     }
 

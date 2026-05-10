@@ -160,13 +160,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     close: () => ipcRenderer.invoke('db:close')
   },
 
-  // 解密
-  decrypt: {
-    database: (sourcePath: string, key: string, outputPath: string) =>
-      ipcRenderer.invoke('decrypt:database', sourcePath, key, outputPath),
-    image: (imagePath: string) => ipcRenderer.invoke('decrypt:image', imagePath)
-  },
-
   // 对话框
   dialog: {
     openFile: (options: any) => ipcRenderer.invoke('dialog:openFile', options),
@@ -332,6 +325,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onDecryptProgress: (callback: (data: any) => void) => {
       ipcRenderer.on('wcdb:decryptProgress', (_, data) => callback(data))
       return () => ipcRenderer.removeAllListeners('wcdb:decryptProgress')
+    },
+    onChange: (callback: (payload: { table: string; dbPath: string; walPath: string }) => void) => {
+      const listener = (_: any, payload: any) => callback(payload)
+      ipcRenderer.on('wcdb:change', listener)
+      return () => ipcRenderer.removeListener('wcdb:change', listener)
     }
   },
 

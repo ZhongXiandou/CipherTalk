@@ -1163,11 +1163,11 @@ async function getImageLocalPath(sessionId: string, message: Message): Promise<s
   }
 }
 
-function getVideoLocalPath(message: Message): string | null {
+async function getVideoLocalPath(message: Message): Promise<string | null> {
   if (!message.videoMd5 && !message.rawContent) return null
 
   try {
-    const info = videoService.getVideoInfo(String(message.videoMd5 || ''), String(message.rawContent || ''))
+    const info = await videoService.getVideoInfo(String(message.videoMd5 || ''), String(message.rawContent || ''))
     return info.exists ? info.videoUrl || null : null
   } catch {
     return null
@@ -1390,7 +1390,7 @@ async function normalizeMessage(
         isLivePhoto: Boolean(message.isLivePhoto)
       }
       if (options.includeMediaPaths) {
-        normalized.media.localPath = getVideoLocalPath(message)
+        normalized.media.localPath = await getVideoLocalPath(message)
       }
       break
     case 'voice':

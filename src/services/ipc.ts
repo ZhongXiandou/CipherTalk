@@ -18,16 +18,9 @@ export const accounts = {
 // 数据库
 export const db = {
   open: (dbPath: string, key?: string) => window.electronAPI.db.open(dbPath, key),
-  query: <T = unknown>(sql: string, params?: unknown[]): Promise<T[]> => 
+  query: <T = unknown>(sql: string, params?: unknown[]): Promise<T[]> =>
     window.electronAPI.db.query(sql, params),
   close: () => window.electronAPI.db.close()
-}
-
-// 解密
-export const decrypt = {
-  database: (sourcePath: string, key: string, outputPath: string) =>
-    window.electronAPI.decrypt.database(sourcePath, key, outputPath),
-  image: (imagePath: string) => window.electronAPI.decrypt.image(imagePath)
 }
 
 // 对话框

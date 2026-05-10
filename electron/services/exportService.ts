@@ -2,14 +2,14 @@
 import * as path from 'path'
 import * as https from 'https'
 import * as http from 'http'
-import Database from 'better-sqlite3'
-import { app } from 'electron'
 import { ConfigService } from './config'
 import { voiceTranscribeService } from './voiceTranscribeService'
 import * as XLSX from 'xlsx'
 import { HtmlExportGenerator } from './htmlExportGenerator'
 import { imageDecryptService } from './imageDecryptService'
 import { videoService } from './videoService'
+import { dbAdapter } from './dbAdapter'
+import { findMessageDbPaths, findDbByName, getDbStoragePath } from './dbStoragePaths'
 
 // ChatLab 0.0.2 格式类型定义
 export interface ChatLabHeader {
@@ -117,10 +117,9 @@ export interface ExportProgress {
 class ExportService {
   private configService: ConfigService
   private dbDir: string | null = null
-  private contactDb: Database.Database | null = null
-  private headImageDb: Database.Database | null = null
-  private messageDbCache: Map<string, Database.Database> = new Map()
   private contactColumnsCache: { hasBigHeadUrl: boolean; hasSmallHeadUrl: boolean; selectCols: string[] } | null = null
+  private contactDbAvailable: boolean = false
+  private headImageDbAvailable: boolean = false
 
   constructor() {
     this.configService = new ConfigService()
@@ -148,74 +147,9 @@ class ExportService {
    * 查找账号对应的实际目录名
    * 支持多种匹配方式以兼容不同版本的目录命名
    */
-  private findAccountDir(baseDir: string, wxid: string): string | null {
-    if (!fs.existsSync(baseDir)) return null
+  // findAccountDir 已被 dbStoragePaths.getDbStoragePath() 取代，不再需要本地实现
 
-    const cleanedWxid = this.cleanAccountDirName(wxid)
-
-    // 1. 直接匹配原始 wxid
-    const directPath = path.join(baseDir, wxid)
-    if (fs.existsSync(directPath)) {
-      return wxid
-    }
-
-    // 2. 直接匹配清理后的 wxid
-    if (cleanedWxid !== wxid) {
-      const cleanedPath = path.join(baseDir, cleanedWxid)
-      if (fs.existsSync(cleanedPath)) {
-        return cleanedWxid
-      }
-    }
-
-    // 3. 扫描目录查找匹配
-    try {
-      const entries = fs.readdirSync(baseDir, { withFileTypes: true })
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue
-
-        const dirName = entry.name
-        const dirNameLower = dirName.toLowerCase()
-        const wxidLower = wxid.toLowerCase()
-        const cleanedWxidLower = cleanedWxid.toLowerCase()
-
-        if (dirNameLower === wxidLower || dirNameLower === cleanedWxidLower) return dirName
-        if (dirNameLower.startsWith(wxidLower + '_') || dirNameLower.startsWith(cleanedWxidLower + '_')) return dirName
-        if (wxidLower.startsWith(dirNameLower + '_') || cleanedWxidLower.startsWith(dirNameLower + '_')) return dirName
-
-        const cleanedDirName = this.cleanAccountDirName(dirName)
-        if (cleanedDirName.toLowerCase() === wxidLower || cleanedDirName.toLowerCase() === cleanedWxidLower) return dirName
-      }
-    } catch (e) {
-      console.error('查找账号目录失败:', e)
-    }
-
-    return null
-  }
-
-  private getDecryptedDbDir(): string {
-    const cachePath = this.configService.get('cachePath')
-    if (cachePath) return cachePath
-
-    // 开发环境使用文档目录
-    if (process.env.VITE_DEV_SERVER_URL) {
-      const documentsPath = app.getPath('documents')
-      return path.join(documentsPath, 'CipherTalkData')
-    }
-
-    // 生产环境
-    const exePath = app.getPath('exe')
-    const installDir = path.dirname(exePath)
-
-    // 检查是否安装在 C 盘
-    const isOnCDrive = /^[cC]:/i.test(installDir) || installDir.startsWith('\\')
-
-    if (isOnCDrive) {
-      const documentsPath = app.getPath('documents')
-      return path.join(documentsPath, 'CipherTalkData')
-    }
-
-    return path.join(installDir, 'CipherTalkData')
-  }
+  // getDecryptedDbDir 已被 dbStoragePaths.getDbStoragePath() 取代，不再需要本地实现
 
   async connect(): Promise<{ success: boolean; error?: string }> {
     try {
@@ -224,25 +158,14 @@ class ExportService {
         return { success: false, error: '请先在设置页面配置微信ID' }
       }
 
-      const baseDir = this.getDecryptedDbDir()
-      const accountDir = this.findAccountDir(baseDir, wxid)
-
-      if (!accountDir) {
-        return { success: false, error: `未找到账号 ${wxid} 的数据库目录，请先解密数据库` }
+      const dbStorage = getDbStoragePath()
+      if (!dbStorage) {
+        return { success: false, error: '未找到 db_storage 目录，请先配置数据库路径' }
       }
+      this.dbDir = dbStorage
 
-      const dbDir = path.join(baseDir, accountDir)
-      this.dbDir = dbDir
-
-      const contactDbPath = path.join(dbDir, 'contact.db')
-      if (fs.existsSync(contactDbPath)) {
-        this.contactDb = new Database(contactDbPath, { readonly: true })
-      }
-
-      const headImageDbPath = path.join(dbDir, 'head_image.db')
-      if (fs.existsSync(headImageDbPath)) {
-        this.headImageDb = new Database(headImageDbPath, { readonly: true })
-      }
+      this.contactDbAvailable = !!findDbByName('contact.db')
+      this.headImageDbAvailable = !!findDbByName('head_image.db')
 
       return { success: true }
     } catch (e) {
@@ -251,44 +174,14 @@ class ExportService {
   }
 
   close(): void {
-    try {
-      this.contactDb?.close()
-      this.messageDbCache.forEach(db => {
-        try { db.close() } catch { }
-      })
-    } catch { }
-    this.contactDb = null
-    this.messageDbCache.clear()
-    this.contactColumnsCache = null
     this.dbDir = null
-  }
-
-  private getMessageDb(dbPath: string): Database.Database | null {
-    if (this.messageDbCache.has(dbPath)) {
-      return this.messageDbCache.get(dbPath)!
-    }
-    try {
-      const db = new Database(dbPath, { readonly: true })
-      this.messageDbCache.set(dbPath, db)
-      return db
-    } catch {
-      return null
-    }
+    this.contactColumnsCache = null
+    this.contactDbAvailable = false
+    this.headImageDbAvailable = false
   }
 
   private findMessageDbs(): string[] {
-    if (!this.dbDir) return []
-    const dbs: string[] = []
-    try {
-      const files = fs.readdirSync(this.dbDir)
-      for (const file of files) {
-        const lower = file.toLowerCase()
-        if ((lower.startsWith('message') || lower.startsWith('msg')) && lower.endsWith('.db')) {
-          dbs.push(path.join(this.dbDir, file))
-        }
-      }
-    } catch { }
-    return dbs
+    return findMessageDbPaths()
   }
 
   private getTableNameHash(sessionId: string): string {
@@ -296,11 +189,13 @@ class ExportService {
     return crypto.createHash('md5').update(sessionId).digest('hex')
   }
 
-  private findMessageTable(db: Database.Database, sessionId: string): string | null {
+  private async findMessageTable(dbPath: string, sessionId: string): Promise<string | null> {
     try {
-      const tables = db.prepare(
+      const tables = await dbAdapter.all<any>(
+        'message',
+        dbPath,
         "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'Msg_%'"
-      ).all() as any[]
+      )
       const hash = this.getTableNameHash(sessionId).toLowerCase()
       // 1. 精确哈希提取匹配（大小写无关）：从表名中提取 32 位 hex 片段后比对
       for (const table of tables) {
@@ -322,16 +217,14 @@ class ExportService {
     return null
   }
 
-  private findSessionTables(sessionId: string): { db: Database.Database; tableName: string; dbPath: string }[] {
+  private async findSessionTables(sessionId: string): Promise<{ tableName: string; dbPath: string }[]> {
     const dbs = this.findMessageDbs()
-    const result: { db: Database.Database; tableName: string; dbPath: string }[] = []
+    const result: { tableName: string; dbPath: string }[] = []
 
     for (const dbPath of dbs) {
-      const db = this.getMessageDb(dbPath)
-      if (!db) continue
-      const tableName = this.findMessageTable(db, sessionId)
+      const tableName = await this.findMessageTable(dbPath, sessionId)
       if (tableName) {
-        result.push({ db, tableName, dbPath })
+        result.push({ tableName, dbPath })
       }
     }
     return result
@@ -341,11 +234,11 @@ class ExportService {
    * 获取联系人信息
    */
   private async getContactInfo(username: string): Promise<{ displayName: string; avatarUrl?: string }> {
-    if (!this.contactDb) return { displayName: username }
+    if (!this.contactDbAvailable) return { displayName: username }
 
     try {
       if (!this.contactColumnsCache) {
-        const columns = this.contactDb.prepare("PRAGMA table_info(contact)").all() as any[]
+        const columns = await dbAdapter.all<any>('contact', '', "PRAGMA table_info(contact)")
         const columnNames = columns.map((c: any) => c.name)
         const hasBigHeadUrl = columnNames.includes('big_head_url')
         const hasSmallHeadUrl = columnNames.includes('small_head_url')
@@ -356,9 +249,12 @@ class ExportService {
       }
 
       const { hasBigHeadUrl, hasSmallHeadUrl, selectCols } = this.contactColumnsCache
-      const contact = this.contactDb.prepare(`
-        SELECT ${selectCols.join(', ')} FROM contact WHERE username = ?
-      `).get(username) as any
+      const contact = await dbAdapter.get<any>(
+        'contact',
+        '',
+        `SELECT ${selectCols.join(', ')} FROM contact WHERE username = ?`,
+        [username]
+      )
 
       if (contact) {
         const displayName = contact.remark || contact.nick_name || contact.alias || username
@@ -386,12 +282,15 @@ class ExportService {
    * 从 head_image.db 获取头像（转换为 base64 data URL）
    */
   private async getAvatarFromHeadImageDb(username: string): Promise<string | undefined> {
-    if (!this.headImageDb || !username) return undefined
+    if (!this.headImageDbAvailable || !username) return undefined
 
     try {
-      const row = this.headImageDb.prepare(`
-        SELECT image_buffer FROM head_image WHERE username = ?
-      `).get(username) as any
+      const row = await dbAdapter.get<any>(
+        'head_image',
+        '',
+        'SELECT image_buffer FROM head_image WHERE username = ?',
+        [username]
+      )
 
       if (!row || !row.image_buffer) return undefined
 
@@ -753,7 +652,7 @@ class ExportService {
       })
 
       // 查找消息表
-      const dbTablePairs = this.findSessionTables(sessionId)
+      const dbTablePairs = await this.findSessionTables(sessionId)
       if (dbTablePairs.length === 0) {
         return { success: false, error: '未找到该会话的消息' }
       }
@@ -764,12 +663,14 @@ class ExportService {
       // 群昵称缓存 (platformId -> groupNickname)
       const groupNicknameCache = new Map<string, string>()
 
-      for (const { db, tableName, dbPath } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
           // 检查是否有 Name2Id 表
-          const hasName2Id = db.prepare(
+          const hasName2Id = await dbAdapter.get<any>(
+            'message',
+            dbPath,
             "SELECT name FROM sqlite_master WHERE type='table' AND name='Name2Id'"
-          ).get()
+          )
 
           let sql: string
           if (hasName2Id) {
@@ -781,7 +682,7 @@ class ExportService {
             sql = `SELECT * FROM ${tableName} ORDER BY create_time ASC`
           }
 
-          const rows = db.prepare(sql).all() as any[]
+          const rows = await dbAdapter.all<any>('message', dbPath, sql)
 
           for (const row of rows) {
             const createTime = row.create_time || 0
@@ -1508,7 +1409,7 @@ class ExportService {
       })
 
       // 查找消息表
-      const dbTablePairs = this.findSessionTables(sessionId)
+      const dbTablePairs = await this.findSessionTables(sessionId)
       if (dbTablePairs.length === 0) {
         return { success: false, error: '未找到该会话的消息' }
       }
@@ -1518,11 +1419,13 @@ class ExportService {
       let firstMessageTime: number | null = null
       let lastMessageTime: number | null = null
 
-      for (const { db, tableName } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
-          const hasName2Id = db.prepare(
+          const hasName2Id = await dbAdapter.get<any>(
+            'message',
+            dbPath,
             "SELECT name FROM sqlite_master WHERE type='table' AND name='Name2Id'"
-          ).get()
+          )
 
           let sql: string
           if (hasName2Id) {
@@ -1534,7 +1437,7 @@ class ExportService {
             sql = `SELECT * FROM ${tableName} ORDER BY create_time ASC`
           }
 
-          const rows = db.prepare(sql).all() as any[]
+          const rows = await dbAdapter.all<any>('message', dbPath, sql)
 
           for (const row of rows) {
             const createTime = row.create_time || 0
@@ -1724,7 +1627,7 @@ class ExportService {
       const fullMyWxid = `wxid_${cleanedMyWxid}`
 
       // 查找消息数据库和表
-      const dbTablePairs = this.findSessionTables(sessionId)
+      const dbTablePairs = await this.findSessionTables(sessionId)
       if (dbTablePairs.length === 0) {
         return { success: false, error: '未找到该会话的消息' }
       }
@@ -1732,11 +1635,13 @@ class ExportService {
       // 收集所有消息
       const allMessages: any[] = []
 
-      for (const { db, tableName } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
-          const hasName2Id = db.prepare(
+          const hasName2Id = await dbAdapter.get<any>(
+            'message',
+            dbPath,
             "SELECT name FROM sqlite_master WHERE type='table' AND name='Name2Id'"
-          ).get()
+          )
 
           let sql: string
           if (hasName2Id) {
@@ -1748,7 +1653,7 @@ class ExportService {
             sql = `SELECT * FROM ${tableName} ORDER BY create_time ASC`
           }
 
-          const rows = db.prepare(sql).all() as any[]
+          const rows = await dbAdapter.all<any>('message', dbPath, sql)
 
           for (const row of rows) {
             const createTime = row.create_time || 0
@@ -1957,7 +1862,7 @@ class ExportService {
       const isGroup = sessionId.includes('@chatroom')
 
       // 查找消息数据库和表
-      const dbTablePairs = this.findSessionTables(sessionId)
+      const dbTablePairs = await this.findSessionTables(sessionId)
       if (dbTablePairs.length === 0) {
         return { success: false, error: '未找到该会话的消息' }
       }
@@ -1966,11 +1871,13 @@ class ExportService {
       const allMessages: any[] = []
       const memberSet = new Map<string, any>()
 
-      for (const { db, tableName } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
-          const hasName2Id = db.prepare(
+          const hasName2Id = await dbAdapter.get<any>(
+            'message',
+            dbPath,
             "SELECT name FROM sqlite_master WHERE type='table' AND name='Name2Id'"
-          ).get()
+          )
 
           let sql: string
           if (hasName2Id) {
@@ -1982,7 +1889,7 @@ class ExportService {
             sql = `SELECT * FROM ${tableName} ORDER BY create_time ASC`
           }
 
-          const rows = db.prepare(sql).all() as any[]
+          const rows = await dbAdapter.all<any>('message', dbPath, sql)
 
           for (const row of rows) {
             const createTime = row.create_time || 0
@@ -2270,7 +2177,7 @@ class ExportService {
     // 返回 createTime → 相对路径 的映射表
     const mediaPathMap = new Map<number, string>()
 
-    const dbTablePairs = this.findSessionTables(sessionId)
+    const dbTablePairs = await this.findSessionTables(sessionId)
     if (dbTablePairs.length === 0) return mediaPathMap
 
     // 创建媒体输出目录（直接在会话文件夹下创建子目录）
@@ -2304,20 +2211,26 @@ class ExportService {
     if (typeConditions.length > 0) {
       // 预先统计表情总数
       if (options.exportEmojis) {
-        for (const { db, tableName } of dbTablePairs) {
+        for (const { tableName, dbPath } of dbTablePairs) {
           try {
-            const cnt = db.prepare(`SELECT COUNT(*) as c FROM ${tableName} WHERE local_type = 47`).get() as any
+            const cnt = await dbAdapter.get<any>(
+              'message',
+              dbPath,
+              `SELECT COUNT(*) as c FROM ${tableName} WHERE local_type = 47`
+            )
             emojiTotal += cnt?.c || 0
           } catch { }
         }
         if (emojiTotal > 0) onDetail?.(`正在导出表情包 (共 ${emojiTotal} 个)...`)
       }
 
-      for (const { db, tableName } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
-          const hasName2Id = db.prepare(
+          const hasName2Id = await dbAdapter.get<any>(
+            'message',
+            dbPath,
             "SELECT name FROM sqlite_master WHERE type='table' AND name='Name2Id'"
-          ).get()
+          )
 
           const typeFilter = typeConditions.map(t => `local_type = ${t}`).join(' OR ')
 
@@ -2329,7 +2242,7 @@ class ExportService {
             sql = `SELECT * FROM ${tableName} WHERE (${typeFilter}) ORDER BY create_time ASC`
           }
 
-          const rows = db.prepare(sql).all() as any[]
+          const rows = await dbAdapter.all<any>('message', dbPath, sql)
 
           for (const row of rows) {
             const createTime = row.create_time || 0
@@ -2394,7 +2307,7 @@ class ExportService {
               try {
                 const videoMd5 = videoService.parseVideoMd5(content)
                 if (videoMd5) {
-                  const videoInfo = videoService.getVideoInfo(videoMd5, content)
+                  const videoInfo = await videoService.getVideoInfo(videoMd5, content)
                   if (videoInfo.exists && videoInfo.videoUrl) {
                     const videoPath = videoInfo.videoUrl.replace(/^file:\/\/\//i, '').replace(/\//g, path.sep)
                     if (fs.existsSync(videoPath)) {
@@ -2493,14 +2406,14 @@ class ExportService {
 
       // 1. 收集所有语音消息的 createTime
       const voiceCreateTimes: number[] = []
-      for (const { db, tableName } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
           let sql = `SELECT create_time FROM ${tableName} WHERE local_type = 34`
           if (options.dateRange) {
             sql += ` AND create_time >= ${options.dateRange.start} AND create_time <= ${options.dateRange.end}`
           }
           sql += ` ORDER BY create_time`
-          const rows = db.prepare(sql).all() as any[]
+          const rows = await dbAdapter.all<any>('message', dbPath, sql)
           for (const row of rows) {
             if (row.create_time) voiceCreateTimes.push(row.create_time)
           }
@@ -2521,9 +2434,9 @@ class ExportService {
           }
 
           if (silkWasm) {
-            // 4. 打开所有 MediaDb，预先建立 VoiceInfo 查询
+            // 4. 枚举所有 MediaDb，预先记录 VoiceInfo 表结构（通过 dbAdapter 查询）
             interface VoiceDbInfo {
-              db: InstanceType<typeof Database>
+              dbPath: string
               voiceTable: string
               dataColumn: string
               timeColumn: string
@@ -2534,25 +2447,34 @@ class ExportService {
 
             for (const dbPath of mediaDbs) {
               try {
-                const mediaDb = new Database(dbPath, { readonly: true })
-                const tables = mediaDb.prepare(
+                const tables = await dbAdapter.all<any>(
+                  'message',
+                  dbPath,
                   "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'VoiceInfo%'"
-                ).all() as any[]
-                if (tables.length === 0) { mediaDb.close(); continue }
+                )
+                if (tables.length === 0) continue
 
                 const voiceTable = tables[0].name
-                const columns = mediaDb.prepare(`PRAGMA table_info('${voiceTable}')`).all() as any[]
-                const colNames = columns.map((c: any) => c.name.toLowerCase())
+                const columns = await dbAdapter.all<any>(
+                  'message',
+                  dbPath,
+                  `PRAGMA table_info('${voiceTable}')`
+                )
+                const colNames = columns.map((c: any) => String(c.name).toLowerCase())
 
                 const dataColumn = colNames.find((c: string) => ['voice_data', 'buf', 'voicebuf', 'data'].includes(c))
                 const timeColumn = colNames.find((c: string) => ['create_time', 'createtime', 'time'].includes(c))
-                if (!dataColumn || !timeColumn) { mediaDb.close(); continue }
+                if (!dataColumn || !timeColumn) continue
 
                 const chatNameIdColumn = colNames.find((c: string) => ['chat_name_id', 'chatnameid', 'chat_nameid'].includes(c)) || null
-                const n2iTables = mediaDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'Name2Id%'").all() as any[]
+                const n2iTables = await dbAdapter.all<any>(
+                  'message',
+                  dbPath,
+                  "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'Name2Id%'"
+                )
                 const name2IdTable = n2iTables.length > 0 ? n2iTables[0].name : null
 
-                voiceDbs.push({ db: mediaDb, voiceTable, dataColumn, timeColumn, chatNameIdColumn, name2IdTable })
+                voiceDbs.push({ dbPath, voiceTable, dataColumn, timeColumn, chatNameIdColumn, name2IdTable })
               } catch { }
             }
 
@@ -2583,9 +2505,19 @@ class ExportService {
                   // 策略1: chatNameId + createTime
                   if (vdb.chatNameIdColumn && vdb.name2IdTable) {
                     for (const cand of candidates) {
-                      const n2i = vdb.db.prepare(`SELECT rowid FROM ${vdb.name2IdTable} WHERE user_name = ?`).get(cand) as any
+                      const n2i = await dbAdapter.get<any>(
+                        'message',
+                        vdb.dbPath,
+                        `SELECT rowid FROM ${vdb.name2IdTable} WHERE user_name = ?`,
+                        [cand]
+                      )
                       if (n2i?.rowid) {
-                        const row = vdb.db.prepare(`SELECT ${vdb.dataColumn} AS data FROM ${vdb.voiceTable} WHERE ${vdb.chatNameIdColumn} = ? AND ${vdb.timeColumn} = ? LIMIT 1`).get(n2i.rowid, createTime) as any
+                        const row = await dbAdapter.get<any>(
+                          'message',
+                          vdb.dbPath,
+                          `SELECT ${vdb.dataColumn} AS data FROM ${vdb.voiceTable} WHERE ${vdb.chatNameIdColumn} = ? AND ${vdb.timeColumn} = ? LIMIT 1`,
+                          [n2i.rowid, createTime]
+                        )
                         if (row?.data) {
                           silkData = this.decodeVoiceBlob(row.data)
                           if (silkData) break
@@ -2595,7 +2527,12 @@ class ExportService {
                   }
                   // 策略2: 仅 createTime
                   if (!silkData) {
-                    const row = vdb.db.prepare(`SELECT ${vdb.dataColumn} AS data FROM ${vdb.voiceTable} WHERE ${vdb.timeColumn} = ? LIMIT 1`).get(createTime) as any
+                    const row = await dbAdapter.get<any>(
+                      'message',
+                      vdb.dbPath,
+                      `SELECT ${vdb.dataColumn} AS data FROM ${vdb.voiceTable} WHERE ${vdb.timeColumn} = ? LIMIT 1`,
+                      [createTime]
+                    )
                     if (row?.data) {
                       silkData = this.decodeVoiceBlob(row.data)
                     }
@@ -2624,10 +2561,7 @@ class ExportService {
               }
             }
 
-            // 6. 关闭所有 MediaDb
-            for (const vdb of voiceDbs) {
-              try { vdb.db.close() } catch { }
-            }
+            // 6. dbAdapter 无持久 handle，无需关闭
           }
         }
       }
@@ -2853,17 +2787,30 @@ class ExportService {
   }
 
   /**
-   * 查找 media 数据库文件
+   * 查找 media 数据库文件（从 db_storage 根目录递归枚举）
    */
   private findMediaDbs(): string[] {
-    if (!this.dbDir) return []
+    const root = getDbStoragePath()
+    if (!root) return []
     const result: string[] = []
+    const stack: string[] = [root]
     try {
-      const files = fs.readdirSync(this.dbDir)
-      for (const file of files) {
-        const lower = file.toLowerCase()
-        if (lower.startsWith('media') && lower.endsWith('.db')) {
-          result.push(path.join(this.dbDir, file))
+      while (stack.length > 0) {
+        const dir = stack.pop()!
+        let entries: string[] = []
+        try { entries = fs.readdirSync(dir) } catch { continue }
+        for (const entry of entries) {
+          const full = path.join(dir, entry)
+          let st
+          try { st = fs.statSync(full) } catch { continue }
+          if (st.isDirectory()) {
+            stack.push(full)
+          } else if (st.isFile()) {
+            const lower = entry.toLowerCase()
+            if (lower.startsWith('media') && lower.endsWith('.db')) {
+              result.push(full)
+            }
+          }
         }
       }
     } catch { }
@@ -2937,7 +2884,7 @@ class ExportService {
         detail: '正在连接数据库...'
       })
 
-      if (!this.contactDb) {
+      if (!this.contactDbAvailable) {
         return { success: false, error: '联系人数据库未连接' }
       }
 
@@ -2947,7 +2894,7 @@ class ExportService {
       }
 
       // 获取表结构
-      const columns = this.contactDb.prepare("PRAGMA table_info(contact)").all() as any[]
+      const columns = await dbAdapter.all<any>('contact', '', "PRAGMA table_info(contact)")
       const columnNames = columns.map((c: any) => c.name)
 
       // 打印所有列名用于调试
@@ -2983,9 +2930,11 @@ class ExportService {
         detail: '正在读取联系人数据...'
       })
 
-      const rows = this.contactDb.prepare(`
-        SELECT ${selectCols.join(', ')} FROM contact
-      `).all() as any[]
+      const rows = await dbAdapter.all<any>(
+        'contact',
+        '',
+        `SELECT ${selectCols.join(', ')} FROM contact`
+      )
 
       // 过滤和转换联系人
       const contacts: any[] = []

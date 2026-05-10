@@ -18,7 +18,7 @@ const steps = [
   { id: 'key', title: '解密密钥', desc: '获取密钥与自动识别账号' },
   { id: 'image', title: '图片密钥', desc: '获取 XOR 与 AES 密钥' },
   { id: 'security', title: '安全防护', desc: '配置应用锁保护隐私' },
-  { id: 'decrypt', title: '解密数据库', desc: '测试连接并完成配置' }
+  { id: 'decrypt', title: '连接数据库', desc: '直连 WCDB 并完成配置' }
 ]
 
 interface WelcomePageProps {
@@ -568,7 +568,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
     setStepIndex((prev) => Math.max(prev - 1, 0))
   }
 
-  const handleStartDecrypt = async () => {
+  const handleConfirm = async () => {
     if (!dbPath) { setError('请先选择数据库目录'); return }
     if (!wxid) { setError('请先选择账号目录'); return }
     if (!isAccountVerified) { setError('账号目录尚未验证，请先验证'); return }
@@ -579,7 +579,6 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
     setDecryptStatus('正在保存配置...')
 
     try {
-      // 先保存配置，因为 dataManagementService 需要从配置中读取这些信息
       const savedAccount = await configService.saveAccount({
         dbPath,
         decryptKey,
@@ -607,49 +606,13 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         return
       }
 
-      setDecryptStatus('连接成功，开始解密数据库...')
+      setDecryptStatus('连接成功，配置保存完成...')
 
-      // 监听解密进度
-      const removeProgressListener = window.electronAPI.dataManagement.onProgress((data) => {
-        if (data.type === 'decrypt') {
-          if (data.fileProgress !== undefined) {
-            setDecryptStatus(`正在解密 ${data.fileName} (${data.fileProgress}%)`)
-          } else {
-            setDecryptStatus(`正在解密数据库 (${data.current + 1}/${data.total})`)
-          }
-        } else if (data.type === 'complete') {
-          setDecryptStatus('解密完成')
-        } else if (data.type === 'error') {
-          setError(data.error || '解密过程出错')
-        }
-      })
-
-      // 执行解密
-      const decryptResult = await window.electronAPI.wcdb.decryptDatabase(dbPath, decryptKey, wxid)
-
-      // 移除进度监听
-      removeProgressListener()
-
-      if (!decryptResult.success) {
-        setError(decryptResult.error || '数据库解密失败')
-        setDecryptStatus('')
-        setIsDecrypting(false)
-        return
-      }
-
-      const totalFiles = (decryptResult.successCount || 0) + (decryptResult.failCount || 0)
-      setDecryptStatus(`解密完成，共解密 ${decryptResult.successCount} 个数据库文件${decryptResult.failCount ? `，失败 ${decryptResult.failCount} 个` : ''}`)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-
-      setDecryptStatus('配置保存成功，准备进入应用...')
-
-      // 3秒倒计时，在倒计时期间清除缓存
       setCountdown(3)
       for (let i = 3; i > 0; i--) {
         setCountdown(i)
         setDecryptStatus(`配置保存成功，${i} 秒后进入应用...`)
 
-        // 在倒计时第一秒时清除缓存
         if (i === 3) {
           try {
             localStorage.removeItem('welcomeConfig')
@@ -661,7 +624,6 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         await new Promise(resolve => setTimeout(resolve, 1000))
       }
 
-      // 在跳转前设置连接状态
       setDbConnected(true, dbPath)
       setCurrentWxid(wxid)
 
@@ -888,12 +850,12 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
 
             {currentStep.id === 'decrypt' && (
               <div className="info-content">
-                <h3>解密数据库说明</h3>
-                <p>测试数据库连接并完成配置。</p>
+                <h3>连接数据库说明</h3>
+                <p>直连本地 WCDB，无需落地解密缓存。</p>
                 <ul className="info-list">
-                  <li>点击"开始解密"验证配置</li>
-                  <li>系统会尝试连接数据库</li>
-                  <li>连接成功后保存配置</li>
+                  <li>点击"连接数据库"验证配置</li>
+                  <li>系统会测试 WCDB 直连</li>
+                  <li>连接成功后保存账号配置</li>
                   <li>完成后即可开始使用</li>
                 </ul>
                 <div className="info-warning">
@@ -1196,11 +1158,11 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
 
                   <button
                     className="btn btn-primary btn-full"
-                    onClick={handleStartDecrypt}
+                    onClick={handleConfirm}
                     disabled={isDecrypting}
                     style={{ marginTop: '16px' }}
                   >
-                    {isDecrypting ? '解密中...' : '开始解密'}
+                    {isDecrypting ? '连接中...' : '连接数据库'}
                   </button>
 
                   {decryptStatus && countdown === 0 && (
@@ -1213,7 +1175,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
 
                   {!isDecrypting && !decryptStatus && (
                     <div className="field-hint" style={{ marginTop: '12px', textAlign: 'center' }}>
-                      点击"开始解密"按钮，系统将验证配置并连接数据库
+                      点击"连接数据库"按钮，系统将验证配置并直连 WCDB
                     </div>
                   )}
                 </div>

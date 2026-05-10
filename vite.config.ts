@@ -18,8 +18,8 @@ export default defineConfig({
     entries: ['index.html']
   },
   server: {
-    port: 3000,
-    strictPort: false  // 如果3000被占用，自动尝试下一个
+    port: 5173,
+    strictPort: false  // 如果5173被占用，自动尝试下一个
   },
   plugins: [
     react(),
@@ -47,16 +47,16 @@ export default defineConfig({
         }
       },
       {
-        entry: 'electron/workers/decryptWorker.js',
+        entry: 'electron/transcribeWorker.ts',
         vite: {
           build: {
-            outDir: 'dist-electron/workers',
+            outDir: 'dist-electron',
             rollupOptions: { external }
           }
         }
       },
       {
-        entry: 'electron/transcribeWorker.ts',
+        entry: 'electron/wcdbWorker.ts',
         vite: {
           build: {
             outDir: 'dist-electron',

@@ -34,11 +34,9 @@ export function registerAccountHandlers(ctx: MainProcessContext): void {
     }
 
     if (deleteLocalData) {
-      const cacheService = new (await import('../../services/cacheService')).CacheService(configService)
-      const clearResult = await cacheService.clearAccountDatabases(deleted)
-      if (!clearResult.success) {
-        return { success: false, error: clearResult.error || '删除账号本地数据失败' }
-      }
+      // Direct DB 迁移后，账号已不再拥有独立的本地解密库目录。
+      // 这里不再尝试删库，仅打印一条已废弃提示，仍继续按普通流程删除账号配置。
+      console.warn('[ipc] accounts:delete(deleteLocalData=true) is deprecated after direct-db migration')
     }
 
     const result = configService.deleteAccount(accountId)

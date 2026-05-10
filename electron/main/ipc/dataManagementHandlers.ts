@@ -4,7 +4,11 @@ import type { MainProcessContext } from '../context'
 
 /**
  * 数据管理 IPC。
- * 保留手动解密和增量更新；自动同步事件由 startup.ts 统一广播，避免重复监听。
+ *
+ * Direct DB 迁移后，旧的数据库落地解密/增量更新/缓存迁移/自动更新链路已废弃，
+ * 这里的 handler 保留 channel 以兼容前端旧代码，统一返回"已废弃"语义，避免
+ * 渲染端因 "No handler registered" 报错。真正的实时变更通过新的
+ * `wcdb:change` 广播通道推送。
  */
 export function registerDataManagementHandlers(ctx: MainProcessContext): void {
   ipcMain.handle('dataManagement:scanDatabases', async () => {
@@ -12,15 +16,18 @@ export function registerDataManagementHandlers(ctx: MainProcessContext): void {
   })
 
   ipcMain.handle('dataManagement:decryptAll', async () => {
-    return dataManagementService.decryptAll()
+    console.warn('[ipc] dataManagement:decryptAll is deprecated after direct-db migration')
+    return { success: true, successCount: 0, failCount: 0, skipped: true }
   })
 
-  ipcMain.handle('dataManagement:decryptSingleDatabase', async (_, filePath: string) => {
-    return dataManagementService.decryptSingleDatabase(filePath)
+  ipcMain.handle('dataManagement:decryptSingleDatabase', async (_, _filePath: string) => {
+    console.warn('[ipc] dataManagement:decryptSingleDatabase is deprecated after direct-db migration')
+    return { success: true, skipped: true }
   })
 
   ipcMain.handle('dataManagement:incrementalUpdate', async () => {
-    return dataManagementService.incrementalUpdate()
+    console.warn('[ipc] dataManagement:incrementalUpdate is deprecated after direct-db migration')
+    return { success: true, successCount: 0, failCount: 0, skipped: true }
   })
 
   ipcMain.handle('dataManagement:getCurrentCachePath', async () => {
@@ -31,8 +38,9 @@ export function registerDataManagementHandlers(ctx: MainProcessContext): void {
     return dataManagementService.getDefaultCachePath()
   })
 
-  ipcMain.handle('dataManagement:migrateCache', async (_, newCachePath: string) => {
-    return dataManagementService.migrateCache(newCachePath)
+  ipcMain.handle('dataManagement:migrateCache', async (_, _newCachePath: string) => {
+    console.warn('[ipc] dataManagement:migrateCache is deprecated after direct-db migration')
+    return { success: true, movedCount: 0, skipped: true }
   })
 
   ipcMain.handle('dataManagement:scanImages', async (_, dirPath: string) => {
@@ -52,20 +60,22 @@ export function registerDataManagementHandlers(ctx: MainProcessContext): void {
   })
 
   ipcMain.handle('dataManagement:checkForUpdates', async () => {
-    return dataManagementService.checkForUpdates()
+    console.warn('[ipc] dataManagement:checkForUpdates is deprecated after direct-db migration')
+    return { hasUpdate: false, updateCount: 0, skipped: true }
   })
 
-  ipcMain.handle('dataManagement:enableAutoUpdate', async (_, intervalSeconds?: number) => {
-    dataManagementService.enableAutoUpdate(intervalSeconds)
-    return { success: true }
+  ipcMain.handle('dataManagement:enableAutoUpdate', async (_, _intervalSeconds?: number) => {
+    console.warn('[ipc] dataManagement:enableAutoUpdate is deprecated after direct-db migration')
+    return { success: true, skipped: true }
   })
 
   ipcMain.handle('dataManagement:disableAutoUpdate', async () => {
-    dataManagementService.disableAutoUpdate()
-    return { success: true }
+    console.warn('[ipc] dataManagement:disableAutoUpdate is deprecated after direct-db migration')
+    return { success: true, skipped: true }
   })
 
-  ipcMain.handle('dataManagement:autoIncrementalUpdate', async (_, silent?: boolean) => {
-    return dataManagementService.autoIncrementalUpdate(silent)
+  ipcMain.handle('dataManagement:autoIncrementalUpdate', async (_, _silent?: boolean) => {
+    console.warn('[ipc] dataManagement:autoIncrementalUpdate is deprecated after direct-db migration')
+    return { success: true, updated: false, skipped: true }
   })
 }

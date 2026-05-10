@@ -1,14 +1,32 @@
-import { ipcMain } from 'electron'
-import { dataManagementService } from '../../services/dataManagementService'
+import { ipcMain, webContents } from 'electron'
 import { dbPathService } from '../../services/dbPathService'
 import { wcdbService } from '../../services/wcdbService'
+import { monitorBridge } from '../../services/monitorBridge'
 import type { MainProcessContext } from '../context'
+
+let monitorBroadcastWired = false
+
+function setupMonitorBroadcast(ctx: MainProcessContext): void {
+  if (monitorBroadcastWired) return
+  monitorBroadcastWired = true
+  monitorBridge.on('change', (payload) => {
+    try {
+      for (const wc of webContents.getAllWebContents()) {
+        if (!wc.isDestroyed()) wc.send('wcdb:change', payload)
+      }
+    } catch (e) {
+      ctx.getLogService()?.warn('WCDB', 'wcdb:change broadcast failed', { error: String(e) })
+    }
+  })
+}
 
 /**
  * WCDB 连接与解密 IPC。
  * 自动连接失败使用 warn，手动测试失败使用 error，便于日志侧区分场景。
  */
 export function registerWcdbHandlers(ctx: MainProcessContext): void {
+  setupMonitorBroadcast(ctx)
+
   ipcMain.handle('wcdb:testConnection', async (_, dbPath: string, hexKey: string, wxid: string, isAutoConnect = false) => {
     const logPrefix = isAutoConnect ? '自动连接' : '手动测试'
     ctx.getLogService()?.info('WCDB', `${logPrefix}数据库连接`, { dbPath, wxid, isAutoConnect })
@@ -64,36 +82,18 @@ export function registerWcdbHandlers(ctx: MainProcessContext): void {
     return true
   })
 
-  // 数据库解密
-  ipcMain.handle('wcdb:decryptDatabase', async (event, dbPath: string, hexKey: string, wxid: string) => {
-    ctx.getLogService()?.info('Decrypt', '开始解密数据库', { dbPath, wxid })
-
-    try {
-      // 使用已有的 dataManagementService 来解密
-      const result = await dataManagementService.decryptAll()
-
-      if (result.success) {
-        ctx.getLogService()?.info('Decrypt', '解密完成', {
-          successCount: result.successCount,
-          failCount: result.failCount
-        })
-
-        return {
-          success: true,
-          totalFiles: (result.successCount || 0) + (result.failCount || 0),
-          successCount: result.successCount,
-          failCount: result.failCount
-        }
-      } else {
-        ctx.getLogService()?.error('Decrypt', '解密失败', { error: result.error })
-        return { success: false, error: result.error }
-      }
-    } catch (e) {
-      ctx.getLogService()?.error('Decrypt', '解密异常', { error: String(e) })
-      return { success: false, error: String(e) }
+  // 数据库解密（已废弃）
+  // Direct DB 迁移后，解密落地链路已下线。保留 channel 以兼容前端旧调用，
+  // 直接返回"已废弃"语义的空结果。
+  ipcMain.handle('wcdb:decryptDatabase', async (_event, _dbPath: string, _hexKey: string, _wxid: string) => {
+    console.warn('[ipc] wcdb:decryptDatabase is deprecated after direct-db migration')
+    ctx.getLogService()?.warn('Decrypt', 'wcdb:decryptDatabase 已废弃，Direct DB 模式下无需解密落地')
+    return {
+      success: true,
+      totalFiles: 0,
+      successCount: 0,
+      failCount: 0,
+      skipped: true
     }
   })
-
-  // 数据管理相关
-
 }

@@ -1,8 +1,5 @@
-import { ConfigService } from './config'
-import Database from 'better-sqlite3'
-import * as fs from 'fs'
-import * as path from 'path'
-import { app } from 'electron'
+import { dbAdapter } from './dbAdapter'
+import { findMessageDbPaths } from './dbStoragePaths'
 
 export interface GroupChatInfo {
   username: string
@@ -39,159 +36,41 @@ export interface GroupMediaStats {
 }
 
 class GroupAnalyticsService {
-  private configService: ConfigService
-  private messageDbCache: Map<string, Database.Database> = new Map()
-
-  constructor() {
-    this.configService = new ConfigService()
-  }
-
-  private getDecryptedDbDir(): string {
-    const cachePath = this.configService.get('cachePath')
-    if (cachePath) return cachePath
-    
-    // 开发环境使用文档目录
-    if (process.env.VITE_DEV_SERVER_URL) {
-      const documentsPath = app.getPath('documents')
-      return path.join(documentsPath, 'CipherTalkData')
-    }
-    
-    // 生产环境
-    const exePath = app.getPath('exe')
-    const installDir = path.dirname(exePath)
-    
-    // 检查是否安装在 C 盘
-    const isOnCDrive = /^[cC]:/i.test(installDir) || installDir.startsWith('\\')
-    
-    if (isOnCDrive) {
-      const documentsPath = app.getPath('documents')
-      return path.join(documentsPath, 'CipherTalkData')
-    }
-    
-    return path.join(installDir, 'CipherTalkData')
-  }
-
-  private cleanAccountDirName(name: string): string {
-    const trimmed = name.trim()
-    if (!trimmed) return trimmed
-    
-    // wxid_ 开头的标准格式: wxid_xxx_yyyy -> wxid_xxx
-    if (trimmed.toLowerCase().startsWith('wxid_')) {
-      const match = trimmed.match(/^(wxid_[a-zA-Z0-9]+)/i)
-      if (match) return match[1]
-      return trimmed
-    }
-    
-    // 自定义微信号格式: xxx_yyyy (4位后缀) -> xxx
-    const suffixMatch = trimmed.match(/^(.+)_([a-zA-Z0-9]{4})$/)
-    if (suffixMatch) return suffixMatch[1]
-    
-    return trimmed
-  }
-
   /**
-   * 查找账号对应的实际目录名
-   * 支持多种匹配方式以兼容不同版本的目录命名
+   * 将 wcdb 返回的 BLOB 值标准化为 Buffer。
+   * native 层会把 bytes 列以 base64 字符串返回，此处兼容字符串 / Buffer / Uint8Array / number[]。
    */
-  private findAccountDir(baseDir: string, wxid: string): string | null {
-    if (!fs.existsSync(baseDir)) return null
-
-    const cleanedWxid = this.cleanAccountDirName(wxid)
-    
-    // 1. 直接匹配原始 wxid
-    const directPath = path.join(baseDir, wxid)
-    if (fs.existsSync(directPath)) {
-      return wxid
+  private toBuffer(value: any): Buffer | null {
+    if (value == null) return null
+    if (Buffer.isBuffer(value)) return value
+    if (value instanceof Uint8Array) return Buffer.from(value)
+    if (Array.isArray(value)) return Buffer.from(value)
+    if (typeof value === 'string') {
+      try { return Buffer.from(value, 'base64') } catch { return null }
     }
-    
-    // 2. 直接匹配清理后的 wxid
-    if (cleanedWxid !== wxid) {
-      const cleanedPath = path.join(baseDir, cleanedWxid)
-      if (fs.existsSync(cleanedPath)) {
-        return cleanedWxid
-      }
-    }
-
-    // 3. 扫描目录查找匹配
-    try {
-      const entries = fs.readdirSync(baseDir, { withFileTypes: true })
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue
-        
-        const dirName = entry.name
-        const dirNameLower = dirName.toLowerCase()
-        const wxidLower = wxid.toLowerCase()
-        const cleanedWxidLower = cleanedWxid.toLowerCase()
-        
-        if (dirNameLower === wxidLower || dirNameLower === cleanedWxidLower) return dirName
-        if (dirNameLower.startsWith(wxidLower + '_') || dirNameLower.startsWith(cleanedWxidLower + '_')) return dirName
-        if (wxidLower.startsWith(dirNameLower + '_') || cleanedWxidLower.startsWith(dirNameLower + '_')) return dirName
-        
-        const cleanedDirName = this.cleanAccountDirName(dirName)
-        if (cleanedDirName.toLowerCase() === wxidLower || cleanedDirName.toLowerCase() === cleanedWxidLower) return dirName
-      }
-    } catch (e) {
-      console.error('查找账号目录失败:', e)
-    }
-
     return null
-  }
-
-  private findMessageDbFiles(dbDir: string): string[] {
-    try {
-      const files = fs.readdirSync(dbDir)
-      return files.filter(f => {
-        const lower = f.toLowerCase()
-        return (lower.startsWith('msg') || lower.startsWith('message')) && lower.endsWith('.db')
-      }).map(f => path.join(dbDir, f))
-    } catch {
-      return []
-    }
-  }
-
-  private getMessageDb(dbPath: string): Database.Database | null {
-    if (this.messageDbCache.has(dbPath)) {
-      return this.messageDbCache.get(dbPath)!
-    }
-    try {
-      const db = new Database(dbPath, { readonly: true })
-      this.messageDbCache.set(dbPath, db)
-      return db
-    } catch {
-      return null
-    }
   }
 
   /**
    * 从 head_image.db 批量获取头像（转换为 base64 data URL）
    */
-  private async getAvatarsFromHeadImageDb(dbDir: string, usernames: string[]): Promise<Record<string, string>> {
+  private async getAvatarsFromHeadImageDb(usernames: string[]): Promise<Record<string, string>> {
     const result: Record<string, string> = {}
     if (usernames.length === 0) return result
 
     try {
-      const headImageDbPath = path.join(dbDir, 'head_image.db')
-      if (!fs.existsSync(headImageDbPath)) return result
-
-      const db = new Database(headImageDbPath, { readonly: true })
-
-      try {
-        const stmt = db.prepare('SELECT username, image_buffer FROM head_image WHERE username = ?')
-        
-        for (const username of usernames) {
-          try {
-            const row = stmt.get(username) as any
-            if (row && row.image_buffer) {
-              const buffer = Buffer.from(row.image_buffer)
-              const base64 = buffer.toString('base64')
-              result[username] = `data:image/jpeg;base64,${base64}`
-            }
-          } catch (e) {
-            console.error(`获取 ${username} 的头像失败:`, e)
-          }
-        }
-      } finally {
-        db.close()
+      const placeholders = usernames.map(() => '?').join(',')
+      const rows = await dbAdapter.all<any>(
+        'head_image',
+        '',
+        `SELECT username, image_buffer FROM head_image WHERE username IN (${placeholders})`,
+        usernames
+      )
+      for (const row of rows) {
+        const buffer = this.toBuffer(row?.image_buffer)
+        if (!buffer || buffer.length === 0) continue
+        const base64 = buffer.toString('base64')
+        result[row.username] = `data:image/jpeg;base64,${base64}`
       }
     } catch (e) {
       console.error('从 head_image.db 获取头像失败:', e)
@@ -200,134 +79,102 @@ class GroupAnalyticsService {
     return result
   }
 
-
   async getGroupChats(): Promise<{ success: boolean; data?: GroupChatInfo[]; error?: string }> {
     try {
-      const wxid = this.configService.get('myWxid')
-      if (!wxid) {
-        return { success: false, error: '未配置微信ID' }
-      }
-
-      const baseDir = this.getDecryptedDbDir()
-      const accountDir = this.findAccountDir(baseDir, wxid)
-      
-      if (!accountDir) {
-        return { success: false, error: `未找到账号 ${wxid} 的数据库目录` }
-      }
-
-      const dbDir = path.join(baseDir, accountDir)
-
-      const sessionDbPath = path.join(dbDir, 'session.db')
-      if (!fs.existsSync(sessionDbPath)) {
-        return { success: false, error: '未找到 session.db' }
-      }
-
-      const sessionDb = new Database(sessionDbPath, { readonly: true })
-      
       // 查询所有群聊会话，包含时间戳用于排序
-      const sessions = sessionDb.prepare(`
-        SELECT username, sort_timestamp, last_timestamp 
-        FROM SessionTable 
-        WHERE username LIKE '%@chatroom'
-      `).all() as { username: string; sort_timestamp?: number; last_timestamp?: number }[]
-      
-      sessionDb.close()
+      const sessions = await dbAdapter.all<{ username: string; sort_timestamp?: number; last_timestamp?: number }>(
+        'session',
+        '',
+        `SELECT username, sort_timestamp, last_timestamp
+         FROM SessionTable
+         WHERE username LIKE '%@chatroom'`
+      )
 
-      const contactDbPath = path.join(dbDir, 'contact.db')
+      if (sessions.length === 0) {
+        return { success: true, data: [] }
+      }
+
       const groupInfoMap: Map<string, { displayName: string; avatarUrl?: string }> = new Map()
       const memberCountMap: Map<string, number> = new Map()
 
-      if (fs.existsSync(contactDbPath)) {
-        const contactDb = new Database(contactDbPath, { readonly: true })
-        
-        // 获取群名称和头像
-        const columns = contactDb.prepare("PRAGMA table_info(contact)").all() as { name: string }[]
-        const columnNames = columns.map(c => c.name)
-        const hasBigHeadUrl = columnNames.includes('big_head_url')
-        const hasSmallHeadUrl = columnNames.includes('small_head_url')
+      // 获取 contact 表列信息，探测是否包含头像 URL 列
+      const columns = await dbAdapter.all<{ name: string }>(
+        'contact',
+        '',
+        'PRAGMA table_info(contact)'
+      )
+      const columnNames = columns.map(c => c.name)
+      const hasBigHeadUrl = columnNames.includes('big_head_url')
+      const hasSmallHeadUrl = columnNames.includes('small_head_url')
 
-        // 收集没有头像 URL 的用户名
-        const missingAvatars: string[] = []
+      const selectCols = ['username', 'nick_name', 'remark']
+      if (hasBigHeadUrl) selectCols.push('big_head_url')
+      if (hasSmallHeadUrl) selectCols.push('small_head_url')
 
-        for (const { username } of sessions) {
-          try {
-            const selectCols = ['nick_name', 'remark']
-            if (hasBigHeadUrl) selectCols.push('big_head_url')
-            if (hasSmallHeadUrl) selectCols.push('small_head_url')
+      const usernames = sessions.map(s => s.username)
+      const placeholders = usernames.map(() => '?').join(',')
+      const contactRows = await dbAdapter.all<any>(
+        'contact',
+        '',
+        `SELECT ${selectCols.join(', ')} FROM contact WHERE username IN (${placeholders})`,
+        usernames
+      )
 
-            const contact = contactDb.prepare(`
-              SELECT ${selectCols.join(', ')} FROM contact WHERE username = ?
-            `).get(username) as any
+      const missingAvatars: string[] = []
+      for (const contact of contactRows) {
+        const avatarUrl = (hasBigHeadUrl && contact.big_head_url)
+          ? contact.big_head_url
+          : (hasSmallHeadUrl && contact.small_head_url)
+            ? contact.small_head_url
+            : undefined
 
-            if (contact) {
-              const avatarUrl = (hasBigHeadUrl && contact.big_head_url)
-                ? contact.big_head_url
-                : (hasSmallHeadUrl && contact.small_head_url)
-                  ? contact.small_head_url
-                  : undefined
-              
-              groupInfoMap.set(username, {
-                displayName: contact.remark || contact.nick_name || username,
-                avatarUrl
-              })
+        groupInfoMap.set(contact.username, {
+          displayName: contact.remark || contact.nick_name || contact.username,
+          avatarUrl
+        })
 
-              // 如果没有头像 URL，记录下来
-              if (!avatarUrl) {
-                missingAvatars.push(username)
-              }
-            }
-          } catch { /* skip */ }
+        if (!avatarUrl) {
+          missingAvatars.push(contact.username)
         }
-
-        contactDb.close()
-
-        // 从 head_image.db 获取缺失的头像
-        if (missingAvatars.length > 0) {
-          const headImageAvatars = await this.getAvatarsFromHeadImageDb(dbDir, missingAvatars)
-          for (const username of missingAvatars) {
-            const avatarUrl = headImageAvatars[username]
-            if (avatarUrl) {
-              const info = groupInfoMap.get(username)
-              if (info) {
-                info.avatarUrl = avatarUrl
-              }
-            }
-          }
-        }
-      } else {
-        return { success: false, error: '未找到 contact.db' }
       }
 
-      // 获取群成员数量
-      if (fs.existsSync(contactDbPath)) {
-        const contactDb = new Database(contactDbPath, { readonly: true })
-
-        // 获取群成员数量
-        try {
-          const tables = contactDb.prepare(`
-            SELECT name FROM sqlite_master WHERE type='table' AND name IN ('chatroom_member', 'name2id')
-          `).all() as { name: string }[]
-          
-          const hasChatroomMember = tables.some(t => t.name === 'chatroom_member')
-          const hasName2Id = tables.some(t => t.name === 'name2id')
-
-          if (hasChatroomMember && hasName2Id) {
-            for (const { username } of sessions) {
-              try {
-                const result = contactDb.prepare(`
-                  SELECT COUNT(*) as count FROM chatroom_member 
-                  WHERE room_id = (SELECT rowid FROM name2id WHERE username = ?)
-                `).get(username) as { count: number }
-                memberCountMap.set(username, result?.count || 0)
-              } catch { /* skip */ }
-            }
+      // 从 head_image.db 获取缺失的头像
+      if (missingAvatars.length > 0) {
+        const headImageAvatars = await this.getAvatarsFromHeadImageDb(missingAvatars)
+        for (const username of missingAvatars) {
+          const avatarUrl = headImageAvatars[username]
+          if (avatarUrl) {
+            const info = groupInfoMap.get(username)
+            if (info) info.avatarUrl = avatarUrl
           }
-        } catch { /* skip */ }
-
-        contactDb.close()
-      } else {
-        return { success: false, error: '未找到 contact.db' }
+        }
       }
+
+      // 获取群成员数量：需要 chatroom_member + name2id 两张表
+      try {
+        const tables = await dbAdapter.all<{ name: string }>(
+          'contact',
+          '',
+          "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('chatroom_member', 'name2id')"
+        )
+        const hasChatroomMember = tables.some(t => t.name === 'chatroom_member')
+        const hasName2Id = tables.some(t => t.name === 'name2id')
+
+        if (hasChatroomMember && hasName2Id) {
+          for (const { username } of sessions) {
+            try {
+              const row = await dbAdapter.get<{ count: number }>(
+                'contact',
+                '',
+                `SELECT COUNT(*) as count FROM chatroom_member
+                 WHERE room_id = (SELECT rowid FROM name2id WHERE username = ?)`,
+                [username]
+              )
+              memberCountMap.set(username, row?.count || 0)
+            } catch { /* skip */ }
+          }
+        }
+      } catch { /* skip */ }
 
       const groups: GroupChatInfo[] = sessions.map(({ username, sort_timestamp, last_timestamp }) => {
         const info = groupInfoMap.get(username)
@@ -338,10 +185,7 @@ class GroupAnalyticsService {
           avatarUrl: info?.avatarUrl,
           sortTimestamp: sort_timestamp || last_timestamp || 0
         }
-      }).sort((a, b) => {
-        // 按最新消息时间降序排列（最新的在前）
-        return (b.sortTimestamp || 0) - (a.sortTimestamp || 0)
-      })
+      }).sort((a, b) => (b.sortTimestamp || 0) - (a.sortTimestamp || 0))
 
       return { success: true, data: groups }
     } catch (e) {
@@ -349,40 +193,22 @@ class GroupAnalyticsService {
     }
   }
 
-
   async getGroupMembers(chatroomId: string): Promise<{ success: boolean; data?: GroupMember[]; error?: string }> {
     try {
-      const wxid = this.configService.get('myWxid')
-      if (!wxid) {
-        return { success: false, error: '未配置微信ID' }
-      }
-
-      const baseDir = this.getDecryptedDbDir()
-      const accountDir = this.findAccountDir(baseDir, wxid)
-      
-      if (!accountDir) {
-        return { success: false, error: `未找到账号 ${wxid} 的数据库目录` }
-      }
-
-      const dbDir = path.join(baseDir, accountDir)
-      const contactDbPath = path.join(dbDir, 'contact.db')
-
-      if (!fs.existsSync(contactDbPath)) {
-        return { success: false, error: '未找到 contact.db' }
-      }
-
-      const contactDb = new Database(contactDbPath, { readonly: true })
       const members: GroupMember[] = []
       const missingAvatars: string[] = []
 
       try {
-        const memberRows = contactDb.prepare(`
-          SELECT n.username, c.nick_name, c.remark, c.small_head_url 
-          FROM chatroom_member m
-          JOIN name2id n ON m.member_id = n.rowid
-          LEFT JOIN contact c ON n.username = c.username
-          WHERE m.room_id = (SELECT rowid FROM name2id WHERE username = ?)
-        `).all(chatroomId) as { username: string; nick_name?: string; remark?: string; small_head_url?: string }[]
+        const memberRows = await dbAdapter.all<{ username: string; nick_name?: string; remark?: string; small_head_url?: string }>(
+          'contact',
+          '',
+          `SELECT n.username, c.nick_name, c.remark, c.small_head_url
+           FROM chatroom_member m
+           JOIN name2id n ON m.member_id = n.rowid
+           LEFT JOIN contact c ON n.username = c.username
+           WHERE m.room_id = (SELECT rowid FROM name2id WHERE username = ?)`,
+          [chatroomId]
+        )
 
         for (const row of memberRows) {
           const avatarUrl = row.small_head_url
@@ -391,25 +217,16 @@ class GroupAnalyticsService {
             displayName: row.remark || row.nick_name || row.username,
             avatarUrl
           })
-          
-          // 如果没有头像 URL，记录下来
-          if (!avatarUrl) {
-            missingAvatars.push(row.username)
-          }
+          if (!avatarUrl) missingAvatars.push(row.username)
         }
       } catch { /* skip */ }
 
-      contactDb.close()
-
-      // 从 head_image.db 获取缺失的头像
       if (missingAvatars.length > 0) {
-        const headImageAvatars = await this.getAvatarsFromHeadImageDb(dbDir, missingAvatars)
+        const headImageAvatars = await this.getAvatarsFromHeadImageDb(missingAvatars)
         for (const member of members) {
           if (!member.avatarUrl) {
             const avatarUrl = headImageAvatars[member.username]
-            if (avatarUrl) {
-              member.avatarUrl = avatarUrl
-            }
+            if (avatarUrl) member.avatarUrl = avatarUrl
           }
         }
       }
@@ -420,23 +237,14 @@ class GroupAnalyticsService {
     }
   }
 
-  async getGroupMessageRanking(chatroomId: string, limit: number = 20, startTime?: number, endTime?: number): Promise<{ success: boolean; data?: GroupMessageRank[]; error?: string }> {
+  async getGroupMessageRanking(
+    chatroomId: string,
+    limit: number = 20,
+    startTime?: number,
+    endTime?: number
+  ): Promise<{ success: boolean; data?: GroupMessageRank[]; error?: string }> {
     try {
-      const wxid = this.configService.get('myWxid')
-      if (!wxid) {
-        return { success: false, error: '未配置微信ID' }
-      }
-
-      const baseDir = this.getDecryptedDbDir()
-      const accountDir = this.findAccountDir(baseDir, wxid)
-      
-      if (!accountDir) {
-        return { success: false, error: `未找到账号 ${wxid} 的数据库目录` }
-      }
-
-      const dbDir = path.join(baseDir, accountDir)
-      const dbFiles = this.findMessageDbFiles(dbDir)
-
+      const dbFiles = findMessageDbPaths()
       if (dbFiles.length === 0) {
         return { success: false, error: '未找到消息数据库' }
       }
@@ -445,57 +253,75 @@ class GroupAnalyticsService {
       const tableHash = crypto.createHash('md5').update(chatroomId).digest('hex')
       const messageCounts: Map<string, number> = new Map()
 
-      // 构建时间条件
-      let timeCondition = ''
-      if (startTime && endTime) {
-        timeCondition = `WHERE create_time >= ${startTime} AND create_time <= ${endTime}`
-      } else if (startTime) {
-        timeCondition = `WHERE create_time >= ${startTime}`
-      } else if (endTime) {
-        timeCondition = `WHERE create_time <= ${endTime}`
-      }
-
       for (const dbPath of dbFiles) {
-        const db = this.getMessageDb(dbPath)
-        if (!db) continue
-
-        const tables = db.prepare(`
-          SELECT name FROM sqlite_master 
-          WHERE type='table' AND name LIKE 'Msg_%'
-        `).all() as { name: string }[]
+        let tables: { name: string }[] = []
+        try {
+          tables = await dbAdapter.all<{ name: string }>(
+            'message',
+            dbPath,
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'Msg_%'"
+          )
+        } catch { continue }
 
         for (const { name: tableName } of tables) {
           if (!tableName.includes(tableHash)) continue
 
           try {
-            // 群聊消息的 real_sender_id 对应发送者
-            const hasName2Id = db.prepare(
+            // 检测 Name2Id 表是否存在
+            const name2idRow = await dbAdapter.get<any>(
+              'message',
+              dbPath,
               "SELECT name FROM sqlite_master WHERE type='table' AND name = 'Name2Id'"
-            ).get()
+            )
+            const hasName2Id = !!name2idRow
 
-            let senderCounts: { sender: string; count: number }[]
+            let senderCounts: { sender: string; count: number }[] = []
 
             if (hasName2Id) {
-              const whereClause = timeCondition ? timeCondition.replace('WHERE', 'AND') : ''
-              senderCounts = db.prepare(`
-                SELECT n.user_name as sender, COUNT(*) as count
-                FROM "${tableName}" m
-                JOIN Name2Id n ON m.real_sender_id = n.rowid
-                ${timeCondition ? `WHERE m.create_time >= ${startTime} AND m.create_time <= ${endTime}` : ''}
-                GROUP BY m.real_sender_id
-              `).all() as { sender: string; count: number }[]
+              const params: any[] = []
+              let whereSql = ''
+              if (startTime != null && endTime != null) {
+                whereSql = 'WHERE m.create_time >= ? AND m.create_time <= ?'
+                params.push(startTime, endTime)
+              } else if (startTime != null) {
+                whereSql = 'WHERE m.create_time >= ?'
+                params.push(startTime)
+              } else if (endTime != null) {
+                whereSql = 'WHERE m.create_time <= ?'
+                params.push(endTime)
+              }
+              senderCounts = await dbAdapter.all<{ sender: string; count: number }>(
+                'message',
+                dbPath,
+                `SELECT n.user_name as sender, COUNT(*) as count
+                 FROM "${tableName}" m
+                 JOIN Name2Id n ON m.real_sender_id = n.rowid
+                 ${whereSql}
+                 GROUP BY m.real_sender_id`,
+                params
+              )
             } else {
-              // 备用方案：使用 sender 字段
-              const baseCondition = "sender IS NOT NULL AND sender != ''"
-              const fullCondition = timeCondition 
-                ? `WHERE ${baseCondition} AND create_time >= ${startTime} AND create_time <= ${endTime}`
-                : `WHERE ${baseCondition}`
-              senderCounts = db.prepare(`
-                SELECT sender, COUNT(*) as count
-                FROM "${tableName}"
-                ${fullCondition}
-                GROUP BY sender
-              `).all() as { sender: string; count: number }[]
+              const params: any[] = []
+              let whereSql = "WHERE sender IS NOT NULL AND sender != ''"
+              if (startTime != null && endTime != null) {
+                whereSql += ' AND create_time >= ? AND create_time <= ?'
+                params.push(startTime, endTime)
+              } else if (startTime != null) {
+                whereSql += ' AND create_time >= ?'
+                params.push(startTime)
+              } else if (endTime != null) {
+                whereSql += ' AND create_time <= ?'
+                params.push(endTime)
+              }
+              senderCounts = await dbAdapter.all<{ sender: string; count: number }>(
+                'message',
+                dbPath,
+                `SELECT sender, COUNT(*) as count
+                 FROM "${tableName}"
+                 ${whereSql}
+                 GROUP BY sender`,
+                params
+              )
             }
 
             for (const { sender, count } of senderCounts) {
@@ -511,9 +337,7 @@ class GroupAnalyticsService {
       const membersResult = await this.getGroupMembers(chatroomId)
       const memberMap: Map<string, GroupMember> = new Map()
       if (membersResult.success && membersResult.data) {
-        for (const m of membersResult.data) {
-          memberMap.set(m.username, m)
-        }
+        for (const m of membersResult.data) memberMap.set(m.username, m)
       }
 
       const rankings: GroupMessageRank[] = Array.from(messageCounts.entries())
@@ -530,24 +354,13 @@ class GroupAnalyticsService {
     }
   }
 
-
-  async getGroupActiveHours(chatroomId: string, startTime?: number, endTime?: number): Promise<{ success: boolean; data?: GroupActiveHours; error?: string }> {
+  async getGroupActiveHours(
+    chatroomId: string,
+    startTime?: number,
+    endTime?: number
+  ): Promise<{ success: boolean; data?: GroupActiveHours; error?: string }> {
     try {
-      const wxid = this.configService.get('myWxid')
-      if (!wxid) {
-        return { success: false, error: '未配置微信ID' }
-      }
-
-      const baseDir = this.getDecryptedDbDir()
-      const accountDir = this.findAccountDir(baseDir, wxid)
-      
-      if (!accountDir) {
-        return { success: false, error: `未找到账号 ${wxid} 的数据库目录` }
-      }
-
-      const dbDir = path.join(baseDir, accountDir)
-      const dbFiles = this.findMessageDbFiles(dbDir)
-
+      const dbFiles = findMessageDbPaths()
       if (dbFiles.length === 0) {
         return { success: false, error: '未找到消息数据库' }
       }
@@ -555,40 +368,45 @@ class GroupAnalyticsService {
       const crypto = require('crypto')
       const tableHash = crypto.createHash('md5').update(chatroomId).digest('hex')
       const hourlyDistribution: Record<number, number> = {}
-
       for (let i = 0; i < 24; i++) hourlyDistribution[i] = 0
 
-      // 构建时间条件
-      let timeCondition = ''
-      if (startTime && endTime) {
-        timeCondition = `WHERE create_time >= ${startTime} AND create_time <= ${endTime}`
-      } else if (startTime) {
-        timeCondition = `WHERE create_time >= ${startTime}`
-      } else if (endTime) {
-        timeCondition = `WHERE create_time <= ${endTime}`
-      }
-
       for (const dbPath of dbFiles) {
-        const db = this.getMessageDb(dbPath)
-        if (!db) continue
-
-        const tables = db.prepare(`
-          SELECT name FROM sqlite_master 
-          WHERE type='table' AND name LIKE 'Msg_%'
-        `).all() as { name: string }[]
+        let tables: { name: string }[] = []
+        try {
+          tables = await dbAdapter.all<{ name: string }>(
+            'message',
+            dbPath,
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'Msg_%'"
+          )
+        } catch { continue }
 
         for (const { name: tableName } of tables) {
           if (!tableName.includes(tableHash)) continue
 
           try {
-            const hourly = db.prepare(`
-              SELECT 
-                CAST(strftime('%H', create_time, 'unixepoch', 'localtime') AS INTEGER) as hour,
-                COUNT(*) as count
-              FROM "${tableName}"
-              ${timeCondition}
-              GROUP BY hour
-            `).all() as { hour: number; count: number }[]
+            const params: any[] = []
+            let whereSql = ''
+            if (startTime != null && endTime != null) {
+              whereSql = 'WHERE create_time >= ? AND create_time <= ?'
+              params.push(startTime, endTime)
+            } else if (startTime != null) {
+              whereSql = 'WHERE create_time >= ?'
+              params.push(startTime)
+            } else if (endTime != null) {
+              whereSql = 'WHERE create_time <= ?'
+              params.push(endTime)
+            }
+            const hourly = await dbAdapter.all<{ hour: number; count: number }>(
+              'message',
+              dbPath,
+              `SELECT
+                 CAST(strftime('%H', create_time, 'unixepoch', 'localtime') AS INTEGER) as hour,
+                 COUNT(*) as count
+               FROM "${tableName}"
+               ${whereSql}
+               GROUP BY hour`,
+              params
+            )
 
             for (const { hour, count } of hourly) {
               hourlyDistribution[hour] = (hourlyDistribution[hour] || 0) + count
@@ -603,23 +421,13 @@ class GroupAnalyticsService {
     }
   }
 
-  async getGroupMediaStats(chatroomId: string, startTime?: number, endTime?: number): Promise<{ success: boolean; data?: GroupMediaStats; error?: string }> {
+  async getGroupMediaStats(
+    chatroomId: string,
+    startTime?: number,
+    endTime?: number
+  ): Promise<{ success: boolean; data?: GroupMediaStats; error?: string }> {
     try {
-      const wxid = this.configService.get('myWxid')
-      if (!wxid) {
-        return { success: false, error: '未配置微信ID' }
-      }
-
-      const baseDir = this.getDecryptedDbDir()
-      const accountDir = this.findAccountDir(baseDir, wxid)
-      
-      if (!accountDir) {
-        return { success: false, error: `未找到账号 ${wxid} 的数据库目录` }
-      }
-
-      const dbDir = path.join(baseDir, accountDir)
-      const dbFiles = this.findMessageDbFiles(dbDir)
-
+      const dbFiles = findMessageDbPaths()
       if (dbFiles.length === 0) {
         return { success: false, error: '未找到消息数据库' }
       }
@@ -627,10 +435,7 @@ class GroupAnalyticsService {
       const crypto = require('crypto')
       const tableHash = crypto.createHash('md5').update(chatroomId).digest('hex')
 
-      // 主要类型（会单独显示）
       const mainTypes = new Set([1, 3, 34, 43, 47, 49])
-
-      // 类型名称映射
       const typeNames: Record<number, string> = {
         1: '文本',
         3: '图片',
@@ -639,45 +444,48 @@ class GroupAnalyticsService {
         47: '表情包',
         49: '链接/文件',
       }
-
       const typeCounts: Map<number, number> = new Map()
 
-      // 构建时间条件
-      let timeCondition = ''
-      if (startTime && endTime) {
-        timeCondition = `WHERE create_time >= ${startTime} AND create_time <= ${endTime}`
-      } else if (startTime) {
-        timeCondition = `WHERE create_time >= ${startTime}`
-      } else if (endTime) {
-        timeCondition = `WHERE create_time <= ${endTime}`
-      }
-
       for (const dbPath of dbFiles) {
-        const db = this.getMessageDb(dbPath)
-        if (!db) continue
-
-        const tables = db.prepare(`
-          SELECT name FROM sqlite_master 
-          WHERE type='table' AND name LIKE 'Msg_%'
-        `).all() as { name: string }[]
+        let tables: { name: string }[] = []
+        try {
+          tables = await dbAdapter.all<{ name: string }>(
+            'message',
+            dbPath,
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'Msg_%'"
+          )
+        } catch { continue }
 
         for (const { name: tableName } of tables) {
           if (!tableName.includes(tableHash)) continue
 
           try {
-            const stats = db.prepare(`
-              SELECT local_type, COUNT(*) as count
-              FROM "${tableName}"
-              ${timeCondition}
-              GROUP BY local_type
-            `).all() as { local_type: number; count: number }[]
+            const params: any[] = []
+            let whereSql = ''
+            if (startTime != null && endTime != null) {
+              whereSql = 'WHERE create_time >= ? AND create_time <= ?'
+              params.push(startTime, endTime)
+            } else if (startTime != null) {
+              whereSql = 'WHERE create_time >= ?'
+              params.push(startTime)
+            } else if (endTime != null) {
+              whereSql = 'WHERE create_time <= ?'
+              params.push(endTime)
+            }
+            const stats = await dbAdapter.all<{ local_type: number; count: number }>(
+              'message',
+              dbPath,
+              `SELECT local_type, COUNT(*) as count
+               FROM "${tableName}"
+               ${whereSql}
+               GROUP BY local_type`,
+              params
+            )
 
             for (const { local_type, count } of stats) {
-              // 只统计主要类型，其他归为"其他"
               if (mainTypes.has(local_type)) {
                 typeCounts.set(local_type, (typeCounts.get(local_type) || 0) + count)
               } else {
-                // 其他类型合并到 -1
                 typeCounts.set(-1, (typeCounts.get(-1) || 0) + count)
               }
             }
@@ -685,7 +493,6 @@ class GroupAnalyticsService {
         }
       }
 
-      // 转换为数组格式，过滤掉数量为0的
       const result: MediaTypeCount[] = Array.from(typeCounts.entries())
         .filter(([, count]) => count > 0)
         .map(([type, count]) => ({
@@ -697,20 +504,14 @@ class GroupAnalyticsService {
 
       const total = result.reduce((sum, item) => sum + item.count, 0)
 
-      return {
-        success: true,
-        data: { typeCounts: result, total }
-      }
+      return { success: true, data: { typeCounts: result, total } }
     } catch (e) {
       return { success: false, error: String(e) }
     }
   }
 
   close() {
-    this.messageDbCache.forEach(db => {
-      try { db.close() } catch { /* ignore */ }
-    })
-    this.messageDbCache.clear()
+    // dbAdapter 由 wcdbService 统一管理连接，此处无本地缓存需清理
   }
 }
 

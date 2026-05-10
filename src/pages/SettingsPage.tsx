@@ -1186,18 +1186,6 @@ function SettingsPage() {
     }
   }
 
-  const handleSelectCachePath = async () => {
-    try {
-      const result = await dialog.openFile({ title: '选择缓存目录', properties: ['openDirectory'] })
-      if (!result.canceled && result.filePaths.length > 0) {
-        setCachePath(result.filePaths[0])
-        showMessage('已选择缓存目录', true)
-      }
-    } catch (e) {
-      showMessage('选择目录失败', false)
-    }
-  }
-
   const handleSelectExportPath = async () => {
     try {
       const result = await dialog.openFile({ title: '选择导出目录', properties: ['openDirectory'] })
@@ -1902,21 +1890,6 @@ function SettingsPage() {
             </div>
           </>
         )}
-      </div>
-
-      <div className="form-group">
-        <label>缓存目录 <span className="optional">(可选)</span></label>
-        <span className="form-hint">{isMac ? '留空使用文稿目录下的 CipherTalkData' : '留空使用默认目录，尽可能不选择C盘'}</span>
-        <input
-          type="text"
-          placeholder={isMac ? '~/Documents/CipherTalkData' : '留空使用默认目录'}
-          value={cachePath}
-          onChange={(e) => setCachePath(e.target.value)}
-        />
-        <div className="btn-row">
-          <button className="btn btn-secondary" onClick={handleSelectCachePath}><FolderOpen size={16} /> 浏览选择</button>
-          <button className="btn btn-secondary" onClick={() => setCachePath('')}><RotateCcw size={16} /> 恢复默认</button>
-        </div>
       </div>
 
       <div className="form-group">

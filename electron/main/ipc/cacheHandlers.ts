@@ -41,20 +41,11 @@ export function registerCacheHandlers(ctx: MainProcessContext): void {
   })
 
   ipcMain.handle('cache:clearDatabases', async () => {
-    ctx.getLogService()?.info('Cache', '开始清除数据库缓存')
-    try {
-      const cacheService = new (await import('../../services/cacheService')).CacheService(ctx.getConfigService()!)
-      const result = await cacheService.clearDatabases()
-      if (result.success) {
-        ctx.getLogService()?.info('Cache', '数据库缓存清除成功')
-      } else {
-        ctx.getLogService()?.error('Cache', '数据库缓存清除失败', { error: result.error })
-      }
-      return result
-    } catch (e) {
-      ctx.getLogService()?.error('Cache', '数据库缓存清除异常', { error: String(e) })
-      return { success: false, error: String(e) }
-    }
+    // Direct DB 迁移后，不再有独立的数据库缓存需要清理。保留 channel，
+    // 直接返回"已废弃"语义的成功结果，避免前端旧代码调用报错。
+    console.warn('[ipc] cache:clearDatabases is deprecated after direct-db migration')
+    ctx.getLogService()?.warn('Cache', 'cache:clearDatabases 已废弃，Direct DB 模式下无数据库缓存')
+    return { success: true, skipped: true }
   })
 
   ipcMain.handle('cache:clearAll', async () => {

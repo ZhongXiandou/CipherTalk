@@ -50,6 +50,16 @@ export interface UpdateDownloadProgressPayload {
 
 export type HttpApiListenMode = 'localhost' | 'lan'
 
+/**
+ * Direct DB 迁移后的 WAL 变更广播 payload，
+ * 通过 `wcdb:change` channel 从主进程推送到渲染端。
+ */
+export interface WcdbChangePayload {
+  table: 'Session' | 'Message' | 'Contact' | 'Sns' | 'Unknown'
+  dbPath: string
+  walPath: string
+}
+
 export interface HttpApiStatusPayload {
   running: boolean
   host: string
@@ -136,10 +146,6 @@ export interface ElectronAPI {
     open: (dbPath: string, key?: string) => Promise<boolean>
     query: <T = unknown>(sql: string, params?: unknown[]) => Promise<T[]>
     close: () => Promise<void>
-  }
-  decrypt: {
-    database: (sourcePath: string, key: string, outputPath: string) => Promise<boolean>
-    image: (imagePath: string) => Promise<Uint8Array | null>
   }
   dialog: {
     openFile: (options?: Electron.OpenDialogOptions) => Promise<Electron.OpenDialogReturnValue>
@@ -353,8 +359,9 @@ export interface ElectronAPI {
     resolveValidWxid: (dbPath: string, hexKey: string) => Promise<{ success: boolean; wxid?: string; error?: string }>
     open: (dbPath: string, hexKey: string, wxid: string) => Promise<boolean>
     close: () => Promise<boolean>
-    decryptDatabase: (dbPath: string, hexKey: string, wxid: string) => Promise<{ success: boolean; error?: string; totalFiles?: number; successCount?: number; failCount?: number }>
+    decryptDatabase: (dbPath: string, hexKey: string, wxid: string) => Promise<{ success: boolean; error?: string; totalFiles?: number; successCount?: number; failCount?: number; skipped?: boolean }>
     onDecryptProgress: (callback: (data: { current: number; total: number; currentFile?: string; status: string; pageProgress?: { current: number; total: number } }) => void) => () => void
+    onChange: (callback: (payload: WcdbChangePayload) => void) => () => void
   }
   dataManagement: {
     scanDatabases: () => Promise<{
@@ -362,28 +369,36 @@ export interface ElectronAPI {
       databases?: DatabaseFileInfo[]
       error?: string
     }>
+    /** @deprecated Direct DB 模式下已无操作，返回 skipped=true。 */
     decryptAll: () => Promise<{
       success: boolean
       successCount?: number
       failCount?: number
       error?: string
+      skipped?: boolean
     }>
+    /** @deprecated Direct DB 模式下已无操作，返回 skipped=true。 */
     decryptSingleDatabase: (filePath: string) => Promise<{
       success: boolean
       error?: string
+      skipped?: boolean
     }>
+    /** @deprecated Direct DB 模式下已无操作，返回 skipped=true。 */
     incrementalUpdate: () => Promise<{
       success: boolean
       successCount?: number
       failCount?: number
       error?: string
+      skipped?: boolean
     }>
     getCurrentCachePath: () => Promise<string>
     getDefaultCachePath: () => Promise<string>
+    /** @deprecated Direct DB 模式下已无操作，返回 skipped=true。 */
     migrateCache: (newCachePath: string) => Promise<{
       success: boolean
       movedCount?: number
       error?: string
+      skipped?: boolean
     }>
     scanImages: (dirPath: string) => Promise<{
       success: boolean
@@ -407,17 +422,23 @@ export interface ElectronAPI {
       outputPath?: string
       error?: string
     }>
+    /** @deprecated Direct DB 模式下已无操作，返回 skipped=true。 */
     checkForUpdates: () => Promise<{
       hasUpdate: boolean
       updateCount?: number
       error?: string
+      skipped?: boolean
     }>
-    enableAutoUpdate: (intervalSeconds?: number) => Promise<{ success: boolean }>
-    disableAutoUpdate: () => Promise<{ success: boolean }>
+    /** @deprecated Direct DB 模式下已无操作。 */
+    enableAutoUpdate: (intervalSeconds?: number) => Promise<{ success: boolean; skipped?: boolean }>
+    /** @deprecated Direct DB 模式下已无操作。 */
+    disableAutoUpdate: () => Promise<{ success: boolean; skipped?: boolean }>
+    /** @deprecated Direct DB 模式下已无操作，返回 skipped=true。 */
     autoIncrementalUpdate: (silent?: boolean) => Promise<{
       success: boolean
       updated: boolean
       error?: string
+      skipped?: boolean
     }>
     onProgress: (callback: (data: DecryptProgress) => void) => () => void
     onUpdateAvailable: (callback: (hasUpdate: boolean) => void) => () => void

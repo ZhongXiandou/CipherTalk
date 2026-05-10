@@ -307,7 +307,7 @@ npm run build
 本项目采用 **CC BY-NC-SA 4.0** 许可证  
 （知识共享 署名-非商业性使用-相同方式共享 4.0 国际许可协议）
 
-<div align="center">
+<div>
 
 ### ❌ 严格禁止
 
@@ -332,20 +332,6 @@ npm run build
 
 ---
 
-## 📞 联系方式
-
-<div align="center">
-
-| 渠道 | 链接 |
-|:---:|:---|
-| 🌐 **官方网站** | [密语 CipherTalk](https://miyu.aiqji.com) |
-| 🐛 **问题反馈** | [GitHub Issues](https://github.com/ILoveBingLu/CipherTalk/issues) |
-| 📱 **Telegram 群组** | [加入群聊](https://t.me/CipherTalkChat) |
-
-</div>
-
----
-
 ## 🙏 致谢
 
 感谢所有为开源社区做出贡献的开发者们！
@@ -353,6 +339,13 @@ npm run build
 特别感谢：
 - **[WeFlow](https://github.com/hicccc77/WeFlow)** - 提供了部分功能参考
 - **所有贡献者** - 感谢每一位为本项目做出贡献的开发者
+
+## 🤝 Contributors
+感谢所有贡献者
+
+<a href="https://github.com/ILoveBingLu/CipherTalk/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=ILoveBingLu/CipherTalk" />
+</a>
 
 ---
 
@@ -370,6 +363,10 @@ npm run build
 
 ---
 
-<sub>一鲸落，万物生 · 愿每一段对话都被温柔以待 ❤️ by the CipherTalk Team</sub>
+<sub>一鲸落，万物生 · 愿每一段对话都被温柔以待</sub>
+
+<sub>❤️ by the CipherTalk</sub>
 
 </div>
+
+

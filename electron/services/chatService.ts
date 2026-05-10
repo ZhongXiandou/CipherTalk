@@ -1,4 +1,3 @@
-import Database from 'better-sqlite3'
 import { EventEmitter } from 'events'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -7,6 +6,8 @@ import * as http from 'http'
 import * as fzstd from 'fzstd'
 import { ConfigService } from './config'
 import { getAppPath, getDocumentsPath, getExePath, isElectronPackaged } from './runtimePaths'
+import { dbAdapter } from './dbAdapter'
+import { findMessageDbPaths, getDbStoragePath } from './dbStoragePaths'
 
 export interface ChatSession {
   username: string
@@ -139,38 +140,23 @@ const SESSION_TABLE_CACHE_DURATION = 60 * 1000  // 60秒，与原项目一致
 
 class ChatService extends EventEmitter {
   private configService: ConfigService
-  private sessionDb: Database.Database | null = null
-  private contactDb: Database.Database | null = null
-  private emoticonDb: Database.Database | null = null
-  private emotionDb: Database.Database | null = null
-  private headImageDb: Database.Database | null = null
-  private miscDb: Database.Database | null = null
-  private messageDbCache: Map<string, Database.Database> = new Map()
-  private dbDir: string | null = null
 
-  // 缓存：已知的消息数据库文件列表
-  private knownMessageDbFiles: Set<string> = new Set()
   // 缓存：会话ID -> 所有包含该会话消息的数据库和表名（增量更新）
   private sessionTableCache: Map<string, { dbPath: string; tableName: string }[]> = new Map()
   // 缓存时间戳
   private sessionTableCacheTime: number = 0
+  // 缓存：已知的消息数据库文件列表
+  private knownMessageDbFiles: Set<string> = new Set()
   // 缓存：当前用户在 Name2Id 表中的 rowid（按数据库路径）- 这个是稳定的
   private myRowIdCache: Map<string, number | null> = new Map()
   // 缓存：数据库是否有 Name2Id 表 - 表结构不会变
   private hasName2IdCache: Map<string, boolean> = new Map()
-  // 缓存：预编译的 SQL 语句 - 提升查询性能
-  private preparedStmtCache: Map<string, Database.Statement> = new Map()
   // 缓存：联系人表结构信息 - 表结构不会变
   private contactColumnsCache: { hasBigHeadUrl: boolean; hasSmallHeadUrl: boolean; selectCols: string[] } | null = null
   // 缓存：头像 base64 数据
   private avatarBase64Cache: Map<string, string> = new Map()
   // 标记：head_image.db 是否损坏
   private headImageDbCorrupted: boolean = false
-
-  // 自动同步相关
-  private syncTimer: NodeJS.Timeout | null = null
-  private lastDbCheckTime: number = 0
-  private isCheckingUpdates: boolean = false
 
   // 增量同步相关
   private currentSessionId: string | null = null
@@ -192,6 +178,7 @@ class ChatService extends EventEmitter {
 
   /**
    * 清理账号目录名（支持 wxid_ 格式和自定义微信号格式）
+   * 保留以兼容原来内部对 cleanedMyWxid 的使用语义
    */
   private cleanAccountDirName(dirName: string): string {
     const trimmed = dirName.trim()
@@ -213,22 +200,18 @@ class ChatService extends EventEmitter {
   }
 
   /**
-   * 查找账号对应的实际目录名
-   * 因为目录名可能是 wxid_xxx、abc123 或 abc123_xxxx 等格式
-   * 支持多种匹配方式以兼容不同版本的目录命名
+   * 查找账号对应的实际目录名（仅用于表情包/文件路径解析等非数据库场景）
    */
   private findAccountDir(baseDir: string, wxid: string): string | null {
     if (!fs.existsSync(baseDir)) return null
 
     const cleanedWxid = this.cleanAccountDirName(wxid)
 
-    // 1. 直接匹配原始 wxid
     const directPath = path.join(baseDir, wxid)
     if (fs.existsSync(directPath)) {
       return wxid
     }
 
-    // 2. 直接匹配清理后的 wxid
     if (cleanedWxid !== wxid) {
       const cleanedPath = path.join(baseDir, cleanedWxid)
       if (fs.existsSync(cleanedPath)) {
@@ -236,7 +219,6 @@ class ChatService extends EventEmitter {
       }
     }
 
-    // 3. 扫描目录，查找匹配的账号目录
     try {
       const entries = fs.readdirSync(baseDir, { withFileTypes: true })
       for (const entry of entries) {
@@ -247,22 +229,18 @@ class ChatService extends EventEmitter {
         const wxidLower = wxid.toLowerCase()
         const cleanedWxidLower = cleanedWxid.toLowerCase()
 
-        // 精确匹配（忽略大小写）
         if (dirNameLower === wxidLower || dirNameLower === cleanedWxidLower) {
           return dirName
         }
 
-        // 前缀匹配: 目录名以 wxid 或 cleanedWxid 开头
         if (dirNameLower.startsWith(wxidLower + '_') || dirNameLower.startsWith(cleanedWxidLower + '_')) {
           return dirName
         }
 
-        // 反向前缀匹配: wxid 或 cleanedWxid 以目录名开头
         if (wxidLower.startsWith(dirNameLower + '_') || cleanedWxidLower.startsWith(dirNameLower + '_')) {
           return dirName
         }
 
-        // 清理目录名后匹配
         const cleanedDirName = this.cleanAccountDirName(dirName)
         if (cleanedDirName.toLowerCase() === wxidLower || cleanedDirName.toLowerCase() === cleanedWxidLower) {
           return dirName
@@ -276,28 +254,20 @@ class ChatService extends EventEmitter {
   }
 
   /**
-   * 获取解密后的数据库目录
-   * - 如果配置了 cachePath，使用配置的路径
-   * - 开发环境：使用文档目录
-   * - 生产环境：
-   *   - C 盘安装：使用文档目录
-   *   - 其他盘安装：使用软件安装目录
+   * 获取解密后的数据库目录（仅用于表情包/文件路径解析等非数据库场景）
    */
   private getDecryptedDbDir(): string {
     const cachePath = this.configService.get('cachePath')
     if (cachePath) return cachePath
 
-    // 开发环境使用文档目录
     if (process.env.VITE_DEV_SERVER_URL) {
       const documentsPath = getDocumentsPath()
       return path.join(documentsPath, 'CipherTalkData')
     }
 
-    // 生产环境
     const exePath = getExePath()
     const installDir = path.dirname(exePath)
 
-    // 检查是否安装在 C 盘
     const isOnCDrive = /^[cC]:/i.test(installDir) || installDir.startsWith('\\')
 
     if (isOnCDrive) {
@@ -309,171 +279,48 @@ class ChatService extends EventEmitter {
   }
 
   /**
-   * 连接数据库
+   * 连接数据库（no-op；真正的 open 由 wcdbService 在启动流程完成）
    */
   async connect(): Promise<{ success: boolean; error?: string }> {
-    try {
-      const wxid = this.configService.get('myWxid')
-      if (!wxid) {
-        return { success: false, error: '请先在设置页面配置微信ID' }
-      }
-
-      const baseDir = this.getDecryptedDbDir()
-      const accountDir = this.findAccountDir(baseDir, wxid)
-
-      if (!accountDir) {
-        return { success: false, error: `未找到账号 ${wxid} 的数据库目录，请先解密数据库` }
-      }
-
-      const dbDir = path.join(baseDir, accountDir)
-
-      const sessionDbPath = path.join(dbDir, 'session.db')
-      if (!fs.existsSync(sessionDbPath)) {
-        return { success: false, error: '未找到 session.db，请先解密数据库' }
-      }
-
-      this.close()
-
-      this.sessionDb = new Database(sessionDbPath, { readonly: true })
-      this.dbDir = dbDir
-
-      const contactDbPath = path.join(dbDir, 'contact.db')
-      if (fs.existsSync(contactDbPath)) {
-        this.contactDb = new Database(contactDbPath, { readonly: true })
-      }
-
-      const emoticonDbPath = path.join(dbDir, 'emoticon.db')
-      if (fs.existsSync(emoticonDbPath)) {
-        this.emoticonDb = new Database(emoticonDbPath, { readonly: true })
-      }
-
-      const emotionDbPath = path.join(dbDir, 'emotion.db')
-      if (fs.existsSync(emotionDbPath)) {
-        this.emotionDb = new Database(emotionDbPath, { readonly: true })
-      }
-
-      const headImageDbPath = path.join(dbDir, 'head_image.db')
-      if (fs.existsSync(headImageDbPath)) {
-        this.headImageDb = new Database(headImageDbPath, { readonly: true })
-      }
-
-      const miscDbPath = path.join(dbDir, 'misc.db')
-      if (fs.existsSync(miscDbPath)) {
-        this.miscDb = new Database(miscDbPath, { readonly: true })
-      }
-
-      // 连接时强制清除所有缓存，确保获取最新数据
-      // 这解决了增量更新后重新打开窗口时数据不刷新的问题
-      this.sessionTableCache.clear()
-      this.sessionTableCacheTime = 0
-      this.knownMessageDbFiles.clear()
-      this.avatarBase64Cache.clear()
-
-      return { success: true }
-    } catch (e) {
-      console.error('ChatService: 连接数据库失败:', e)
-      return { success: false, error: String(e) }
-    }
+    return { success: true }
   }
 
   /**
-   * 关闭数据库连接
+   * 关闭数据库连接（no-op；真正的 close 由 wcdbService 接管）
    */
   close(): void {
-    // 先停止自动同步定时器
-    this.stopAutoSync()
-
-    try {
-      this.sessionDb?.close()
-      this.contactDb?.close()
-      this.emoticonDb?.close()
-      this.emotionDb?.close()
-      this.headImageDb?.close()
-      this.miscDb?.close()
-      this.messageDbCache.forEach(db => {
-        try { db.close() } catch { }
-      })
-    } catch (e) {
-      console.error('ChatService: 关闭数据库失败:', e)
-    }
-    this.sessionDb = null
-    this.contactDb = null
-    this.emoticonDb = null
-    this.emotionDb = null
-    this.headImageDb = null
-    this.messageDbCache.clear()
-    this.knownMessageDbFiles.clear()
+    // 清理本地缓存（真正的句柄由 wcdbService 的 Worker 管理）
     this.sessionTableCache.clear()
     this.sessionTableCacheTime = 0
+    this.knownMessageDbFiles.clear()
     this.myRowIdCache.clear()
     this.hasName2IdCache.clear()
-    this.preparedStmtCache.clear()
     this.contactColumnsCache = null
     this.avatarBase64Cache.clear()
-    this.dbDir = null
   }
 
   /**
-   * 关闭指定的数据库文件（用于增量更新时释放单个文件）
-   * 这样可以在更新某个数据库时，不影响其他数据库的查询
+   * 关闭指定的数据库文件（no-op；wcdbService 统一管理）
    */
-  closeDatabase(fileName: string): void {
-    const fileNameLower = fileName.toLowerCase()
+  closeDatabase(_fileName: string): void {
+    // 不再持有本地 better-sqlite3 句柄。清掉相关缓存即可。
+    this.sessionTableCache.clear()
+    this.sessionTableCacheTime = 0
+    this.knownMessageDbFiles.clear()
+    this.avatarBase64Cache.clear()
+    this.contactColumnsCache = null
+  }
 
-    // 检查是否是核心数据库
-    if (fileNameLower === 'session.db' && this.sessionDb) {
-      try { this.sessionDb.close() } catch { }
-      this.sessionDb = null
-      return
-    }
-
-    if (fileNameLower === 'contact.db' && this.contactDb) {
-      try { this.contactDb.close() } catch { }
-      this.contactDb = null
-      this.contactColumnsCache = null
-      return
-    }
-
-    if (fileNameLower === 'emoticon.db' && this.emoticonDb) {
-      try { this.emoticonDb.close() } catch { }
-      this.emoticonDb = null
-      return
-    }
-
-    if (fileNameLower === 'emotion.db' && this.emotionDb) {
-      try { this.emotionDb.close() } catch { }
-      this.emotionDb = null
-      return
-    }
-
-    if (fileNameLower === 'head_image.db' && this.headImageDb) {
-      try { this.headImageDb.close() } catch { }
-      this.headImageDb = null
-      this.avatarBase64Cache.clear()
-      return
-    }
-
-    // 检查是否是消息数据库（在缓存中查找）
-    const entries = Array.from(this.messageDbCache.entries())
-    for (let i = 0; i < entries.length; i++) {
-      const [dbPath, db] = entries[i]
-      if (dbPath.toLowerCase().endsWith(fileNameLower)) {
-        try { db.close() } catch { }
-        this.messageDbCache.delete(dbPath)
-        this.knownMessageDbFiles.delete(dbPath)
-        // 清除相关的预编译语句缓存
-        const stmtKeys = Array.from(this.preparedStmtCache.keys())
-        for (let j = 0; j < stmtKeys.length; j++) {
-          if (stmtKeys[j].startsWith(dbPath)) {
-            this.preparedStmtCache.delete(stmtKeys[j])
-          }
-        }
-        // 清除会话表缓存（因为可能包含这个数据库的信息）
-        this.sessionTableCache.clear()
-        this.sessionTableCacheTime = 0
-        return
+  /**
+   * 由 startup.ts 调用：把 monitorBridge 的变更事件桥接成 chatService 自身的 EventEmitter
+   * 暂时只做事件转发；不在这里做 query 或 push。
+   */
+  attachMonitor(bridge: { on: (evt: string, cb: (p: any) => void) => void }): void {
+    bridge.on('change', (payload) => {
+      if (payload?.table === 'Session' || payload?.table === 'Message' || payload?.table === 'Contact') {
+        this.emit('dbChange', payload)
       }
-    }
+    })
   }
 
   /**
@@ -481,17 +328,12 @@ class ChatService extends EventEmitter {
    */
   async getSessions(offset?: number, limit?: number): Promise<{ success: boolean; sessions?: ChatSession[]; error?: string }> {
     try {
-      if (!this.sessionDb) {
-        const connectResult = await this.connect()
-        if (!connectResult.success) {
-          return { success: false, error: connectResult.error }
-        }
-      }
-
       // 获取表列表
-      const tables = this.sessionDb!.prepare(
+      const tables = await dbAdapter.all<{ name: string }>(
+        'session',
+        '',
         "SELECT name FROM sqlite_master WHERE type='table'"
-      ).all() as any[]
+      )
       const tableNames = tables.map(t => t.name)
 
       // 查找会话表
@@ -507,18 +349,15 @@ class ChatService extends EventEmitter {
         return { success: false, error: '未找到会话表' }
       }
 
-      // 获取表结构
-      const columns = this.sessionDb!.prepare(
-        `PRAGMA table_info(${sessionTableName})`
-      ).all() as any[]
-      const columnNames = columns.map((c: any) => c.name)
-
       // 查询数据（支持分页）
       const safeOffset = Math.max(0, Math.floor(Number(offset) || 0))
       const safeLimit = Math.max(1, Math.floor(Number(limit) || 999999))
-      const rows = this.sessionDb!.prepare(
-        `SELECT * FROM ${sessionTableName} ORDER BY sort_timestamp DESC LIMIT ? OFFSET ?`
-      ).all(safeLimit, safeOffset) as any[]
+      const rows = await dbAdapter.all<any>(
+        'session',
+        '',
+        `SELECT * FROM ${sessionTableName} ORDER BY sort_timestamp DESC LIMIT ? OFFSET ?`,
+        [safeLimit, safeOffset]
+      )
 
       // 转换为 ChatSession
       const sessions: ChatSession[] = []
@@ -556,13 +395,15 @@ class ChatService extends EventEmitter {
    * 补充联系人信息
    */
   private async enrichSessionsWithContacts(sessions: ChatSession[]): Promise<void> {
-    if (!this.contactDb || sessions.length === 0) return
+    if (sessions.length === 0) return
 
     try {
       // 检查 contact 表是否存在
-      const tables = this.contactDb.prepare(
+      const tables = await dbAdapter.all<any>(
+        'contact',
+        '',
         "SELECT name FROM sqlite_master WHERE type='table' AND name='contact'"
-      ).all()
+      )
 
       if (tables.length === 0) {
         return
@@ -570,7 +411,7 @@ class ChatService extends EventEmitter {
 
       // 使用缓存的列信息
       if (!this.contactColumnsCache) {
-        const columns = this.contactDb.prepare("PRAGMA table_info(contact)").all() as any[]
+        const columns = await dbAdapter.all<any>('contact', '', "PRAGMA table_info(contact)")
         const columnNames = columns.map((c: any) => c.name)
 
         const hasBigHeadUrl = columnNames.includes('big_head_url')
@@ -585,15 +426,15 @@ class ChatService extends EventEmitter {
 
       const { hasBigHeadUrl, hasSmallHeadUrl, selectCols } = this.contactColumnsCache
 
-      const stmt = this.contactDb.prepare(`
+      const contactSql = `
         SELECT ${selectCols.join(', ')}
         FROM contact
         WHERE username = ?
-      `)
+      `
 
       for (const session of sessions) {
         try {
-          const contact = stmt.get(session.username) as any
+          const contact = await dbAdapter.get<any>('contact', '', contactSql, [session.username])
           if (contact) {
             session.displayName = contact.remark || contact.nick_name || contact.alias || session.username
 
@@ -618,54 +459,45 @@ class ChatService extends EventEmitter {
    */
   async getContacts(): Promise<{ success: boolean; contacts?: ContactInfo[]; error?: string }> {
     try {
-      if (!this.contactDb) {
-        const connectResult = await this.connect()
-        if (!connectResult.success) {
-          return { success: false, error: connectResult.error }
-        }
-      }
-
-      if (!this.contactDb) {
-        return { success: false, error: '联系人数据库未连接' }
-      }
-
       // 获取会话表的最后联系时间
       const lastContactTimeMap = new Map<string, number>()
-      if (this.sessionDb) {
-        try {
-          const tables = this.sessionDb.prepare(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-          ).all() as any[]
-          const tableNames = tables.map((t: any) => t.name)
+      try {
+        const tables = await dbAdapter.all<any>(
+          'session',
+          '',
+          "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+        const tableNames = tables.map((t: any) => t.name)
 
-          let sessionTableName: string | null = null
-          for (const name of ['SessionTable', 'Session', 'session']) {
-            if (tableNames.includes(name)) {
-              sessionTableName = name
-              break
-            }
+        let sessionTableName: string | null = null
+        for (const name of ['SessionTable', 'Session', 'session']) {
+          if (tableNames.includes(name)) {
+            sessionTableName = name
+            break
           }
-
-          if (sessionTableName) {
-            const sessionRows = this.sessionDb.prepare(
-              `SELECT username, user_name, userName, sort_timestamp, sortTimestamp FROM ${sessionTableName}`
-            ).all() as any[]
-
-            for (const row of sessionRows) {
-              const username = row.username || row.user_name || row.userName || ''
-              const timestamp = row.sort_timestamp || row.sortTimestamp || 0
-              if (username && timestamp) {
-                lastContactTimeMap.set(username, timestamp)
-              }
-            }
-          }
-        } catch (e) {
-          // 忽略错误，继续使用默认排序
         }
+
+        if (sessionTableName) {
+          const sessionRows = await dbAdapter.all<any>(
+            'session',
+            '',
+            `SELECT username, user_name, userName, sort_timestamp, sortTimestamp FROM ${sessionTableName}`
+          )
+
+          for (const row of sessionRows) {
+            const username = row.username || row.user_name || row.userName || ''
+            const timestamp = row.sort_timestamp || row.sortTimestamp || 0
+            if (username && timestamp) {
+              lastContactTimeMap.set(username, timestamp)
+            }
+          }
+        }
+      } catch (e) {
+        // 忽略错误，继续使用默认排序
       }
 
       // 获取表结构
-      const columns = this.contactDb.prepare("PRAGMA table_info(contact)").all() as any[]
+      const columns = await dbAdapter.all<any>('contact', '', "PRAGMA table_info(contact)")
       const columnNames = columns.map((c: any) => c.name)
 
       const hasBigHeadUrl = columnNames.includes('big_head_url')
@@ -677,9 +509,11 @@ class ChatService extends EventEmitter {
       if (hasSmallHeadUrl) selectCols.push('small_head_url')
       if (hasLocalType) selectCols.push('local_type')
 
-      const rows = this.contactDb.prepare(`
-        SELECT ${selectCols.join(', ')} FROM contact
-      `).all() as any[]
+      const rows = await dbAdapter.all<any>(
+        'contact',
+        '',
+        `SELECT ${selectCols.join(', ')} FROM contact`
+      )
 
       const contacts: ContactInfo[] = []
       const excludeNames = ['medianote', 'floatbottle', 'qmessage', 'qqmail', 'fmessage']
@@ -727,14 +561,11 @@ class ChatService extends EventEmitter {
       contacts.sort((a, b) => {
         const timeA = (a as any).lastContactTime || 0
         const timeB = (b as any).lastContactTime || 0
-        // 都有联系时间，按时间倒序
         if (timeA && timeB) {
           return timeB - timeA
         }
-        // 有联系时间的排前面
         if (timeA && !timeB) return -1
         if (!timeA && timeB) return 1
-        // 都没有联系时间，按名称排序
         return a.displayName.localeCompare(b.displayName, 'zh-CN')
       })
 
@@ -749,24 +580,15 @@ class ChatService extends EventEmitter {
    * 查找消息数据库（增量扫描：返回所有数据库，包括新发现的）
    */
   private findMessageDbs(): { allDbs: string[]; newDbs: string[] } {
-    if (!this.dbDir) return { allDbs: [], newDbs: [] }
-
     const allDbs: string[] = []
     const newDbs: string[] = []
 
     try {
-      const files = fs.readdirSync(this.dbDir)
-      for (const file of files) {
-        const lower = file.toLowerCase()
-        if ((lower.startsWith('message') || lower.startsWith('msg')) && lower.endsWith('.db')) {
-          const fullPath = path.join(this.dbDir, file)
-          allDbs.push(fullPath)
-
-          // 检查是否是新发现的数据库
-          if (!this.knownMessageDbFiles.has(fullPath)) {
-            newDbs.push(fullPath)
-            this.knownMessageDbFiles.add(fullPath)
-          }
+      for (const fullPath of findMessageDbPaths()) {
+        allDbs.push(fullPath)
+        if (!this.knownMessageDbFiles.has(fullPath)) {
+          newDbs.push(fullPath)
+          this.knownMessageDbFiles.add(fullPath)
         }
       }
     } catch { }
@@ -778,90 +600,14 @@ class ChatService extends EventEmitter {
    * 刷新消息数据库缓存（解密后调用）
    */
   refreshMessageDbCache(): void {
-    // 关闭所有已打开的消息数据库连接
-    this.messageDbCache.forEach(db => {
-      try { db.close() } catch { }
-    })
-    this.messageDbCache.clear()
     this.knownMessageDbFiles.clear()
     this.sessionTableCache.clear()
     this.sessionTableCacheTime = 0
     this.myRowIdCache.clear()
     this.hasName2IdCache.clear()
-    this.preparedStmtCache.clear()
-
-    // 同时刷新 sessionDb 和 contactDb，确保获取最新的会话列表
-    try {
-      if (this.sessionDb) {
-        this.sessionDb.close()
-        this.sessionDb = null
-      }
-      if (this.contactDb) {
-        this.contactDb.close()
-        this.contactDb = null
-      }
-      this.contactColumnsCache = null
-    } catch {
-      // ignore
-    }
-
-    // 尝试推送增量消息
-    this.checkNewMessagesForCurrentSession()
-  }
-
-  /**
-   * 获取或打开消息数据库
-   */
-  private getMessageDb(dbPath: string): Database.Database | null {
-    if (this.messageDbCache.has(dbPath)) {
-      return this.messageDbCache.get(dbPath)!
-    }
-
-    try {
-      // 以读写模式打开，以便创建索引
-      const db = new Database(dbPath)
-      this.messageDbCache.set(dbPath, db)
-
-      // 尝试为消息表创建索引（如果不存在）
-      this.ensureMessageIndexes(db)
-
-      return db
-    } catch (e) {
-      console.error('ChatService: 打开消息数据库失败:', dbPath, e)
-      return null
-    }
-  }
-
-  /**
-   * 为消息表创建索引以加速查询
-   */
-  private ensureMessageIndexes(db: Database.Database): void {
-    try {
-      // 获取所有消息表
-      const tables = db.prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'Msg_%'"
-      ).all() as any[]
-
-      for (const table of tables) {
-        const tableName = table.name as string
-        const indexName = `idx_${tableName}_sort_seq`
-
-        // 检查索引是否已存在
-        const existingIndex = db.prepare(
-          "SELECT name FROM sqlite_master WHERE type='index' AND name = ?"
-        ).get(indexName)
-
-        if (!existingIndex) {
-          try {
-            db.exec(`CREATE INDEX IF NOT EXISTS ${indexName} ON ${tableName}(sort_seq DESC)`)
-          } catch (e) {
-            // 忽略索引创建失败（可能是只读数据库）
-          }
-        }
-      }
-    } catch (e) {
-      // 忽略错误
-    }
+    this.contactColumnsCache = null
+    // 尝试推送增量消息（fire-and-forget，避免把同步方法改成 async）
+    void this.checkNewMessagesForCurrentSession()
   }
 
   /**
@@ -885,11 +631,13 @@ class ChatService extends EventEmitter {
   /**
    * 在消息数据库中查找会话的消息表（带缓存）
    */
-  private findMessageTable(db: Database.Database, sessionId: string): string | null {
+  private async findMessageTable(dbPath: string, sessionId: string): Promise<string | null> {
     try {
-      const tables = db.prepare(
+      const tables = await dbAdapter.all<any>(
+        'message',
+        dbPath,
         "SELECT name FROM sqlite_master WHERE type='table' AND lower(name) LIKE 'msg_%'"
-      ).all() as any[]
+      )
 
       const hash = this.getTableNameHash(sessionId).toLowerCase()
 
@@ -919,13 +667,13 @@ class ChatService extends EventEmitter {
 
   /**
    * 查找会话对应的所有数据库和表（带缓存过期）
-   * 
+   *
    * 缓存策略：
    * 1. 缓存60秒后自动过期，重新扫描
    * 2. 如果有新数据库文件，在新数据库中查找并追加到缓存
    * 3. 如果会话未缓存，全量扫描所有数据库
    */
-  private findSessionTables(sessionId: string): { db: Database.Database; tableName: string; dbPath: string }[] {
+  private async findSessionTables(sessionId: string): Promise<{ tableName: string; dbPath: string }[]> {
     const now = Date.now()
     const { allDbs, newDbs } = this.findMessageDbs()
     if (allDbs.length === 0) return []
@@ -945,10 +693,7 @@ class ChatService extends EventEmitter {
       const newPairs: { dbPath: string; tableName: string }[] = []
 
       for (const dbPath of newDbs) {
-        const db = this.getMessageDb(dbPath)
-        if (!db) continue
-
-        const tableName = this.findMessageTable(db, sessionId)
+        const tableName = await this.findMessageTable(dbPath, sessionId)
         if (tableName) {
           newPairs.push({ dbPath, tableName })
         }
@@ -963,30 +708,16 @@ class ChatService extends EventEmitter {
 
     // 情况2：有缓存，没有新数据库 -> 直接使用缓存
     if (cached && cached.length > 0) {
-      const result: { db: Database.Database; tableName: string; dbPath: string }[] = []
-      for (const item of cached) {
-        const db = this.getMessageDb(item.dbPath)
-        if (db) {
-          result.push({ db, tableName: item.tableName, dbPath: item.dbPath })
-        }
-      }
-      if (result.length > 0) {
-        return result
-      }
-      // 缓存中的数据库都无法打开，清空缓存重新扫描
-      this.sessionTableCache.delete(sessionId)
+      return cached.map(item => ({ tableName: item.tableName, dbPath: item.dbPath }))
     }
 
     // 情况3：没有缓存 -> 全量扫描所有数据库
-    const dbTablePairs: { db: Database.Database; tableName: string; dbPath: string }[] = []
+    const dbTablePairs: { tableName: string; dbPath: string }[] = []
 
     for (const dbPath of allDbs) {
-      const db = this.getMessageDb(dbPath)
-      if (!db) continue
-
-      const tableName = this.findMessageTable(db, sessionId)
+      const tableName = await this.findMessageTable(dbPath, sessionId)
       if (tableName) {
-        dbTablePairs.push({ db, tableName, dbPath })
+        dbTablePairs.push({ tableName, dbPath })
       }
     }
 
@@ -1001,15 +732,18 @@ class ChatService extends EventEmitter {
   /**
    * 检查表是否存在（带缓存）
    */
-  private checkTableExists(db: Database.Database, tableName: string): boolean {
-    const cacheKey = `${db.name}:${tableName}`
+  private async checkTableExists(dbPath: string, tableName: string): Promise<boolean> {
+    const cacheKey = `${dbPath}:${tableName}`
     const cached = this.hasName2IdCache.get(cacheKey)
     if (cached !== undefined) return cached
 
     try {
-      const result = db.prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name = ?"
-      ).get(tableName)
+      const result = await dbAdapter.get<any>(
+        'message',
+        dbPath,
+        "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+        [tableName]
+      )
       const exists = !!result
       this.hasName2IdCache.set(cacheKey, exists)
       return exists
@@ -1020,35 +754,49 @@ class ChatService extends EventEmitter {
   }
 
   /**
-   * 获取预编译的查询语句
+   * 解析当前用户在 Name2Id 表中的 rowid（带缓存）。
+   * 行为与原各个 query 方法中内联的逻辑完全一致：
+   *   - 优先按原始 myWxid 查
+   *   - 否则按清理后的 cleanedMyWxid 查
+   *   - 以 dbPath:<key> 作为缓存 key
    */
-  private getPreparedStatement(db: Database.Database, tableName: string, hasName2Id: boolean, hasMyRowId: boolean): Database.Statement {
-    const cacheKey = `${db.name}:${tableName}:${hasName2Id}:${hasMyRowId}`
-    const cached = this.preparedStmtCache.get(cacheKey)
-    if (cached) return cached
+  private async resolveMyRowId(dbPath: string, myWxid: string, cleanedMyWxid: string, hasName2IdTable: boolean): Promise<number | null> {
+    if (!myWxid || !hasName2IdTable) return null
 
-    let sql: string
-    if (hasName2Id && hasMyRowId) {
-      sql = `SELECT m.*, 
-             CASE WHEN m.real_sender_id = ? THEN 1 ELSE 0 END AS computed_is_send,
-             n.user_name AS sender_username
-             FROM ${tableName} m
-             LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
-             ORDER BY m.sort_seq DESC, m.create_time DESC, m.local_id DESC
-             LIMIT ? OFFSET ?`
-    } else if (hasName2Id) {
-      sql = `SELECT m.*, n.user_name AS sender_username
-             FROM ${tableName} m
-             LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
-             ORDER BY m.sort_seq DESC, m.create_time DESC, m.local_id DESC
-             LIMIT ? OFFSET ?`
-    } else {
-      sql = `SELECT * FROM ${tableName} ORDER BY sort_seq DESC, create_time DESC, local_id DESC LIMIT ? OFFSET ?`
+    const cacheKeyOriginal = `${dbPath}:${myWxid}`
+    const cachedRowIdOriginal = this.myRowIdCache.get(cacheKeyOriginal)
+    if (cachedRowIdOriginal !== undefined) return cachedRowIdOriginal
+
+    const row = await dbAdapter.get<any>(
+      'message',
+      dbPath,
+      'SELECT rowid FROM Name2Id WHERE user_name = ?',
+      [myWxid]
+    )
+    if (row?.rowid) {
+      const rid = row.rowid as number
+      this.myRowIdCache.set(cacheKeyOriginal, rid)
+      return rid
     }
 
-    const stmt = db.prepare(sql)
-    this.preparedStmtCache.set(cacheKey, stmt)
-    return stmt
+    if (cleanedMyWxid && cleanedMyWxid !== myWxid) {
+      const cacheKeyCleaned = `${dbPath}:${cleanedMyWxid}`
+      const cachedRowIdCleaned = this.myRowIdCache.get(cacheKeyCleaned)
+      if (cachedRowIdCleaned !== undefined) return cachedRowIdCleaned
+
+      const row2 = await dbAdapter.get<any>(
+        'message',
+        dbPath,
+        'SELECT rowid FROM Name2Id WHERE user_name = ?',
+        [cleanedMyWxid]
+      )
+      const rid = row2?.rowid ?? null
+      this.myRowIdCache.set(cacheKeyCleaned, rid)
+      return rid
+    }
+
+    this.myRowIdCache.set(cacheKeyOriginal, null)
+    return null
   }
 
   /**
@@ -1060,30 +808,17 @@ class ChatService extends EventEmitter {
     limit: number = 50
   ): Promise<{ success: boolean; messages?: Message[]; hasMore?: boolean; error?: string }> {
     try {
-      // 如果数据库未连接，尝试自动重连
-      // 这解决了增量更新期间数据库被关闭后，用户无法查询消息的问题
-      if (!this.dbDir) {
-        const connectResult = await this.connect()
-        if (!connectResult.success) {
-          return { success: false, error: connectResult.error || '数据库未连接' }
-        }
-      }
-
       // 获取当前用户的 wxid
       const myWxid = this.configService.get('myWxid')
       const cleanedMyWxid = myWxid ? this.cleanAccountDirName(myWxid) : ''
 
-      // 当 offset === 0 时（重新加载），只清除该会话的表缓存，保留数据库连接池和其他缓存
-      // 这样可以避免每次点击会话时都重新扫描和打开数据库，大幅提升性能
+      // 当 offset === 0 时（重新加载），只清除该会话的表缓存，保留其他缓存
       if (offset === 0) {
         this.sessionTableCache.delete(sessionId)
-        // 不清除 knownMessageDbFiles，避免重复扫描
-        // 不关闭数据库连接，保持连接池以提高性能
-        // 不清除 myRowIdCache、hasName2IdCache、preparedStmtCache，这些缓存可以复用
       }
 
       // 使用缓存查找会话对应的数据库和表
-      const dbTablePairs = this.findSessionTables(sessionId)
+      const dbTablePairs = await this.findSessionTables(sessionId)
       if (dbTablePairs.length === 0) {
         return { success: false, error: '未找到该会话的消息表' }
       }
@@ -1092,60 +827,38 @@ class ChatService extends EventEmitter {
       let allMessages: Message[] = []
       const minFetchPerDb = Math.max(offset + limit + 1, 100)
 
-      for (const { db, tableName, dbPath } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
-          // 根据设置决定是否进行完整性检查（默认跳过以提高性能）
-          const skipIntegrityCheck = this.configService.get('skipIntegrityCheck') === true
-          if (!skipIntegrityCheck) {
-            // 只在设置中未启用"跳过完整性检查"时才检查（默认是 false，所以默认会检查）
-            // 但为了性能，我们默认跳过检查，只在用户明确要求时才检查
-            // 如果数据库损坏，会在查询时抛出错误，那时再处理
-          }
-
-          const hasName2IdTable = this.checkTableExists(db, 'Name2Id')
+          const hasName2IdTable = await this.checkTableExists(dbPath, 'Name2Id')
 
           // 获取当前用户的 rowid（使用缓存）
-          // 需要同时尝试原始 wxid 和清理后的 wxid
-          let myRowId: number | null = null
-          if (myWxid && hasName2IdTable) {
-            // 先尝试用原始 wxid 查找
-            const cacheKeyOriginal = `${dbPath}:${myWxid}`
-            const cachedRowIdOriginal = this.myRowIdCache.get(cacheKeyOriginal)
+          const myRowId = await this.resolveMyRowId(dbPath, myWxid, cleanedMyWxid, hasName2IdTable)
 
-            if (cachedRowIdOriginal !== undefined) {
-              myRowId = cachedRowIdOriginal
-            } else {
-              const row = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(myWxid) as any
-              if (row?.rowid) {
-                myRowId = row.rowid
-                this.myRowIdCache.set(cacheKeyOriginal, myRowId)
-              } else if (cleanedMyWxid && cleanedMyWxid !== myWxid) {
-                // 原始 wxid 找不到，尝试清理后的 wxid
-                const cacheKeyCleaned = `${dbPath}:${cleanedMyWxid}`
-                const cachedRowIdCleaned = this.myRowIdCache.get(cacheKeyCleaned)
-
-                if (cachedRowIdCleaned !== undefined) {
-                  myRowId = cachedRowIdCleaned
-                } else {
-                  const row2 = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(cleanedMyWxid) as any
-                  myRowId = row2?.rowid ?? null
-                  this.myRowIdCache.set(cacheKeyCleaned, myRowId)
-                }
-              } else {
-                this.myRowIdCache.set(cacheKeyOriginal, null)
-              }
-            }
-          }
-
-          // 使用预编译语句查询
-          const stmt = this.getPreparedStatement(db, tableName, hasName2IdTable, myRowId !== null)
-          let rows: any[]
-
+          // 构造查询 SQL（与原 getPreparedStatement 语义一致）
+          let sql: string
+          let params: any[]
           if (hasName2IdTable && myRowId !== null) {
-            rows = stmt.all(myRowId, minFetchPerDb, 0) as any[]
+            sql = `SELECT m.*,
+                   CASE WHEN m.real_sender_id = ? THEN 1 ELSE 0 END AS computed_is_send,
+                   n.user_name AS sender_username
+                   FROM ${tableName} m
+                   LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+                   ORDER BY m.sort_seq DESC, m.create_time DESC, m.local_id DESC
+                   LIMIT ? OFFSET ?`
+            params = [myRowId, minFetchPerDb, 0]
+          } else if (hasName2IdTable) {
+            sql = `SELECT m.*, n.user_name AS sender_username
+                   FROM ${tableName} m
+                   LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+                   ORDER BY m.sort_seq DESC, m.create_time DESC, m.local_id DESC
+                   LIMIT ? OFFSET ?`
+            params = [minFetchPerDb, 0]
           } else {
-            rows = stmt.all(minFetchPerDb, 0) as any[]
+            sql = `SELECT * FROM ${tableName} ORDER BY sort_seq DESC, create_time DESC, local_id DESC LIMIT ? OFFSET ?`
+            params = [minFetchPerDb, 0]
           }
+
+          const rows = await dbAdapter.all<any>('message', dbPath, sql, params)
 
           // 批量处理消息
           for (const row of rows) {
@@ -1175,17 +888,14 @@ class ChatService extends EventEmitter {
               emojiMd5 = emojiInfo.md5
               emojiProductId = emojiInfo.productId
             } else if (localType === 3 && content) {
-              // 图片消息
               const imageInfo = this.parseImageInfo(content)
               imageMd5 = imageInfo.md5
               imageDatName = this.parseImageDatNameFromRow(row)
               isLivePhoto = imageInfo.isLivePhoto
             } else if (localType === 43 && content) {
-              // 视频消息
               videoMd5 = this.parseVideoMd5(content)
               videoDuration = this.parseVideoDuration(content)
             } else if (localType === 34 && content) {
-              // 语音消息
               voiceDuration = this.parseVoiceDuration(content)
             } else if (localType === 244813135921 || (content && content.includes('<type>57</type>'))) {
               const quoteInfo = this.parseQuoteMessage(content)
@@ -1196,7 +906,6 @@ class ChatService extends EventEmitter {
               quotedEmojiCdnUrl = quoteInfo.emojiCdnUrl
             }
 
-            // 解析文件消息 (localType === 49 且 XML 中 type=6)
             let fileName: string | undefined
             let fileSize: number | undefined
             let fileExt: string | undefined
@@ -1209,17 +918,14 @@ class ChatService extends EventEmitter {
               fileMd5 = fileInfo.fileMd5
             }
 
-            // 解析聊天记录 (localType === 49 且 XML 中 type=19，或者直接检查 XML type=19)
             let chatRecordList: ChatRecordItem[] | undefined
             if (content) {
-              // 先检查 XML 中是否有 type=19
               const xmlType = this.extractXmlValue(content, 'type')
               if (xmlType === '19' || localType === 49) {
                 chatRecordList = this.parseChatHistory(content)
               }
             }
 
-            // 解析转账消息的付款方和收款方
             let transferPayerUsername: string | undefined
             let transferReceiverUsername: string | undefined
             if ((localType === 49 || localType === 8589934592049) && content) {
@@ -1269,9 +975,6 @@ class ChatService extends EventEmitter {
           // 检测数据库损坏错误
           if (e?.code === 'SQLITE_CORRUPT' || e?.message?.includes('malformed')) {
             console.error(`[ChatService] 数据库损坏: ${dbPath}`, e)
-            // 从缓存中移除损坏的数据库
-            this.messageDbCache.delete(dbPath)
-            try { db.close() } catch { }
             // 刷新缓存，强制重新解密
             this.refreshMessageDbCache()
           } else {
@@ -1286,7 +989,6 @@ class ChatService extends EventEmitter {
       // 去重（同一条消息可能在多个数据库中）
       const seen = new Set<string>()
       allMessages = allMessages.filter(msg => {
-        // 使用多个字段组合去重：serverId + localId + createTime + sortSeq
         const key = `${msg.serverId}-${msg.localId}-${msg.createTime}-${msg.sortSeq}`
         if (seen.has(key)) return false
         seen.add(key)
@@ -1298,13 +1000,11 @@ class ChatService extends EventEmitter {
       const messages = allMessages.slice(offset, offset + limit)
 
       // 反转使最新消息在最后（UI 显示顺序）
-      // 反转使最新消息在最后（UI 显示顺序）
       messages.reverse()
 
       // 更新增量游标（仅在拉取最新一页时）
       if (offset === 0 && messages.length > 0) {
         const latestMsg = messages[messages.length - 1]
-        // 记录已读取的最大 sortSeq
         const currentCursor = this.sessionCursor.get(sessionId) || 0
         if (latestMsg.sortSeq > currentCursor) {
           this.sessionCursor.set(sessionId, latestMsg.sortSeq)
@@ -1330,13 +1030,6 @@ class ChatService extends EventEmitter {
     }
   ): Promise<{ success: boolean; messages?: Message[]; hasMore?: boolean; error?: string }> {
     try {
-      if (!this.dbDir) {
-        const connectResult = await this.connect()
-        if (!connectResult.success) {
-          return { success: false, error: connectResult.error || '数据库未连接' }
-        }
-      }
-
       const normalizedLimit = Number.isFinite(options.limit) ? Math.max(1, Math.floor(options.limit)) : 50
       const startTime = Number.isFinite(options.startTime) && Number(options.startTime) > 0
         ? Math.floor(Number(options.startTime))
@@ -1351,7 +1044,7 @@ class ChatService extends EventEmitter {
 
       const myWxid = this.configService.get('myWxid')
       const cleanedMyWxid = myWxid ? this.cleanAccountDirName(myWxid) : ''
-      const dbTablePairs = this.findSessionTables(sessionId)
+      const dbTablePairs = await this.findSessionTables(sessionId)
 
       if (dbTablePairs.length === 0) {
         return { success: false, error: '未找到该会话的消息表' }
@@ -1360,38 +1053,10 @@ class ChatService extends EventEmitter {
       let allMessages: Message[] = []
       const fetchLimitPerDb = normalizedLimit + 1
 
-      for (const { db, tableName, dbPath } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
-          const hasName2IdTable = this.checkTableExists(db, 'Name2Id')
-
-          let myRowId: number | null = null
-          if (myWxid && hasName2IdTable) {
-            const cacheKeyOriginal = `${dbPath}:${myWxid}`
-            const cachedRowIdOriginal = this.myRowIdCache.get(cacheKeyOriginal)
-
-            if (cachedRowIdOriginal !== undefined) {
-              myRowId = cachedRowIdOriginal
-            } else {
-              const row = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(myWxid) as any
-              if (row?.rowid) {
-                myRowId = row.rowid
-                this.myRowIdCache.set(cacheKeyOriginal, myRowId)
-              } else if (cleanedMyWxid && cleanedMyWxid !== myWxid) {
-                const cacheKeyCleaned = `${dbPath}:${cleanedMyWxid}`
-                const cachedRowIdCleaned = this.myRowIdCache.get(cacheKeyCleaned)
-
-                if (cachedRowIdCleaned !== undefined) {
-                  myRowId = cachedRowIdCleaned
-                } else {
-                  const row2 = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(cleanedMyWxid) as any
-                  myRowId = row2?.rowid ?? null
-                  this.myRowIdCache.set(cacheKeyCleaned, myRowId)
-                }
-              } else {
-                this.myRowIdCache.set(cacheKeyOriginal, null)
-              }
-            }
-          }
+          const hasName2IdTable = await this.checkTableExists(dbPath, 'Name2Id')
+          const myRowId = await this.resolveMyRowId(dbPath, myWxid, cleanedMyWxid, hasName2IdTable)
 
           const whereParts: string[] = []
           const params: Array<number> = []
@@ -1418,7 +1083,7 @@ class ChatService extends EventEmitter {
                    ${whereClause}
                    ORDER BY m.sort_seq DESC, m.create_time DESC, m.local_id DESC
                    LIMIT ?`
-            rows = db.prepare(sql).all(myRowId, ...params, fetchLimitPerDb) as any[]
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [myRowId, ...params, fetchLimitPerDb])
           } else if (hasName2IdTable) {
             sql = `SELECT m.*, n.user_name AS sender_username
                    FROM ${tableName} m
@@ -1426,14 +1091,14 @@ class ChatService extends EventEmitter {
                    ${whereClause}
                    ORDER BY m.sort_seq DESC, m.create_time DESC, m.local_id DESC
                    LIMIT ?`
-            rows = db.prepare(sql).all(...params, fetchLimitPerDb) as any[]
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [...params, fetchLimitPerDb])
           } else {
             sql = `SELECT *
                    FROM ${tableName}
                    ${whereClause}
                    ORDER BY sort_seq DESC, create_time DESC, local_id DESC
                    LIMIT ?`
-            rows = db.prepare(sql).all(...params, fetchLimitPerDb) as any[]
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [...params, fetchLimitPerDb])
           }
 
           for (const row of rows) {
@@ -1462,8 +1127,6 @@ class ChatService extends EventEmitter {
         } catch (e: any) {
           if (e?.code === 'SQLITE_CORRUPT' || e?.message?.includes('malformed')) {
             console.error(`[ChatService] 摘要查询遇到损坏数据库: ${dbPath}`, e)
-            this.messageDbCache.delete(dbPath)
-            try { db.close() } catch { }
             this.refreshMessageDbCache()
           } else {
             console.error('ChatService: 摘要时间范围查询失败:', e)
@@ -1503,17 +1166,10 @@ class ChatService extends EventEmitter {
     cursorLocalId?: number
   ): Promise<{ success: boolean; messages?: Message[]; hasMore?: boolean; error?: string }> {
     try {
-      if (!this.dbDir) {
-        const connectResult = await this.connect()
-        if (!connectResult.success) {
-          return { success: false, error: connectResult.error || '数据库未连接' }
-        }
-      }
-
       const myWxid = this.configService.get('myWxid')
       const cleanedMyWxid = myWxid ? this.cleanAccountDirName(myWxid) : ''
 
-      const dbTablePairs = this.findSessionTables(sessionId)
+      const dbTablePairs = await this.findSessionTables(sessionId)
       if (dbTablePairs.length === 0) {
         return { success: false, error: '未找到该会话的消息表' }
       }
@@ -1523,38 +1179,10 @@ class ChatService extends EventEmitter {
       const effectiveCursorCreateTime = cursorCreateTime ?? Number.MAX_SAFE_INTEGER
       const effectiveCursorLocalId = cursorLocalId ?? Number.MAX_SAFE_INTEGER
 
-      for (const { db, tableName, dbPath } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
-          const hasName2IdTable = this.checkTableExists(db, 'Name2Id')
-
-          let myRowId: number | null = null
-          if (myWxid && hasName2IdTable) {
-            const cacheKeyOriginal = `${dbPath}:${myWxid}`
-            const cachedRowIdOriginal = this.myRowIdCache.get(cacheKeyOriginal)
-
-            if (cachedRowIdOriginal !== undefined) {
-              myRowId = cachedRowIdOriginal
-            } else {
-              const row = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(myWxid) as any
-              if (row?.rowid) {
-                myRowId = row.rowid
-                this.myRowIdCache.set(cacheKeyOriginal, myRowId)
-              } else if (cleanedMyWxid && cleanedMyWxid !== myWxid) {
-                const cacheKeyCleaned = `${dbPath}:${cleanedMyWxid}`
-                const cachedRowIdCleaned = this.myRowIdCache.get(cacheKeyCleaned)
-
-                if (cachedRowIdCleaned !== undefined) {
-                  myRowId = cachedRowIdCleaned
-                } else {
-                  const row2 = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(cleanedMyWxid) as any
-                  myRowId = row2?.rowid ?? null
-                  this.myRowIdCache.set(cacheKeyCleaned, myRowId)
-                }
-              } else {
-                this.myRowIdCache.set(cacheKeyOriginal, null)
-              }
-            }
-          }
+          const hasName2IdTable = await this.checkTableExists(dbPath, 'Name2Id')
+          const myRowId = await this.resolveMyRowId(dbPath, myWxid, cleanedMyWxid, hasName2IdTable)
 
           let sql: string
           let rows: any[]
@@ -1572,7 +1200,7 @@ class ChatService extends EventEmitter {
                    )
                    ORDER BY m.sort_seq DESC, m.create_time DESC, m.local_id DESC
                    LIMIT ?`
-            rows = db.prepare(sql).all(
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
               myRowId,
               cursorSortSeq,
               cursorSortSeq,
@@ -1581,7 +1209,7 @@ class ChatService extends EventEmitter {
               effectiveCursorCreateTime,
               effectiveCursorLocalId,
               fetchLimitPerDb
-            ) as any[]
+            ])
           } else if (hasName2IdTable) {
             sql = `SELECT m.*, n.user_name AS sender_username
                    FROM ${tableName} m
@@ -1593,7 +1221,7 @@ class ChatService extends EventEmitter {
                    )
                    ORDER BY m.sort_seq DESC, m.create_time DESC, m.local_id DESC
                    LIMIT ?`
-            rows = db.prepare(sql).all(
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
               cursorSortSeq,
               cursorSortSeq,
               effectiveCursorCreateTime,
@@ -1601,7 +1229,7 @@ class ChatService extends EventEmitter {
               effectiveCursorCreateTime,
               effectiveCursorLocalId,
               fetchLimitPerDb
-            ) as any[]
+            ])
           } else {
             sql = `SELECT * FROM ${tableName}
                    WHERE (
@@ -1611,7 +1239,7 @@ class ChatService extends EventEmitter {
                    )
                    ORDER BY sort_seq DESC, create_time DESC, local_id DESC
                    LIMIT ?`
-            rows = db.prepare(sql).all(
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
               cursorSortSeq,
               cursorSortSeq,
               effectiveCursorCreateTime,
@@ -1619,7 +1247,7 @@ class ChatService extends EventEmitter {
               effectiveCursorCreateTime,
               effectiveCursorLocalId,
               fetchLimitPerDb
-            ) as any[]
+            ])
           }
 
           for (const row of rows) {
@@ -1734,8 +1362,6 @@ class ChatService extends EventEmitter {
         } catch (e: any) {
           if (e?.code === 'SQLITE_CORRUPT' || e?.message?.includes('malformed')) {
             console.error(`[ChatService] 数据库损坏: ${dbPath}`, e)
-            this.messageDbCache.delete(dbPath)
-            try { db.close() } catch { }
             this.refreshMessageDbCache()
           } else {
             console.error('ChatService: 查询更早消息失败:', e)
@@ -1775,17 +1401,10 @@ class ChatService extends EventEmitter {
     cursorLocalId?: number
   ): Promise<{ success: boolean; messages?: Message[]; hasMore?: boolean; error?: string }> {
     try {
-      if (!this.dbDir) {
-        const connectResult = await this.connect()
-        if (!connectResult.success) {
-          return { success: false, error: connectResult.error || '数据库未连接' }
-        }
-      }
-
       const myWxid = this.configService.get('myWxid')
       const cleanedMyWxid = myWxid ? this.cleanAccountDirName(myWxid) : ''
 
-      const dbTablePairs = this.findSessionTables(sessionId)
+      const dbTablePairs = await this.findSessionTables(sessionId)
       if (dbTablePairs.length === 0) {
         return { success: false, error: '未找到该会话的消息表' }
       }
@@ -1795,38 +1414,10 @@ class ChatService extends EventEmitter {
       const effectiveCursorCreateTime = cursorCreateTime ?? Number.MIN_SAFE_INTEGER
       const effectiveCursorLocalId = cursorLocalId ?? Number.MIN_SAFE_INTEGER
 
-      for (const { db, tableName, dbPath } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
-          const hasName2IdTable = this.checkTableExists(db, 'Name2Id')
-
-          let myRowId: number | null = null
-          if (myWxid && hasName2IdTable) {
-            const cacheKeyOriginal = `${dbPath}:${myWxid}`
-            const cachedRowIdOriginal = this.myRowIdCache.get(cacheKeyOriginal)
-
-            if (cachedRowIdOriginal !== undefined) {
-              myRowId = cachedRowIdOriginal
-            } else {
-              const row = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(myWxid) as any
-              if (row?.rowid) {
-                myRowId = row.rowid
-                this.myRowIdCache.set(cacheKeyOriginal, myRowId)
-              } else if (cleanedMyWxid && cleanedMyWxid !== myWxid) {
-                const cacheKeyCleaned = `${dbPath}:${cleanedMyWxid}`
-                const cachedRowIdCleaned = this.myRowIdCache.get(cacheKeyCleaned)
-
-                if (cachedRowIdCleaned !== undefined) {
-                  myRowId = cachedRowIdCleaned
-                } else {
-                  const row2 = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(cleanedMyWxid) as any
-                  myRowId = row2?.rowid ?? null
-                  this.myRowIdCache.set(cacheKeyCleaned, myRowId)
-                }
-              } else {
-                this.myRowIdCache.set(cacheKeyOriginal, null)
-              }
-            }
-          }
+          const hasName2IdTable = await this.checkTableExists(dbPath, 'Name2Id')
+          const myRowId = await this.resolveMyRowId(dbPath, myWxid, cleanedMyWxid, hasName2IdTable)
 
           let sql: string
           let rows: any[]
@@ -1844,7 +1435,7 @@ class ChatService extends EventEmitter {
                    )
                    ORDER BY m.sort_seq ASC, m.create_time ASC, m.local_id ASC
                    LIMIT ?`
-            rows = db.prepare(sql).all(
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
               myRowId,
               cursorSortSeq,
               cursorSortSeq,
@@ -1853,7 +1444,7 @@ class ChatService extends EventEmitter {
               effectiveCursorCreateTime,
               effectiveCursorLocalId,
               fetchLimitPerDb
-            ) as any[]
+            ])
           } else if (hasName2IdTable) {
             sql = `SELECT m.*, n.user_name AS sender_username
                    FROM ${tableName} m
@@ -1865,7 +1456,7 @@ class ChatService extends EventEmitter {
                    )
                    ORDER BY m.sort_seq ASC, m.create_time ASC, m.local_id ASC
                    LIMIT ?`
-            rows = db.prepare(sql).all(
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
               cursorSortSeq,
               cursorSortSeq,
               effectiveCursorCreateTime,
@@ -1873,7 +1464,7 @@ class ChatService extends EventEmitter {
               effectiveCursorCreateTime,
               effectiveCursorLocalId,
               fetchLimitPerDb
-            ) as any[]
+            ])
           } else {
             sql = `SELECT * FROM ${tableName}
                    WHERE (
@@ -1883,7 +1474,7 @@ class ChatService extends EventEmitter {
                    )
                    ORDER BY sort_seq ASC, create_time ASC, local_id ASC
                    LIMIT ?`
-            rows = db.prepare(sql).all(
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
               cursorSortSeq,
               cursorSortSeq,
               effectiveCursorCreateTime,
@@ -1891,7 +1482,7 @@ class ChatService extends EventEmitter {
               effectiveCursorCreateTime,
               effectiveCursorLocalId,
               fetchLimitPerDb
-            ) as any[]
+            ])
           }
 
           for (const row of rows) {
@@ -2006,8 +1597,6 @@ class ChatService extends EventEmitter {
         } catch (e: any) {
           if (e?.code === 'SQLITE_CORRUPT' || e?.message?.includes('malformed')) {
             console.error(`[ChatService] 数据库损坏: ${dbPath}`, e)
-            this.messageDbCache.delete(dbPath)
-            try { db.close() } catch { }
             this.refreshMessageDbCache()
           } else {
             console.error('ChatService: 查询更新消息失败:', e)
@@ -2050,13 +1639,6 @@ class ChatService extends EventEmitter {
     }
   ): Promise<{ success: boolean; messages?: ChatLabSourceMessage[]; hasMore?: boolean; error?: string }> {
     try {
-      if (!this.dbDir) {
-        const connectResult = await this.connect()
-        if (!connectResult.success) {
-          return { success: false, error: connectResult.error || '数据库未连接' }
-        }
-      }
-
       const normalizedOffset = Number.isFinite(options?.offset) ? Math.max(0, Math.floor(options?.offset || 0)) : 0
       const normalizedLimit = Number.isFinite(options?.limit) ? Math.max(1, Math.min(500, Math.floor(options?.limit || 100))) : 100
       const startTime = Number.isFinite(options?.startTime) && Number(options?.startTime) > 0
@@ -2074,7 +1656,7 @@ class ChatService extends EventEmitter {
 
       const myWxid = this.configService.get('myWxid')
       const cleanedMyWxid = myWxid ? this.cleanAccountDirName(myWxid) : ''
-      const dbTablePairs = this.findSessionTables(sessionId)
+      const dbTablePairs = await this.findSessionTables(sessionId)
 
       if (dbTablePairs.length === 0) {
         return { success: false, error: '未找到该会话的消息表' }
@@ -2083,38 +1665,10 @@ class ChatService extends EventEmitter {
       const allMessages: ChatLabSourceMessage[] = []
       const fetchLimitPerDb = Math.max(normalizedOffset + normalizedLimit + 1, 100)
 
-      for (const { db, tableName, dbPath } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
-          const hasName2IdTable = this.checkTableExists(db, 'Name2Id')
-
-          let myRowId: number | null = null
-          if (myWxid && hasName2IdTable) {
-            const cacheKeyOriginal = `${dbPath}:${myWxid}`
-            const cachedRowIdOriginal = this.myRowIdCache.get(cacheKeyOriginal)
-
-            if (cachedRowIdOriginal !== undefined) {
-              myRowId = cachedRowIdOriginal
-            } else {
-              const row = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(myWxid) as any
-              if (row?.rowid) {
-                myRowId = row.rowid
-                this.myRowIdCache.set(cacheKeyOriginal, myRowId)
-              } else if (cleanedMyWxid && cleanedMyWxid !== myWxid) {
-                const cacheKeyCleaned = `${dbPath}:${cleanedMyWxid}`
-                const cachedRowIdCleaned = this.myRowIdCache.get(cacheKeyCleaned)
-
-                if (cachedRowIdCleaned !== undefined) {
-                  myRowId = cachedRowIdCleaned
-                } else {
-                  const row2 = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(cleanedMyWxid) as any
-                  myRowId = row2?.rowid ?? null
-                  this.myRowIdCache.set(cacheKeyCleaned, myRowId)
-                }
-              } else {
-                this.myRowIdCache.set(cacheKeyOriginal, null)
-              }
-            }
-          }
+          const hasName2IdTable = await this.checkTableExists(dbPath, 'Name2Id')
+          const myRowId = await this.resolveMyRowId(dbPath, myWxid, cleanedMyWxid, hasName2IdTable)
 
           const whereParts: string[] = []
           const params: Array<number> = []
@@ -2142,7 +1696,7 @@ class ChatService extends EventEmitter {
                    ${whereClause}
                    ORDER BY m.sort_seq ASC, m.create_time ASC, m.local_id ASC
                    LIMIT ?`
-            rows = db.prepare(sql).all(myRowId, ...params, fetchLimitPerDb) as any[]
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [myRowId, ...params, fetchLimitPerDb])
           } else if (hasName2IdTable) {
             sql = `SELECT m.*, n.user_name AS sender_username
                    FROM ${tableName} m
@@ -2150,14 +1704,14 @@ class ChatService extends EventEmitter {
                    ${whereClause}
                    ORDER BY m.sort_seq ASC, m.create_time ASC, m.local_id ASC
                    LIMIT ?`
-            rows = db.prepare(sql).all(...params, fetchLimitPerDb) as any[]
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [...params, fetchLimitPerDb])
           } else {
             sql = `SELECT *
                    FROM ${tableName}
                    ${whereClause}
                    ORDER BY sort_seq ASC, create_time ASC, local_id ASC
                    LIMIT ?`
-            rows = db.prepare(sql).all(...params, fetchLimitPerDb) as any[]
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [...params, fetchLimitPerDb])
           }
 
           for (const row of rows) {
@@ -2186,8 +1740,6 @@ class ChatService extends EventEmitter {
         } catch (e: any) {
           if (e?.code === 'SQLITE_CORRUPT' || e?.message?.includes('malformed')) {
             console.error(`[ChatService] ChatLab 查询遇到损坏数据库: ${dbPath}`, e)
-            this.messageDbCache.delete(dbPath)
-            try { db.close() } catch { }
             this.refreshMessageDbCache()
           } else {
             console.error('ChatService: ChatLab 轻量查询失败:', e)
@@ -2223,61 +1775,25 @@ class ChatService extends EventEmitter {
     sessionId: string
   ): Promise<{ success: boolean; messages?: Message[]; error?: string }> {
     try {
-      if (!this.dbDir) {
-        const connectResult = await this.connect()
-        if (!connectResult.success) {
-          return { success: false, error: connectResult.error || '数据库未连接' }
-        }
-      }
-
       const myWxid = this.configService.get('myWxid')
       const cleanedMyWxid = myWxid ? this.cleanAccountDirName(myWxid) : ''
 
       // 使用与 getMessages 相同的方法查找会话对应的表
-      const dbTablePairs = this.findSessionTables(sessionId)
+      const dbTablePairs = await this.findSessionTables(sessionId)
       if (dbTablePairs.length === 0) {
         return { success: false, error: '未找到该会话的消息表' }
       }
 
       let allVoiceMessages: Message[] = []
 
-      for (const { db, tableName, dbPath } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
-          const hasName2IdTable = this.checkTableExists(db, 'Name2Id')
-
-          // 获取当前用户的 rowid（使用缓存）
-          let myRowId: number | null = null
-          if (myWxid && hasName2IdTable) {
-            const cacheKeyOriginal = `${dbPath}:${myWxid}`
-            const cachedRowIdOriginal = this.myRowIdCache.get(cacheKeyOriginal)
-
-            if (cachedRowIdOriginal !== undefined) {
-              myRowId = cachedRowIdOriginal
-            } else {
-              const row = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(myWxid) as any
-              if (row?.rowid) {
-                myRowId = row.rowid
-                this.myRowIdCache.set(cacheKeyOriginal, myRowId)
-              } else if (cleanedMyWxid && cleanedMyWxid !== myWxid) {
-                const cacheKeyCleaned = `${dbPath}:${cleanedMyWxid}`
-                const cachedRowIdCleaned = this.myRowIdCache.get(cacheKeyCleaned)
-
-                if (cachedRowIdCleaned !== undefined) {
-                  myRowId = cachedRowIdCleaned
-                } else {
-                  const row2 = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(cleanedMyWxid) as any
-                  myRowId = row2?.rowid ?? null
-                  this.myRowIdCache.set(cacheKeyCleaned, myRowId)
-                }
-              } else {
-                this.myRowIdCache.set(cacheKeyOriginal, null)
-              }
-            }
-          }
+          const hasName2IdTable = await this.checkTableExists(dbPath, 'Name2Id')
+          const myRowId = await this.resolveMyRowId(dbPath, myWxid, cleanedMyWxid, hasName2IdTable)
 
           // 查询所有语音消息 (localType = 34)
           // 检查表结构
-          const columns = db.prepare(`PRAGMA table_info('${tableName}')`).all() as any[]
+          const columns = await dbAdapter.all<any>('message', dbPath, `PRAGMA table_info('${tableName}')`)
           const columnNames = columns.map((c: any) => c.name.toLowerCase())
           const hasTypeColumn = columnNames.includes('type')
           const hasLocalTypeColumn = columnNames.includes('local_type')
@@ -2300,29 +1816,26 @@ class ChatService extends EventEmitter {
           let rows: any[]
 
           if (hasName2IdTable && myRowId !== null) {
-            // 有 Name2Id 表且找到了当前用户的 rowid
-            sql = `SELECT m.*, 
+            sql = `SELECT m.*,
                    CASE WHEN m.real_sender_id = ? THEN 1 ELSE 0 END AS computed_is_send,
                    n.user_name AS sender_username
                    FROM ${tableName} m
                    LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
                    WHERE ${typeCondition}
                    ORDER BY m.sort_seq DESC`
-            rows = db.prepare(sql).all(myRowId) as any[]
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [myRowId])
           } else if (hasName2IdTable) {
-            // 有 Name2Id 表但没找到当前用户的 rowid
             sql = `SELECT m.*, n.user_name AS sender_username
                    FROM ${tableName} m
                    LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
                    WHERE ${typeCondition}
                    ORDER BY m.sort_seq DESC`
-            rows = db.prepare(sql).all() as any[]
+            rows = await dbAdapter.all<any>('message', dbPath, sql)
           } else {
-            // 没有 Name2Id 表
             sql = `SELECT * FROM ${tableName}
                    WHERE ${typeCondition}
                    ORDER BY sort_seq DESC`
-            rows = db.prepare(sql).all() as any[]
+            rows = await dbAdapter.all<any>('message', dbPath, sql)
           }
 
           // 处理查询结果
@@ -2378,23 +1891,16 @@ class ChatService extends EventEmitter {
     sessionId: string
   ): Promise<{ success: boolean; images?: { imageMd5?: string; imageDatName?: string; createTime?: number }[]; error?: string }> {
     try {
-      if (!this.dbDir) {
-        const connectResult = await this.connect()
-        if (!connectResult.success) {
-          return { success: false, error: connectResult.error || '数据库未连接' }
-        }
-      }
-
-      const dbTablePairs = this.findSessionTables(sessionId)
+      const dbTablePairs = await this.findSessionTables(sessionId)
       if (dbTablePairs.length === 0) {
         return { success: false, error: '未找到该会话的消息表' }
       }
 
       const images: { imageMd5?: string; imageDatName?: string; createTime?: number }[] = []
 
-      for (const { db, tableName } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
-          const columns = db.prepare(`PRAGMA table_info('${tableName}')`).all() as any[]
+          const columns = await dbAdapter.all<any>('message', dbPath, `PRAGMA table_info('${tableName}')`)
           const columnNames = columns.map((c: any) => c.name.toLowerCase())
           const hasLocalTypeColumn = columnNames.includes('local_type')
           const hasTypeColumn = columnNames.includes('type')
@@ -2410,9 +1916,11 @@ class ChatService extends EventEmitter {
             continue
           }
 
-          const rows = db.prepare(
+          const rows = await dbAdapter.all<any>(
+            'message',
+            dbPath,
             `SELECT * FROM ${tableName} WHERE ${typeCondition}`
-          ).all() as any[]
+          )
 
           for (const row of rows) {
             const content = this.decodeMessageContent(row.message_content, row.compress_content)
@@ -2457,17 +1965,10 @@ class ChatService extends EventEmitter {
     limit: number = 50
   ): Promise<{ success: boolean; messages?: Message[]; targetIndex?: number; error?: string }> {
     try {
-      if (!this.dbDir) {
-        const connectResult = await this.connect()
-        if (!connectResult.success) {
-          return { success: false, error: connectResult.error || '数据库未连接' }
-        }
-      }
-
       const myWxid = this.configService.get('myWxid')
       const cleanedMyWxid = myWxid ? this.cleanAccountDirName(myWxid) : ''
 
-      const dbTablePairs = this.findSessionTables(sessionId)
+      const dbTablePairs = await this.findSessionTables(sessionId)
       if (dbTablePairs.length === 0) {
         return { success: false, error: '未找到该会话的消息表' }
       }
@@ -2480,45 +1981,17 @@ class ChatService extends EventEmitter {
       // 从所有数据库查找目标日期或之后的第一条消息
       let allMessages: Message[] = []
 
-      for (const { db, tableName, dbPath } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
-          const hasName2IdTable = this.checkTableExists(db, 'Name2Id')
-
-          let myRowId: number | null = null
-          if (myWxid && hasName2IdTable) {
-            const cacheKeyOriginal = `${dbPath}:${myWxid}`
-            const cachedRowIdOriginal = this.myRowIdCache.get(cacheKeyOriginal)
-
-            if (cachedRowIdOriginal !== undefined) {
-              myRowId = cachedRowIdOriginal
-            } else {
-              const row = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(myWxid) as any
-              if (row?.rowid) {
-                myRowId = row.rowid
-                this.myRowIdCache.set(cacheKeyOriginal, myRowId)
-              } else if (cleanedMyWxid && cleanedMyWxid !== myWxid) {
-                const cacheKeyCleaned = `${dbPath}:${cleanedMyWxid}`
-                const cachedRowIdCleaned = this.myRowIdCache.get(cacheKeyCleaned)
-
-                if (cachedRowIdCleaned !== undefined) {
-                  myRowId = cachedRowIdCleaned
-                } else {
-                  const row2 = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(cleanedMyWxid) as any
-                  myRowId = row2?.rowid ?? null
-                  this.myRowIdCache.set(cacheKeyCleaned, myRowId)
-                }
-              } else {
-                this.myRowIdCache.set(cacheKeyOriginal, null)
-              }
-            }
-          }
+          const hasName2IdTable = await this.checkTableExists(dbPath, 'Name2Id')
+          const myRowId = await this.resolveMyRowId(dbPath, myWxid, cleanedMyWxid, hasName2IdTable)
 
           // 查询目标日期或之后的消息，按时间升序获取
           let sql: string
           let rows: any[]
 
           if (hasName2IdTable && myRowId !== null) {
-            sql = `SELECT m.*, 
+            sql = `SELECT m.*,
                    CASE WHEN m.real_sender_id = ? THEN 1 ELSE 0 END AS computed_is_send,
                    n.user_name AS sender_username
                    FROM ${tableName} m
@@ -2526,7 +1999,7 @@ class ChatService extends EventEmitter {
                    WHERE m.create_time >= ?
                    ORDER BY m.create_time ASC, m.sort_seq ASC
                    LIMIT ?`
-            rows = db.prepare(sql).all(myRowId, dayStartTimestamp, limit * 2) as any[]
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [myRowId, dayStartTimestamp, limit * 2])
           } else if (hasName2IdTable) {
             sql = `SELECT m.*, n.user_name AS sender_username
                    FROM ${tableName} m
@@ -2534,13 +2007,13 @@ class ChatService extends EventEmitter {
                    WHERE m.create_time >= ?
                    ORDER BY m.create_time ASC, m.sort_seq ASC
                    LIMIT ?`
-            rows = db.prepare(sql).all(dayStartTimestamp, limit * 2) as any[]
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [dayStartTimestamp, limit * 2])
           } else {
-            sql = `SELECT * FROM ${tableName} 
+            sql = `SELECT * FROM ${tableName}
                    WHERE create_time >= ?
                    ORDER BY create_time ASC, sort_seq ASC
                    LIMIT ?`
-            rows = db.prepare(sql).all(dayStartTimestamp, limit * 2) as any[]
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [dayStartTimestamp, limit * 2])
           }
 
           // 处理消息
@@ -2600,7 +2073,6 @@ class ChatService extends EventEmitter {
               fileMd5 = fileInfo.fileMd5
             }
 
-            // 解析聊天记录 (检查 XML type=19)
             let chatRecordList: ChatRecordItem[] | undefined
             if (content) {
               const xmlType = this.extractXmlValue(content, 'type')
@@ -2609,7 +2081,6 @@ class ChatService extends EventEmitter {
               }
             }
 
-            // 解析转账消息的付款方和收款方
             let transferPayerUsername: string | undefined
             let transferReceiverUsername: string | undefined
             if ((localType === 49 || localType === 8589934592049) && content) {
@@ -2699,14 +2170,7 @@ class ChatService extends EventEmitter {
     month: number
   ): Promise<{ success: boolean; dates?: string[]; error?: string }> {
     try {
-      if (!this.dbDir) {
-        const connectResult = await this.connect()
-        if (!connectResult.success) {
-          return { success: false, error: connectResult.error || '数据库未连接' }
-        }
-      }
-
-      const dbTablePairs = this.findSessionTables(sessionId)
+      const dbTablePairs = await this.findSessionTables(sessionId)
       if (dbTablePairs.length === 0) {
         return { success: true, dates: [] }
       }
@@ -2721,13 +2185,13 @@ class ChatService extends EventEmitter {
 
       const datesSet = new Set<string>()
 
-      for (const { db, tableName } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
           // 只查询 create_time 字段以优化性能
-          const sql = `SELECT create_time FROM ${tableName} 
+          const sql = `SELECT create_time FROM ${tableName}
                        WHERE create_time BETWEEN ? AND ?`
 
-          const rows = db.prepare(sql).all(startTimestamp, endTimestamp) as { create_time: number }[]
+          const rows = await dbAdapter.all<{ create_time: number }>('message', dbPath, sql, [startTimestamp, endTimestamp])
 
           for (const row of rows) {
             const date = new Date(row.create_time * 1000)
@@ -3499,13 +2963,13 @@ class ChatService extends EventEmitter {
   }
 
   async getContact(username: string): Promise<Contact | null> {
-    if (!this.contactDb) return null
-
     try {
-      const row = this.contactDb.prepare(`
-        SELECT username, alias, remark, nick_name as nickName
-        FROM contact WHERE username = ?
-      `).get(username) as any
+      const row = await dbAdapter.get<any>(
+        'contact',
+        '',
+        'SELECT username, alias, remark, nick_name as nickName FROM contact WHERE username = ?',
+        [username]
+      )
 
       if (!row) return null
 
@@ -3524,12 +2988,12 @@ class ChatService extends EventEmitter {
    * 获取联系人头像和显示名称（用于群聊消息）
    */
   async getContactAvatar(username: string): Promise<{ avatarUrl?: string; displayName?: string } | null> {
-    if (!this.contactDb || !username) return null
+    if (!username) return null
 
     try {
       // 使用缓存的列信息
       if (!this.contactColumnsCache) {
-        const columns = this.contactDb.prepare("PRAGMA table_info(contact)").all() as any[]
+        const columns = await dbAdapter.all<any>('contact', '', "PRAGMA table_info(contact)")
         const columnNames = columns.map((c: any) => c.name)
 
         const hasBigHeadUrl = columnNames.includes('big_head_url')
@@ -3544,11 +3008,12 @@ class ChatService extends EventEmitter {
 
       const { hasBigHeadUrl, hasSmallHeadUrl, selectCols } = this.contactColumnsCache
 
-      const row = this.contactDb.prepare(`
-        SELECT ${selectCols.join(', ')}
-        FROM contact
-        WHERE username = ?
-      `).get(username) as any
+      const row = await dbAdapter.get<any>(
+        'contact',
+        '',
+        `SELECT ${selectCols.join(', ')} FROM contact WHERE username = ?`,
+        [username]
+      )
 
       if (!row) {
         const avatarUrl = await this.getAvatarFromHeadImageDb(username)
@@ -3585,23 +3050,25 @@ class ChatService extends EventEmitter {
     try {
       // 如果是群聊，尝试从 contact.db 获取群昵称
       let groupNicknames: Record<string, string> = {}
-      if (chatroomId.endsWith('@chatroom') && this.contactDb) {
+      if (chatroomId.endsWith('@chatroom')) {
         try {
           // 尝试从 chatroom_info 表获取群成员昵称
-          const tables = this.contactDb.prepare(
+          const tables = await dbAdapter.all<any>(
+            'contact',
+            '',
             "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%chatroom%'"
-          ).all() as any[]
+          )
           for (const t of tables) {
             try {
-              // chatroom_info 表通常有 chatroom_name + member_list 或类似结构
-              const rows = this.contactDb.prepare(
-                `SELECT * FROM ${t.name} WHERE chatroom_name = ? OR username = ?`
-              ).all(chatroomId, chatroomId) as any[]
+              const rows = await dbAdapter.all<any>(
+                'contact',
+                '',
+                `SELECT * FROM ${t.name} WHERE chatroom_name = ? OR username = ?`,
+                [chatroomId, chatroomId]
+              )
               for (const row of rows) {
-                // 尝试解析 room_data 字段（XML/JSON 格式的群成员信息）
                 const roomData = row.room_data || row.ext_buffer || ''
                 if (roomData && typeof roomData === 'string') {
-                  // 从 XML 中提取群昵称：<member><username>wxid</username><displayName>nick</displayName></member>
                   const memberRegex = /<member>[\s\S]*?<username>(.*?)<\/username>[\s\S]*?<displayName>(.*?)<\/displayName>[\s\S]*?<\/member>/gi
                   let match
                   while ((match = memberRegex.exec(roomData)) !== null) {
@@ -3624,12 +3091,9 @@ class ChatService extends EventEmitter {
       const resolveName = async (username: string): Promise<string> => {
         if (!username) return username
 
-        // 特判：如果是当前用户自己（contact 表通常不包含自己）
         if (myWxid && (username === myWxid || username === cleanedMyWxid)) {
-          // 先查群昵称中是否有自己
           const myGroupNick = groupNicknames[username]
           if (myGroupNick) return myGroupNick
-          // 尝试从 contact 表查自己的昵称
           try {
             const myInfo = await this.getMyUserInfo()
             if (myInfo.success && myInfo.userInfo?.nickName) {
@@ -3664,7 +3128,7 @@ class ChatService extends EventEmitter {
    * 从 head_image.db 获取头像（转换为 base64 data URL）
    */
   private async getAvatarFromHeadImageDb(username: string): Promise<string | undefined> {
-    if (!this.headImageDb || !username) return undefined
+    if (!username) return undefined
 
     try {
       // 检查缓存
@@ -3672,9 +3136,12 @@ class ChatService extends EventEmitter {
         return this.avatarBase64Cache.get(username)
       }
 
-      const row = this.headImageDb.prepare(`
-        SELECT image_buffer FROM head_image WHERE username = ?
-      `).get(username) as any
+      const row = await dbAdapter.get<any>(
+        'head_image',
+        '',
+        'SELECT image_buffer FROM head_image WHERE username = ?',
+        [username]
+      )
 
       if (!row || !row.image_buffer) return undefined
 
@@ -3689,7 +3156,7 @@ class ChatService extends EventEmitter {
       return dataUrl
     } catch (e: any) {
       // 如果是数据库损坏错误，只记录一次警告，避免刷屏
-      if (e.code === 'SQLITE_CORRUPT') {
+      if (e?.code === 'SQLITE_CORRUPT' || e?.message?.includes('malformed')) {
         if (!this.headImageDbCorrupted) {
           console.warn(`[ChatService] head_image.db 数据库文件损坏，头像功能可能受影响`)
           this.headImageDbCorrupted = true
@@ -3706,31 +3173,24 @@ class ChatService extends EventEmitter {
    */
   async getMyAvatarUrl(): Promise<{ success: boolean; avatarUrl?: string; error?: string }> {
     try {
-      if (!this.contactDb) {
-        const connectResult = await this.connect()
-        if (!connectResult.success) {
-          return { success: false, error: connectResult.error }
-        }
-      }
-
       const myWxid = this.configService.get('myWxid')
       if (!myWxid) {
         return { success: false, error: '未配置微信ID' }
       }
 
-      // 注意：contact.db 中的 username 是完整的 wxid，不需要清理
-
       // 检查 contact 表是否存在
-      const tables = this.contactDb!.prepare(
+      const tables = await dbAdapter.all<any>(
+        'contact',
+        '',
         "SELECT name FROM sqlite_master WHERE type='table' AND name='contact'"
-      ).all()
+      )
 
       if (tables.length === 0) {
         return { success: false, error: 'contact 表不存在' }
       }
 
       // 获取表结构
-      const columns = this.contactDb!.prepare("PRAGMA table_info(contact)").all() as any[]
+      const columns = await dbAdapter.all<any>('contact', '', "PRAGMA table_info(contact)")
       const columnNames = columns.map((c: any) => c.name)
 
       const hasBigHeadUrl = columnNames.includes('big_head_url')
@@ -3745,21 +3205,23 @@ class ChatService extends EventEmitter {
       if (hasSmallHeadUrl) selectCols.push('small_head_url')
 
       // 使用原始 wxid 查询
-      const row = this.contactDb!.prepare(`
-        SELECT ${selectCols.join(', ')}
-        FROM contact
-        WHERE username = ?
-      `).get(myWxid) as any
+      const row = await dbAdapter.get<any>(
+        'contact',
+        '',
+        `SELECT ${selectCols.join(', ')} FROM contact WHERE username = ?`,
+        [myWxid]
+      )
 
       if (!row) {
         // 如果找不到，尝试用清理后的 wxid
         const cleanedWxid = this.cleanAccountDirName(myWxid)
 
-        const row2 = this.contactDb!.prepare(`
-          SELECT ${selectCols.join(', ')}
-          FROM contact
-          WHERE username = ?
-        `).get(cleanedWxid) as any
+        const row2 = await dbAdapter.get<any>(
+          'contact',
+          '',
+          `SELECT ${selectCols.join(', ')} FROM contact WHERE username = ?`,
+          [cleanedWxid]
+        )
 
         if (!row2) {
           const fallbackAvatarUrl = await this.getAvatarFromHeadImageDb(cleanedWxid || myWxid) || await this.getAvatarFromHeadImageDb(myWxid)
@@ -3780,7 +3242,7 @@ class ChatService extends EventEmitter {
         ? row.big_head_url
         : (hasSmallHeadUrl && row.small_head_url)
           ? row.small_head_url
-            : undefined
+          : undefined
       const resolvedAvatarUrl = avatarUrl || await this.getAvatarFromHeadImageDb(row.username || myWxid)
 
       return { success: true, avatarUrl: resolvedAvatarUrl }
@@ -3804,29 +3266,24 @@ class ChatService extends EventEmitter {
     error?: string
   }> {
     try {
-      if (!this.contactDb) {
-        const connectResult = await this.connect()
-        if (!connectResult.success) {
-          return { success: false, error: connectResult.error }
-        }
-      }
-
       const myWxid = this.configService.get('myWxid')
       if (!myWxid) {
         return { success: false, error: '未配置微信ID' }
       }
 
       // 检查 contact 表是否存在
-      const tables = this.contactDb!.prepare(
+      const tables = await dbAdapter.all<any>(
+        'contact',
+        '',
         "SELECT name FROM sqlite_master WHERE type='table' AND name='contact'"
-      ).all()
+      )
 
       if (tables.length === 0) {
         return { success: false, error: 'contact 表不存在' }
       }
 
       // 获取表结构
-      const columns = this.contactDb!.prepare("PRAGMA table_info(contact)").all() as any[]
+      const columns = await dbAdapter.all<any>('contact', '', "PRAGMA table_info(contact)")
       const columnNames = columns.map((c: any) => c.name)
 
       const hasBigHeadUrl = columnNames.includes('big_head_url')
@@ -3837,20 +3294,22 @@ class ChatService extends EventEmitter {
       if (hasSmallHeadUrl) selectCols.push('small_head_url')
 
       // 使用原始 wxid 查询
-      let row = this.contactDb!.prepare(`
-        SELECT ${selectCols.join(', ')}
-        FROM contact
-        WHERE username = ?
-      `).get(myWxid) as any
+      let row = await dbAdapter.get<any>(
+        'contact',
+        '',
+        `SELECT ${selectCols.join(', ')} FROM contact WHERE username = ?`,
+        [myWxid]
+      )
 
       if (!row) {
         // 如果找不到，尝试用清理后的 wxid
         const cleanedWxid = this.cleanAccountDirName(myWxid)
-        row = this.contactDb!.prepare(`
-          SELECT ${selectCols.join(', ')}
-          FROM contact
-          WHERE username = ?
-        `).get(cleanedWxid) as any
+        row = await dbAdapter.get<any>(
+          'contact',
+          '',
+          `SELECT ${selectCols.join(', ')} FROM contact WHERE username = ?`,
+          [cleanedWxid]
+        )
       }
 
       if (!row) {
@@ -3895,22 +3354,13 @@ class ChatService extends EventEmitter {
    */
   async getUinFromMiscDb(): Promise<string | null> {
     try {
-      if (!this.miscDb) {
-        const connectResult = await this.connect()
-        if (!connectResult.success) {
-          return null
-        }
-      }
-
-      if (!this.miscDb) {
-        return null
-      }
-
       // 尝试从 DBInfo 表获取 UIN
       try {
-        const row = this.miscDb.prepare(`
-          SELECT value FROM DBInfo WHERE key = 'uin'
-        `).get() as any
+        const row = await dbAdapter.get<any>(
+          'misc',
+          '',
+          "SELECT value FROM DBInfo WHERE key = 'uin'"
+        )
 
         if (row && row.value) {
           return String(row.value)
@@ -3921,19 +3371,20 @@ class ChatService extends EventEmitter {
 
       // 备选：尝试从其他可能的表获取 UIN
       try {
-        const tables = this.miscDb.prepare(
+        const tables = await dbAdapter.all<any>(
+          'misc',
+          '',
           "SELECT name FROM sqlite_master WHERE type='table'"
-        ).all() as any[]
-
+        )
         for (const table of tables) {
           const tableName = table.name
           if (tableName.toLowerCase().includes('info') || tableName.toLowerCase().includes('account')) {
             try {
-              const columns = this.miscDb.prepare(`PRAGMA table_info(${tableName})`).all() as any[]
+              const columns = await dbAdapter.all<any>('misc', '', `PRAGMA table_info(${tableName})`)
               const columnNames = columns.map((c: any) => c.name)
 
               if (columnNames.includes('uin')) {
-                const uinRow = this.miscDb.prepare(`SELECT uin FROM ${tableName} LIMIT 1`).get() as any
+                const uinRow = await dbAdapter.get<any>('misc', '', `SELECT uin FROM ${tableName} LIMIT 1`)
                 if (uinRow && uinRow.uin) {
                   return String(uinRow.uin)
                 }
@@ -4222,16 +3673,15 @@ class ChatService extends EventEmitter {
    */
   private async extractEmojiFromPackage(md5: string, productId: string): Promise<string | null> {
     try {
-      if (!this.emoticonDb) {
-        return null
-      }
-
       // 从数据库获取 offset 和 size
-      const row = this.emoticonDb.prepare(`
-        SELECT emoticon_offset_, emoticon_size_ 
-        FROM kStoreEmoticonFilesTable 
-        WHERE LOWER(md5_) = LOWER(?) AND package_id_ = ?
-      `).get(md5, productId) as any
+      const row = await dbAdapter.get<any>(
+        'emoticon',
+        '',
+        `SELECT emoticon_offset_, emoticon_size_
+         FROM kStoreEmoticonFilesTable
+         WHERE LOWER(md5_) = LOWER(?) AND package_id_ = ?`,
+        [md5, productId]
+      )
 
       if (!row || !row.emoticon_offset_ || !row.emoticon_size_) {
         return null
@@ -4347,13 +3797,12 @@ class ChatService extends EventEmitter {
       // 遍历所有消息数据库，查找匹配的表情消息
       for (const dbPath of allDbs) {
         try {
-          const db = this.getMessageDb(dbPath)
-          if (!db) continue
-
           // 查找所有消息表
-      const tables = db.prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND lower(name) LIKE 'msg_%'"
-      ).all() as any[]
+          const tables = await dbAdapter.all<any>(
+            'message',
+            dbPath,
+            "SELECT name FROM sqlite_master WHERE type='table' AND lower(name) LIKE 'msg_%'"
+          )
 
           for (const table of tables) {
             const tableName = table.name as string
@@ -4366,23 +3815,28 @@ class ChatService extends EventEmitter {
                 const timeStart = createTime - 5
                 const timeEnd = createTime + 5
 
-                rows = db.prepare(`
-                  SELECT local_id, create_time, message_content, compress_content 
-                  FROM ${tableName} 
-                  WHERE local_type = 47 
-                  AND create_time >= ? 
-                  AND create_time <= ?
-                  LIMIT 100
-                `).all(timeStart, timeEnd) as any[]
+                rows = await dbAdapter.all<any>(
+                  'message',
+                  dbPath,
+                  `SELECT local_id, create_time, message_content, compress_content
+                   FROM ${tableName}
+                   WHERE local_type = 47
+                   AND create_time >= ?
+                   AND create_time <= ?
+                   LIMIT 100`,
+                  [timeStart, timeEnd]
+                )
               } else {
                 // 没有 createTime，查询最近的表情消息（按时间倒序）
-                rows = db.prepare(`
-                  SELECT local_id, create_time, message_content, compress_content 
-                  FROM ${tableName} 
-                  WHERE local_type = 47 
-                  ORDER BY create_time DESC
-                  LIMIT 200
-                `).all() as any[]
+                rows = await dbAdapter.all<any>(
+                  'message',
+                  dbPath,
+                  `SELECT local_id, create_time, message_content, compress_content
+                   FROM ${tableName}
+                   WHERE local_type = 47
+                   ORDER BY create_time DESC
+                   LIMIT 200`
+                )
               }
 
               for (const row of rows) {
@@ -4485,9 +3939,14 @@ class ChatService extends EventEmitter {
     let finalCdnUrl = cdnUrl
 
     // 尝试从本地数据库补充 productId (商店表情包)
-    if (!effectiveProductId && md5 && (this as any).emoticonDb) {
+    if (!effectiveProductId && md5) {
       try {
-        const row = (this as any).emoticonDb.prepare('SELECT package_id_ FROM kStoreEmoticonFilesTable WHERE LOWER(md5_) = LOWER(?)').get(md5) as any
+        const row = await dbAdapter.get<any>(
+          'emoticon',
+          '',
+          'SELECT package_id_ FROM kStoreEmoticonFilesTable WHERE LOWER(md5_) = LOWER(?)',
+          [md5]
+        )
         if (row?.package_id_) {
           effectiveProductId = row.package_id_
         }
@@ -4496,74 +3955,90 @@ class ChatService extends EventEmitter {
 
     // [New] 尝试从本地数据库查找 CDN URL (修复: 增强匹配逻辑、不区分大小写)
     if (!finalCdnUrl && md5) {
-      const targetDbs = []
-      if (this.emoticonDb) targetDbs.push(this.emoticonDb)
-      if (this.emotionDb) targetDbs.push(this.emotionDb)
+      const targetKinds: string[] = ['emoticon', 'emotion']
 
-      if (targetDbs.length > 0) {
-        // 优先查询 kNonStoreEmoticonTable (非商店表情包，最常用)
-        const priorityTables = [
-          { name: 'kNonStoreEmoticonTable', md5Col: 'md5', urlCols: ['cdn_url', 'encrypt_url', 'extern_url'] },
-          { name: 'kStoreEmoticonFilesTable', md5Col: 'md5_', urlCols: [] }, // 商店表情包需要通过 package_id 构建
-        ]
+      // 优先查询 kNonStoreEmoticonTable (非商店表情包，最常用)
+      const priorityTables = [
+        { name: 'kNonStoreEmoticonTable', md5Col: 'md5', urlCols: ['cdn_url', 'encrypt_url', 'extern_url'] },
+        { name: 'kStoreEmoticonFilesTable', md5Col: 'md5_', urlCols: [] }, // 商店表情包需要通过 package_id 构建
+      ]
 
-        // 备用表名（兼容旧版本）
-        const candidateTables = ['CustomEmoticon', 'Emoticon', 'EmojiInfo', 'SmileyInfo', 'EmoticonInfo']
-        let found = false
+      // 备用表名（兼容旧版本）
+      const candidateTables = ['CustomEmoticon', 'Emoticon', 'EmojiInfo', 'SmileyInfo', 'EmoticonInfo']
+      let found = false
 
-        for (const db of targetDbs) {
-          // 1. 优先查询已知表结构
-          for (const tableInfo of priorityTables) {
-            try {
-              const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(tableInfo.name)
-              if (!tableExists) continue
+      for (const kind of targetKinds) {
+        // 1. 优先查询已知表结构
+        for (const tableInfo of priorityTables) {
+          try {
+            const tableExists = await dbAdapter.get<any>(
+              kind,
+              '',
+              "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+              [tableInfo.name]
+            )
+            if (!tableExists) continue
 
-              if (tableInfo.urlCols.length > 0) {
-                // kNonStoreEmoticonTable: 尝试多个 URL 字段
-                for (const urlCol of tableInfo.urlCols) {
-                  try {
-                    const row = db.prepare(`SELECT ${urlCol} as url FROM ${tableInfo.name} WHERE LOWER(${tableInfo.md5Col}) = LOWER(?) LIMIT 1`).get(md5) as any
-                    if (row?.url) {
-                      finalCdnUrl = row.url
-                      found = true
-                      break
-                    }
-                  } catch (err) { }
-                }
+            if (tableInfo.urlCols.length > 0) {
+              // kNonStoreEmoticonTable: 尝试多个 URL 字段
+              for (const urlCol of tableInfo.urlCols) {
+                try {
+                  const row = await dbAdapter.get<any>(
+                    kind,
+                    '',
+                    `SELECT ${urlCol} as url FROM ${tableInfo.name} WHERE LOWER(${tableInfo.md5Col}) = LOWER(?) LIMIT 1`,
+                    [md5]
+                  )
+                  if (row?.url) {
+                    finalCdnUrl = row.url
+                    found = true
+                    break
+                  }
+                } catch (err) { }
               }
+            }
 
-              if (found) break
-            } catch (err) { }
-          }
-
-          if (found) break
-
-          // 2. 备用：动态查询未知表结构
-          for (const tableName of candidateTables) {
-            try {
-              // 检查表是否存在
-              const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(tableName)
-              if (!tableExists) continue
-
-              // 动态获取列名以适配不同版本 (md5 vs md5_, cdnUrl vs cdn_url)
-              const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as any[]
-              const colNames = columns.map(c => c.name)
-              const md5Col = colNames.find(c => ['md5', 'md5_'].includes(c.toLowerCase()))
-              const urlCol = colNames.find(c => ['cdnurl', 'cdn_url', 'cdnurl_', 'url', 'encrypturl', 'encrypt_url'].includes(c.toLowerCase()))
-
-              if (md5Col && urlCol) {
-                // 使用 LOWER 确保 MD5 大小写不一致也能匹配 (微信数据库中 MD5 有时是大写)
-                const row = db.prepare(`SELECT ${urlCol} as url FROM ${tableName} WHERE LOWER(${md5Col}) = LOWER(?) LIMIT 1`).get(md5) as any
-                if (row?.url) {
-                  finalCdnUrl = row.url
-                  found = true
-                  break
-                }
-              }
-            } catch (err) { }
-          }
-          if (found) break
+            if (found) break
+          } catch (err) { }
         }
+
+        if (found) break
+
+        // 2. 备用：动态查询未知表结构
+        for (const tableName of candidateTables) {
+          try {
+            // 检查表是否存在
+            const tableExists = await dbAdapter.get<any>(
+              kind,
+              '',
+              "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+              [tableName]
+            )
+            if (!tableExists) continue
+
+            // 动态获取列名以适配不同版本 (md5 vs md5_, cdnUrl vs cdn_url)
+            const columns = await dbAdapter.all<any>(kind, '', `PRAGMA table_info(${tableName})`)
+            const colNames = columns.map((c: any) => c.name)
+            const md5Col = colNames.find((c: string) => ['md5', 'md5_'].includes(c.toLowerCase()))
+            const urlCol = colNames.find((c: string) => ['cdnurl', 'cdn_url', 'cdnurl_', 'url', 'encrypturl', 'encrypt_url'].includes(c.toLowerCase()))
+
+            if (md5Col && urlCol) {
+              // 使用 LOWER 确保 MD5 大小写不一致也能匹配 (微信数据库中 MD5 有时是大写)
+              const row = await dbAdapter.get<any>(
+                kind,
+                '',
+                `SELECT ${urlCol} as url FROM ${tableName} WHERE LOWER(${md5Col}) = LOWER(?) LIMIT 1`,
+                [md5]
+              )
+              if (row?.url) {
+                finalCdnUrl = row.url
+                found = true
+                break
+              }
+            }
+          } catch (err) { }
+        }
+        if (found) break
       }
     }
 
@@ -4928,10 +4403,6 @@ class ChatService extends EventEmitter {
     error?: string
   }> {
     try {
-      if (!this.dbDir) {
-        return { success: false, error: '数据库未连接' }
-      }
-
       // 获取联系人信息
       let displayName = sessionId
       let remark: string | undefined
@@ -4939,72 +4410,77 @@ class ChatService extends EventEmitter {
       let alias: string | undefined
       let avatarUrl: string | undefined
 
-      if (this.contactDb) {
-        try {
-          if (!this.contactColumnsCache) {
-            const columns = this.contactDb.prepare("PRAGMA table_info(contact)").all() as any[]
-            const columnNames = columns.map((c: any) => c.name)
+      try {
+        if (!this.contactColumnsCache) {
+          const columns = await dbAdapter.all<any>('contact', '', "PRAGMA table_info(contact)")
+          const columnNames = columns.map((c: any) => c.name)
 
-            const hasBigHeadUrl = columnNames.includes('big_head_url')
-            const hasSmallHeadUrl = columnNames.includes('small_head_url')
+          const hasBigHeadUrl = columnNames.includes('big_head_url')
+          const hasSmallHeadUrl = columnNames.includes('small_head_url')
 
-            const selectCols = ['username', 'remark', 'nick_name', 'alias']
-            if (hasBigHeadUrl) selectCols.push('big_head_url')
-            if (hasSmallHeadUrl) selectCols.push('small_head_url')
+          const selectCols = ['username', 'remark', 'nick_name', 'alias']
+          if (hasBigHeadUrl) selectCols.push('big_head_url')
+          if (hasSmallHeadUrl) selectCols.push('small_head_url')
 
-            this.contactColumnsCache = { hasBigHeadUrl, hasSmallHeadUrl, selectCols }
+          this.contactColumnsCache = { hasBigHeadUrl, hasSmallHeadUrl, selectCols }
+        }
+
+        const { hasBigHeadUrl, hasSmallHeadUrl, selectCols } = this.contactColumnsCache
+
+        const contact = await dbAdapter.get<any>(
+          'contact',
+          '',
+          `SELECT ${selectCols.join(', ')} FROM contact WHERE username = ?`,
+          [sessionId]
+        )
+
+        if (contact) {
+          remark = contact.remark || undefined
+          nickName = contact.nick_name || undefined
+          alias = contact.alias || undefined
+          displayName = remark || nickName || alias || sessionId
+
+          if (hasBigHeadUrl && contact.big_head_url) {
+            avatarUrl = contact.big_head_url
+          } else if (hasSmallHeadUrl && contact.small_head_url) {
+            avatarUrl = contact.small_head_url
           }
 
-          const { hasBigHeadUrl, hasSmallHeadUrl, selectCols } = this.contactColumnsCache
-
-          const contact = this.contactDb.prepare(`
-            SELECT ${selectCols.join(', ')}
-            FROM contact
-            WHERE username = ?
-          `).get(sessionId) as any
-
-          if (contact) {
-            remark = contact.remark || undefined
-            nickName = contact.nick_name || undefined
-            alias = contact.alias || undefined
-            displayName = remark || nickName || alias || sessionId
-
-            if (hasBigHeadUrl && contact.big_head_url) {
-              avatarUrl = contact.big_head_url
-            } else if (hasSmallHeadUrl && contact.small_head_url) {
-              avatarUrl = contact.small_head_url
-            }
-
-            if (!avatarUrl) {
-              avatarUrl = await this.getAvatarFromHeadImageDb(sessionId)
-            }
+          if (!avatarUrl) {
+            avatarUrl = await this.getAvatarFromHeadImageDb(sessionId)
           }
-        } catch { }
-      }
+        }
+      } catch { }
 
       if (!avatarUrl) {
         avatarUrl = await this.getAvatarFromHeadImageDb(sessionId)
       }
 
       // 查找所有包含该会话消息的数据库和表
-      const dbTablePairs = this.findSessionTables(sessionId)
+      const dbTablePairs = await this.findSessionTables(sessionId)
       const messageTables: { dbName: string; tableName: string; count: number }[] = []
       let totalMessageCount = 0
       let firstMessageTime: number | undefined
       let latestMessageTime: number | undefined
 
-      for (const { db, tableName, dbPath } of dbTablePairs) {
+      for (const { tableName, dbPath } of dbTablePairs) {
         try {
           // 获取消息数量
-          const countResult = db.prepare(`SELECT COUNT(*) as count FROM ${tableName}`).get() as any
+          const countResult = await dbAdapter.get<any>(
+            'message',
+            dbPath,
+            `SELECT COUNT(*) as count FROM ${tableName}`
+          )
           const count = countResult?.count || 0
           totalMessageCount += count
 
           // 获取时间范围
-          const timeResult = db.prepare(`
-            SELECT MIN(create_time) as first_time, MAX(create_time) as last_time
-            FROM ${tableName}
-          `).get() as any
+          const timeResult = await dbAdapter.get<any>(
+            'message',
+            dbPath,
+            `SELECT MIN(create_time) as first_time, MAX(create_time) as last_time
+             FROM ${tableName}`
+          )
 
           if (timeResult) {
             if (timeResult.first_time) {
@@ -5066,18 +4542,29 @@ class ChatService extends EventEmitter {
    * 查找 media 数据库文件
    */
   private findMediaDbs(): string[] {
-    if (!this.dbDir) return []
+    const root = getDbStoragePath()
+    if (!root) return []
 
     const mediaDbFiles: string[] = []
 
     try {
-      const files = fs.readdirSync(this.dbDir)
-      for (const file of files) {
-        const lower = file.toLowerCase()
-        if (lower.startsWith('media') && lower.endsWith('.db')) {
-          mediaDbFiles.push(path.join(this.dbDir, file))
+      const collect = (dir: string, depth = 0) => {
+        if (depth > 5) return
+        let entries: fs.Dirent[]
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+        for (const entry of entries) {
+          const full = path.join(dir, entry.name)
+          if (entry.isDirectory()) {
+            collect(full, depth + 1)
+          } else if (entry.isFile()) {
+            const lower = entry.name.toLowerCase()
+            if (lower.startsWith('media') && lower.endsWith('.db')) {
+              mediaDbFiles.push(full)
+            }
+          }
         }
       }
+      collect(root)
     } catch (e) {
       console.error('[ChatService][Voice] 查找 media 数据库失败:', e)
     }
@@ -5088,62 +4575,46 @@ class ChatService extends EventEmitter {
   /**
    * 获取单条消息
    */
-  /**
-   * 获取单条消息
-   */
   public async getMessageByLocalId(sessionId: string, localId: number): Promise<{ success: boolean; message?: Message; error?: string }> {
-    const dbTablePairs = this.findSessionTables(sessionId)
+    const dbTablePairs = await this.findSessionTables(sessionId)
     const myWxid = this.configService.get('myWxid')
     const cleanedMyWxid = myWxid ? this.cleanAccountDirName(myWxid) : ''
 
-    for (const { db, tableName, dbPath } of dbTablePairs) {
+    for (const { tableName, dbPath } of dbTablePairs) {
       try {
-        const hasName2IdTable = this.checkTableExists(db, 'Name2Id')
-        let myRowId: number | null = null
-
-        if (myWxid && hasName2IdTable) {
-          const cacheKeyOriginal = `${dbPath}:${myWxid}`
-          const cachedRowIdOriginal = this.myRowIdCache.get(cacheKeyOriginal)
-
-          if (cachedRowIdOriginal !== undefined) {
-            myRowId = cachedRowIdOriginal
-          } else {
-            const row = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(myWxid) as any
-            if (row?.rowid) {
-              myRowId = row.rowid
-              this.myRowIdCache.set(cacheKeyOriginal, myRowId)
-            } else if (cleanedMyWxid && cleanedMyWxid !== myWxid) {
-              const cacheKeyCleaned = `${dbPath}:${cleanedMyWxid}`
-              const cachedRowIdCleaned = this.myRowIdCache.get(cacheKeyCleaned)
-
-              if (cachedRowIdCleaned !== undefined) {
-                myRowId = cachedRowIdCleaned
-              } else {
-                const row2 = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(cleanedMyWxid) as any
-                myRowId = row2?.rowid ?? null
-                this.myRowIdCache.set(cacheKeyCleaned, myRowId)
-              }
-            } else {
-              this.myRowIdCache.set(cacheKeyOriginal, null)
-            }
-          }
-        }
+        const hasName2IdTable = await this.checkTableExists(dbPath, 'Name2Id')
+        const myRowId = await this.resolveMyRowId(dbPath, myWxid, cleanedMyWxid, hasName2IdTable)
 
         let row: any
         if (hasName2IdTable && myRowId !== null) {
-          row = db.prepare(`SELECT m.*,
-                  CASE WHEN m.real_sender_id = ? THEN 1 ELSE 0 END AS computed_is_send,
-                  n.user_name AS sender_username
-                  FROM ${tableName} m
-                  LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
-                  WHERE m.local_id = ?`).get(myRowId, localId) as any
+          row = await dbAdapter.get<any>(
+            'message',
+            dbPath,
+            `SELECT m.*,
+                    CASE WHEN m.real_sender_id = ? THEN 1 ELSE 0 END AS computed_is_send,
+                    n.user_name AS sender_username
+                    FROM ${tableName} m
+                    LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+                    WHERE m.local_id = ?`,
+            [myRowId, localId]
+          )
         } else if (hasName2IdTable) {
-          row = db.prepare(`SELECT m.*, n.user_name AS sender_username
-                  FROM ${tableName} m
-                  LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
-                  WHERE m.local_id = ?`).get(localId) as any
+          row = await dbAdapter.get<any>(
+            'message',
+            dbPath,
+            `SELECT m.*, n.user_name AS sender_username
+                    FROM ${tableName} m
+                    LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+                    WHERE m.local_id = ?`,
+            [localId]
+          )
         } else {
-          row = db.prepare(`SELECT * FROM ${tableName} WHERE local_id = ?`).get(localId) as any
+          row = await dbAdapter.get<any>(
+            'message',
+            dbPath,
+            `SELECT * FROM ${tableName} WHERE local_id = ?`,
+            [localId]
+          )
         }
 
         if (row) {
@@ -5308,94 +4779,92 @@ class ChatService extends EventEmitter {
 
       for (const dbPath of mediaDbs) {
         try {
-          const mediaDb = new Database(dbPath, { readonly: true })
+          // 查找 VoiceInfo 表
+          const tables = await dbAdapter.all<any>(
+            'message',
+            dbPath,
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'VoiceInfo%'"
+          )
 
-          try {
-            // 查找 VoiceInfo 表
-            const tables = mediaDb.prepare(
-              "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'VoiceInfo%'"
-            ).all() as any[]
+          if (tables.length === 0) {
+            continue
+          }
 
-            if (tables.length === 0) {
-              mediaDb.close()
-              continue
-            }
+          const voiceTable = tables[0].name
 
-            const voiceTable = tables[0].name
+          // 获取表结构
+          const columns = await dbAdapter.all<any>('message', dbPath, `PRAGMA table_info('${voiceTable}')`)
+          const columnNames = columns.map((c: any) => c.name.toLowerCase())
 
-            // 获取表结构
-            const columns = mediaDb.prepare(`PRAGMA table_info('${voiceTable}')`).all() as any[]
-            const columnNames = columns.map((c: any) => c.name.toLowerCase())
+          // 找到数据列
+          const dataColumn = columnNames.find((c: string) =>
+            c === 'voice_data' || c === 'buf' || c === 'voicebuf' || c === 'data'
+          )
+          if (!dataColumn) {
+            continue
+          }
 
-            // 找到数据列
-            const dataColumn = columnNames.find(c =>
-              c === 'voice_data' || c === 'buf' || c === 'voicebuf' || c === 'data'
-            )
-            if (!dataColumn) {
-              mediaDb.close()
-              continue
-            }
+          // 找到 chat_name_id 列
+          const chatNameIdColumn = columnNames.find((c: string) =>
+            c === 'chat_name_id' || c === 'chatnameid' || c === 'chat_nameid'
+          )
 
-            // 找到 chat_name_id 列
-            const chatNameIdColumn = columnNames.find(c =>
-              c === 'chat_name_id' || c === 'chatnameid' || c === 'chat_nameid'
-            )
+          // 找到时间列
+          const timeColumn = columnNames.find((c: string) =>
+            c === 'create_time' || c === 'createtime' || c === 'time'
+          )
 
-            // 找到时间列
-            const timeColumn = columnNames.find(c =>
-              c === 'create_time' || c === 'createtime' || c === 'time'
-            )
+          // 查找 Name2Id 表
+          const name2IdTables = await dbAdapter.all<any>(
+            'message',
+            dbPath,
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'Name2Id%'"
+          )
 
-            // 查找 Name2Id 表
-            const name2IdTables = mediaDb.prepare(
-              "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'Name2Id%'"
-            ).all() as any[]
+          // 策略1: 通过 chat_name_id + create_time 查找（最准确）
+          if (chatNameIdColumn && timeColumn && name2IdTables.length > 0) {
+            const name2IdTable = name2IdTables[0].name
 
-            // 策略1: 通过 chat_name_id + create_time 查找（最准确）
-            if (chatNameIdColumn && timeColumn && name2IdTables.length > 0) {
-              const name2IdTable = name2IdTables[0].name
+            for (const candidate of candidates) {
+              // 获取 chat_name_id
+              const name2IdRow = await dbAdapter.get<any>(
+                'message',
+                dbPath,
+                `SELECT rowid FROM ${name2IdTable} WHERE user_name = ?`,
+                [candidate]
+              )
 
-              for (const candidate of candidates) {
-                // 获取 chat_name_id
-                const name2IdRow = mediaDb.prepare(
-                  `SELECT rowid FROM ${name2IdTable} WHERE user_name = ?`
-                ).get(candidate) as any
-
-                if (!name2IdRow?.rowid) {
-                  continue
-                }
-
-                const chatNameId = name2IdRow.rowid
-
-                // 用 chat_name_id + create_time 查找
-                const sql = `SELECT ${dataColumn} AS data FROM ${voiceTable} WHERE ${chatNameIdColumn} = ? AND ${timeColumn} = ? LIMIT 1`
-
-                const row = mediaDb.prepare(sql).get(chatNameId, msgCreateTime) as any
-
-                if (row?.data) {
-                  silkData = this.decodeVoiceBlob(row.data)
-                  if (silkData) {
-                    break
-                  }
-                }
+              if (!name2IdRow?.rowid) {
+                continue
               }
-            }
 
-            // 策略2: 只通过 create_time 查找（兜底）
-            if (!silkData && timeColumn) {
-              const sql = `SELECT ${dataColumn} AS data FROM ${voiceTable} WHERE ${timeColumn} = ? LIMIT 1`
-              const row = mediaDb.prepare(sql).get(msgCreateTime) as any
+              const chatNameId = name2IdRow.rowid
+
+              // 用 chat_name_id + create_time 查找
+              const sql = `SELECT ${dataColumn} AS data FROM ${voiceTable} WHERE ${chatNameIdColumn} = ? AND ${timeColumn} = ? LIMIT 1`
+
+              const row = await dbAdapter.get<any>('message', dbPath, sql, [chatNameId, msgCreateTime])
 
               if (row?.data) {
                 silkData = this.decodeVoiceBlob(row.data)
+                if (silkData) {
+                  break
+                }
               }
             }
-
-            mediaDb.close()
-            if (silkData) break
-          } catch (e) {
-            try { mediaDb.close() } catch { }
           }
+
+          // 策略2: 只通过 create_time 查找（兜底）
+          if (!silkData && timeColumn) {
+            const sql = `SELECT ${dataColumn} AS data FROM ${voiceTable} WHERE ${timeColumn} = ? LIMIT 1`
+            const row = await dbAdapter.get<any>('message', dbPath, sql, [msgCreateTime])
+
+            if (row?.data) {
+              silkData = this.decodeVoiceBlob(row.data)
+            }
+          }
+
+          if (silkData) break
         } catch (e) {
           // 忽略单个数据库打开失败
         }
@@ -5515,308 +4984,31 @@ class ChatService extends EventEmitter {
   }
 
   /**
-   * 启动自动增量同步
-   * @param intervalMs 检查间隔（毫秒）
+   * 启动自动增量同步（保留签名作为 no-op；实时同步已迁移到 monitorBridge）
    */
-  startAutoSync(intervalMs = 5000) {
-    if (this.syncTimer) return
-
-    // 立即执行一次
-    this.checkUpdates().catch(() => { })
-
-    this.syncTimer = setInterval(() => {
-      this.checkUpdates().catch(() => { })
-    }, intervalMs)
+  startAutoSync(_intervalMs = 5000) {
+    // no-op，等待 monitorBridge 推送
   }
 
   /**
-   * 停止自动同步
+   * 停止自动同步（保留签名作为 no-op）
    */
   stopAutoSync() {
-    if (this.syncTimer) {
-      clearInterval(this.syncTimer)
-      this.syncTimer = null
-      // console.log('[ChatService] 停止自动增量同步') // 减少日志
-    }
+    // no-op
   }
 
   /**
-   * 检查数据库是否有更新
-   * @param force 是否强制触发（跳过时间检查）
+   * 检查数据库是否有更新（保留签名作为 no-op；真正的变更来自 monitorBridge）
    */
-  async checkUpdates(force: boolean = false) {
-    if (this.isCheckingUpdates) return
-    this.isCheckingUpdates = true
-
-    // 确保已连接
-    try {
-      if (!this.sessionDb || !this.dbDir) {
-        // 如果数据库已关闭，不要尝试重新连接（可能正在同步）
-        return
-      }
-
-      const sessionPath = path.join(this.dbDir!, 'session.db')
-      const walPath = path.join(this.dbDir!, 'session.db-wal')
-
-      // 检查文件是否存在
-      if (!fs.existsSync(sessionPath)) return
-
-      let currentMtime = fs.statSync(sessionPath).mtimeMs
-
-      // 如果存在 WAL 文件，也检查它的修改时间
-      if (fs.existsSync(walPath)) {
-        const walMtime = fs.statSync(walPath).mtimeMs
-        currentMtime = Math.max(currentMtime, walMtime)
-      }
-
-      // 如果不是强制检查，且时间没变，则返回
-      if (!force) {
-        // 首次运行时记录时间但不触发更新
-        if (this.lastDbCheckTime === 0) {
-          this.lastDbCheckTime = currentMtime
-          return
-        }
-
-        // 如果时间没变变大，则不触发
-        if (currentMtime <= this.lastDbCheckTime) {
-          return
-        }
-      }
-
-      // 更新上一次检查时间
-      this.lastDbCheckTime = currentMtime
-
-      // 再次检查数据库是否仍然打开（可能在等待期间被关闭）
-      if (!this.sessionDb) {
-        return
-      }
-
-      // 强制或时间变大：获取最新会话列表并广播
-      try {
-        const result = await this.getSessions()
-        if (result.success && result.sessions) {
-          this.emit('sessions-update-available', result.sessions)
-        }
-      } catch (err) {
-        console.error('[ChatService] 获取更新会话列表失败:', err)
-      }
-    } catch (e) {
-      console.error('[ChatService] 检查更新出错:', e)
-    } finally {
-      this.isCheckingUpdates = false
-    }
+  async checkUpdates(_force: boolean = false) {
+    // no-op
   }
 
   /**
-   * 检查当前会话的新消息并推送（增量同步）
-   * 采用 Push 模式，主动将新解密的消息推送到前端
+   * 检查当前会话的新消息并推送（保留签名作为 no-op；真正的增量推送走 monitorBridge）
    */
-  private checkNewMessagesForCurrentSession(): void {
-    if (!this.currentSessionId) return
-
-    // 如果没有游标，说明尚未加载过历史消息，暂不推送（避免数据不连续）
-    const cursor = this.sessionCursor.get(this.currentSessionId) || 0
-    if (cursor === 0) return
-
-    try {
-      const tables = this.findSessionTables(this.currentSessionId)
-      if (tables.length === 0) return
-
-      const allNewMessages: Message[] = []
-
-      // 获取当前用户的 wxid
-      const myWxid = this.configService.get('myWxid')
-      const cleanedMyWxid = myWxid ? this.cleanAccountDirName(myWxid) : ''
-
-      for (const { db, tableName, dbPath } of tables) {
-        // 检查 Name2Id 表
-        const hasName2IdTable = this.checkTableExists(db, 'Name2Id')
-
-        // 鲁棒的 myRowId 查找逻辑 (与 getMessages 保持一致)
-        let myRowId: number | null = null
-        if (myWxid && hasName2IdTable) {
-          const cacheKeyOriginal = `${dbPath}:${myWxid}`
-          const cachedRowIdOriginal = this.myRowIdCache.get(cacheKeyOriginal)
-
-          if (cachedRowIdOriginal !== undefined) {
-            myRowId = cachedRowIdOriginal
-          } else {
-            try {
-              const row = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(myWxid) as any
-              if (row?.rowid) {
-                myRowId = row.rowid
-                this.myRowIdCache.set(cacheKeyOriginal, myRowId)
-              } else if (cleanedMyWxid && cleanedMyWxid !== myWxid) {
-                const cacheKeyCleaned = `${dbPath}:${cleanedMyWxid}`
-                const cachedRowIdCleaned = this.myRowIdCache.get(cacheKeyCleaned)
-
-                if (cachedRowIdCleaned !== undefined) {
-                  myRowId = cachedRowIdCleaned
-                } else {
-                  const row2 = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(cleanedMyWxid) as any
-                  myRowId = row2?.rowid ?? null
-                  this.myRowIdCache.set(cacheKeyCleaned, myRowId)
-                }
-              } else {
-                this.myRowIdCache.set(cacheKeyOriginal, null)
-              }
-            } catch {
-              myRowId = null
-            }
-          }
-        }
-
-        // 构建查询 SQL (查询比 cursor 大的消息)
-        let sql: string
-        if (hasName2IdTable && myRowId !== null) {
-          sql = `SELECT m.*, 
-                 CASE WHEN m.real_sender_id = ? THEN 1 ELSE 0 END AS computed_is_send,
-                 n.user_name AS sender_username
-                 FROM ${tableName} m
-                 LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
-                 WHERE m.sort_seq > ?
-                 ORDER BY m.sort_seq ASC
-                 LIMIT 100`
-        } else if (hasName2IdTable) {
-          sql = `SELECT m.*, n.user_name AS sender_username
-                 FROM ${tableName} m
-                 LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
-                 WHERE m.sort_seq > ?
-                 ORDER BY m.sort_seq ASC
-                 LIMIT 100`
-        } else {
-          sql = `SELECT * FROM ${tableName} WHERE sort_seq > ? ORDER BY sort_seq ASC LIMIT 100`
-        }
-
-        const rows = hasName2IdTable && myRowId !== null
-          ? db.prepare(sql).all(myRowId, cursor) as any[]
-          : db.prepare(sql).all(cursor) as any[]
-
-        // 解析消息
-        for (const row of rows) {
-          const content = this.decodeMessageContent(row.message_content, row.compress_content)
-          const localType = row.local_type || row.type || 1
-          const isSend = row.computed_is_send ?? row.is_send ?? null
-
-          let emojiCdnUrl: string | undefined
-          let emojiMd5: string | undefined
-          let emojiProductId: string | undefined
-          let quotedContent: string | undefined
-          let quotedSender: string | undefined
-          let quotedImageMd5: string | undefined
-          let imageMd5: string | undefined
-          let imageDatName: string | undefined
-          let isLivePhoto: boolean | undefined
-          let videoMd5: string | undefined
-          let videoDuration: number | undefined
-          let voiceDuration: number | undefined
-          let fileName: string | undefined
-          let fileSize: number | undefined
-          let fileExt: string | undefined
-          let fileMd5: string | undefined
-
-          if (localType === 47 && content) {
-            const emojiInfo = this.parseEmojiInfo(content)
-            emojiCdnUrl = emojiInfo.cdnUrl
-            emojiMd5 = emojiInfo.md5
-            emojiProductId = emojiInfo.productId
-          } else if (localType === 3 && content) {
-            const imageInfo = this.parseImageInfo(content)
-            imageMd5 = imageInfo.md5
-            imageDatName = this.parseImageDatNameFromRow(row)
-            isLivePhoto = imageInfo.isLivePhoto
-          } else if (localType === 43 && content) {
-            videoMd5 = this.parseVideoMd5(content)
-            videoDuration = this.parseVideoDuration(content)
-          } else if (localType === 34 && content) {
-            voiceDuration = this.parseVoiceDuration(content)
-          } else if (localType === 49 && content) {
-            // 解析文件消息
-            const fileInfo = this.parseFileInfo(content)
-            fileName = fileInfo.fileName
-            fileSize = fileInfo.fileSize
-            fileExt = fileInfo.fileExt
-            fileMd5 = fileInfo.fileMd5
-          }
-
-          let chatRecordList: ChatRecordItem[] | undefined
-          if (content) {
-            const xmlType = this.extractXmlValue(content, 'type')
-            if (xmlType === '19' || localType === 49) {
-              chatRecordList = this.parseChatHistory(content)
-            }
-          } else if (localType === 244813135921 || (content && content.includes('<type>57</type>'))) {
-            const quoteInfo = this.parseQuoteMessage(content)
-            quotedContent = quoteInfo.content
-            quotedSender = quoteInfo.sender
-            quotedImageMd5 = quoteInfo.imageMd5
-          }
-
-          // 解析转账消息的付款方和收款方
-          let transferPayerUsername: string | undefined
-          let transferReceiverUsername: string | undefined
-          if ((localType === 49 || localType === 8589934592049) && content) {
-            const xmlType = this.extractXmlValue(content, 'type')
-            if (xmlType === '2000') {
-              transferPayerUsername = this.extractXmlValue(content, 'payer_username') || undefined
-              transferReceiverUsername = this.extractXmlValue(content, 'receiver_username') || undefined
-            }
-          }
-
-          const parsedContent = this.parseMessageContent(content, localType)
-
-          allNewMessages.push({
-            localId: row.local_id || 0,
-            serverId: row.server_id || 0,
-            localType,
-            createTime: row.create_time || 0,
-            sortSeq: row.sort_seq || 0,
-            isSend,
-            senderUsername: row.sender_username || null,
-            parsedContent,
-            rawContent: content,
-            emojiCdnUrl,
-            emojiMd5,
-            productId: emojiProductId,
-            quotedContent,
-            quotedSender,
-            quotedImageMd5,
-            imageMd5,
-            imageDatName,
-            isLivePhoto,
-            videoMd5,
-            videoDuration,
-            voiceDuration,
-            fileName,
-            fileSize,
-            fileExt,
-            fileMd5,
-            chatRecordList,
-            transferPayerUsername,
-            transferReceiverUsername
-          })
-        }
-      }
-
-      if (allNewMessages.length > 0) {
-        // 排序
-        allNewMessages.sort((a, b) => a.sortSeq - b.sortSeq)
-
-        // 更新游标
-        const maxSeq = allNewMessages[allNewMessages.length - 1].sortSeq
-        this.sessionCursor.set(this.currentSessionId, maxSeq)
-
-        // 推送事件
-        this.emit('new-messages', {
-          sessionId: this.currentSessionId,
-          messages: allNewMessages
-        })
-        // console.log(`[ChatService] 推送增量消息: ${allNewMessages.length} 条`)
-      }
-
-    } catch (e) {
-      // console.error('[ChatService] 增量同步失败:', e)
-    }
+  private async checkNewMessagesForCurrentSession(): Promise<void> {
+    // no-op；等待 wcdb monitor 推送变更后再由 attachMonitor 处理
   }
 }
 

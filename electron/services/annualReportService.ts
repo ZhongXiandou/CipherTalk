@@ -1,8 +1,6 @@
 import { ConfigService } from './config'
-import Database from 'better-sqlite3'
-import * as fs from 'fs'
-import * as path from 'path'
-import { app } from 'electron'
+import { dbAdapter } from './dbAdapter'
+import { findMessageDbPaths, findSessionDbPath, findDbByName } from './dbStoragePaths'
 import * as crypto from 'crypto'
 
 export interface TopContact {
@@ -78,7 +76,6 @@ export interface AnnualReportData {
 
 class AnnualReportService {
   private configService: ConfigService
-  private messageDbCache: Map<string, Database.Database> = new Map()
   private readonly systemAccounts = new Set([
     'medianote',
     'floatbottle',
@@ -105,31 +102,6 @@ class AnnualReportService {
     this.configService = new ConfigService()
   }
 
-  private getDecryptedDbDir(): string {
-    const cachePath = this.configService.get('cachePath')
-    if (cachePath) return cachePath
-    
-    // 开发环境使用文档目录
-    if (process.env.VITE_DEV_SERVER_URL) {
-      const documentsPath = app.getPath('documents')
-      return path.join(documentsPath, 'CipherTalkData')
-    }
-    
-    // 生产环境
-    const exePath = app.getPath('exe')
-    const installDir = path.dirname(exePath)
-    
-    // 检查是否安装在 C 盘
-    const isOnCDrive = /^[cC]:/i.test(installDir) || installDir.startsWith('\\')
-    
-    if (isOnCDrive) {
-      const documentsPath = app.getPath('documents')
-      return path.join(documentsPath, 'CipherTalkData')
-    }
-    
-    return path.join(installDir, 'CipherTalkData')
-  }
-
   private cleanAccountDirName(dirName: string): string {
     const trimmed = dirName.trim()
     if (!trimmed) return trimmed
@@ -147,85 +119,6 @@ class AnnualReportService {
     if (suffixMatch) return suffixMatch[1]
 
     return trimmed
-  }
-
-  /**
-   * 查找账号对应的实际目录名
-   * 支持多种匹配方式以兼容不同版本的目录命名
-   */
-  private findAccountDir(baseDir: string, wxid: string): string | null {
-    if (!fs.existsSync(baseDir)) return null
-
-    const cleanedWxid = this.cleanAccountDirName(wxid)
-    
-    // 1. 直接匹配原始 wxid
-    const directPath = path.join(baseDir, wxid)
-    if (fs.existsSync(directPath)) {
-      return wxid
-    }
-    
-    // 2. 直接匹配清理后的 wxid
-    if (cleanedWxid !== wxid) {
-      const cleanedPath = path.join(baseDir, cleanedWxid)
-      if (fs.existsSync(cleanedPath)) {
-        return cleanedWxid
-      }
-    }
-
-    // 3. 扫描目录查找匹配
-    try {
-      const entries = fs.readdirSync(baseDir, { withFileTypes: true })
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue
-        
-        const dirName = entry.name
-        const dirNameLower = dirName.toLowerCase()
-        const wxidLower = wxid.toLowerCase()
-        const cleanedWxidLower = cleanedWxid.toLowerCase()
-        
-        // 精确匹配（忽略大小写）
-        if (dirNameLower === wxidLower || dirNameLower === cleanedWxidLower) return dirName
-        
-        // 前缀匹配: 目录名以 wxid 或 cleanedWxid 开头
-        if (dirNameLower.startsWith(wxidLower + '_') || dirNameLower.startsWith(cleanedWxidLower + '_')) return dirName
-        
-        // 反向前缀匹配: wxid 或 cleanedWxid 以目录名开头
-        if (wxidLower.startsWith(dirNameLower + '_') || cleanedWxidLower.startsWith(dirNameLower + '_')) return dirName
-        
-        // 清理目录名后匹配
-        const cleanedDirName = this.cleanAccountDirName(dirName)
-        if (cleanedDirName.toLowerCase() === wxidLower || cleanedDirName.toLowerCase() === cleanedWxidLower) return dirName
-      }
-    } catch (e) {
-      console.error('查找账号目录失败:', e)
-    }
-
-    return null
-  }
-
-  private findMessageDbFiles(dbDir: string): string[] {
-    try {
-      const files = fs.readdirSync(dbDir)
-      return files.filter(f => {
-        const lower = f.toLowerCase()
-        return (lower.startsWith('msg') || lower.startsWith('message')) && lower.endsWith('.db')
-      }).map(f => path.join(dbDir, f))
-    } catch {
-      return []
-    }
-  }
-
-  private getMessageDb(dbPath: string): Database.Database | null {
-    if (this.messageDbCache.has(dbPath)) {
-      return this.messageDbCache.get(dbPath)!
-    }
-    try {
-      const db = new Database(dbPath, { readonly: true })
-      this.messageDbCache.set(dbPath, db)
-      return db
-    } catch {
-      return null
-    }
   }
 
   private getTableHash(username: string): string {
@@ -258,26 +151,28 @@ class AnnualReportService {
     return null
   }
 
-  private hasName2IdTable(db: Database.Database): boolean {
-    try {
-      const result = db.prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name = 'Name2Id'"
-      ).get()
-      return !!result
-    } catch {
-      return false
-    }
+  private hasName2IdTable(dbPath: string): Promise<boolean> {
+    return dbAdapter.get<{ name: string }>(
+      'message',
+      dbPath,
+      "SELECT name FROM sqlite_master WHERE type='table' AND name = 'Name2Id'"
+    ).then(row => !!row).catch(() => false)
   }
 
   private myRowIdCache: Map<string, number | null> = new Map()
 
-  private getMyRowId(db: Database.Database, dbPath: string, myWxid: string): number | null {
+  private async getMyRowId(dbPath: string, myWxid: string): Promise<number | null> {
     const cacheKey = `${dbPath}:${myWxid}`
     if (this.myRowIdCache.has(cacheKey)) {
       return this.myRowIdCache.get(cacheKey)!
     }
     try {
-      const row = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(myWxid) as { rowid: number } | undefined
+      const row = await dbAdapter.get<{ rowid: number }>(
+        'message',
+        dbPath,
+        'SELECT rowid FROM Name2Id WHERE user_name = ?',
+        [myWxid]
+      )
       const rowId = row?.rowid ?? null
       this.myRowIdCache.set(cacheKey, rowId)
       return rowId
@@ -294,16 +189,7 @@ class AnnualReportService {
         return { success: false, error: '未配置微信ID' }
       }
 
-      const baseDir = this.getDecryptedDbDir()
-      const accountDir = this.findAccountDir(baseDir, wxid)
-      
-      if (!accountDir) {
-        return { success: false, error: `未找到账号 ${wxid} 的数据库目录` }
-      }
-
-      const dbDir = path.join(baseDir, accountDir)
-      
-      const dbFiles = this.findMessageDbFiles(dbDir)
+      const dbFiles = findMessageDbPaths()
 
       if (dbFiles.length === 0) {
         return { success: false, error: '未找到消息数据库' }
@@ -312,20 +198,25 @@ class AnnualReportService {
       const years = new Set<number>()
 
       for (const dbPath of dbFiles) {
-        const db = this.getMessageDb(dbPath)
-        if (!db) continue
-
-        const tables = db.prepare(`
-          SELECT name FROM sqlite_master 
-          WHERE type='table' AND lower(name) LIKE 'msg_%'
-        `).all() as { name: string }[]
+        let tables: { name: string }[]
+        try {
+          tables = await dbAdapter.all<{ name: string }>(
+            'message',
+            dbPath,
+            "SELECT name FROM sqlite_master WHERE type='table' AND lower(name) LIKE 'msg_%'"
+          )
+        } catch {
+          continue
+        }
 
         for (const { name: tableName } of tables) {
           try {
-            const result = db.prepare(`
-              SELECT MIN(create_time) as min_time, MAX(create_time) as max_time
-              FROM "${tableName}" WHERE create_time > 0
-            `).get() as { min_time: number; max_time: number } | undefined
+            const result = await dbAdapter.get<{ min_time: number; max_time: number }>(
+              'message',
+              dbPath,
+              `SELECT MIN(create_time) as min_time, MAX(create_time) as max_time
+              FROM "${tableName}" WHERE create_time > 0`
+            )
 
             if (result?.min_time && result?.max_time) {
               const minYear = new Date(result.min_time * 1000).getFullYear()
@@ -354,36 +245,27 @@ class AnnualReportService {
         return { success: false, error: '未配置微信ID' }
       }
 
-      const baseDir = this.getDecryptedDbDir()
-      const accountDir = this.findAccountDir(baseDir, wxid)
-      
-      if (!accountDir) {
-        return { success: false, error: `未找到账号 ${wxid} 的数据库目录` }
-      }
-
       const cleanedWxid = this.cleanAccountDirName(wxid)
-      const dbDir = path.join(baseDir, accountDir)
-      
-      const dbFiles = this.findMessageDbFiles(dbDir)
+      const dbFiles = findMessageDbPaths()
 
       if (dbFiles.length === 0) {
         return { success: false, error: '未找到消息数据库' }
       }
 
       // 获取私聊会话列表
-      const sessionDbPath = path.join(dbDir, 'session.db')
-      if (!fs.existsSync(sessionDbPath)) {
+      const sessionDbPath = findSessionDbPath()
+      if (!sessionDbPath) {
         return { success: false, error: '未找到 session.db' }
       }
 
-      const sessionDb = new Database(sessionDbPath, { readonly: true })
-      const sessions = sessionDb.prepare(`
-        SELECT username FROM SessionTable 
+      const sessions = await dbAdapter.all<{ username: string }>(
+        'session',
+        '',
+        `SELECT username FROM SessionTable
         WHERE username NOT LIKE '%@chatroom'
         AND username != 'filehelper'
-        AND username NOT LIKE 'gh_%'
-      `).all() as { username: string }[]
-      sessionDb.close()
+        AND username NOT LIKE 'gh_%'`
+      )
 
       // 过滤掉自己（同时匹配原始wxid和清理后的wxid）
       const wxidLower = wxid.toLowerCase()
@@ -428,16 +310,19 @@ class AnnualReportService {
 
       // 遍历所有消息数据库
       for (const dbPath of dbFiles) {
-        const db = this.getMessageDb(dbPath)
-        if (!db) continue
+        const hasName2Id = await this.hasName2IdTable(dbPath)
+        const myRowId = hasName2Id ? await this.getMyRowId(dbPath, cleanedWxid) : null
 
-        const hasName2Id = this.hasName2IdTable(db)
-        const myRowId = hasName2Id ? this.getMyRowId(db, dbPath, cleanedWxid) : null
-
-        const tables = db.prepare(`
-          SELECT name FROM sqlite_master 
-          WHERE type='table' AND lower(name) LIKE 'msg_%'
-        `).all() as { name: string }[]
+        let tables: { name: string }[]
+        try {
+          tables = await dbAdapter.all<{ name: string }>(
+            'message',
+            dbPath,
+            "SELECT name FROM sqlite_master WHERE type='table' AND lower(name) LIKE 'msg_%'"
+          )
+        } catch {
+          continue
+        }
 
         for (const { name: tableName } of tables) {
           // 从表名提取 hash，查找对应的 sessionId
@@ -456,7 +341,11 @@ class AnnualReportService {
             }
 
             // 检查表是否有内容字段（按优先级尝试多个字段名）
-            const columns = db.prepare(`PRAGMA table_info("${tableName}")`).all() as { name: string }[]
+            const columns = await dbAdapter.all<{ name: string }>(
+              'message',
+              dbPath,
+              `PRAGMA table_info("${tableName}")`
+            )
             const columnNames = columns.map(c => c.name.toLowerCase())
             
             // 内容字段候选列表（按优先级排序）
@@ -487,10 +376,10 @@ class AnnualReportService {
               ORDER BY create_time ASC
             `
 
-            const messages = db.prepare(query).all(startTime, endTime) as { 
+            const messages = await dbAdapter.all<{
               create_time: number; is_sent: number; day: string; month: number; hour: number; weekday: number;
               local_type: number; msg_content?: string | null
-            }[]
+            }>('message', dbPath, query, [startTime, endTime])
 
             // 用于计算对话发起和回复时间
             let lastMsg = lastMessageTime.get(sessionId)
@@ -592,27 +481,31 @@ class AnnualReportService {
       }
 
       // 获取联系人信息
-      const contactDbPath = path.join(dbDir, 'contact.db')
+      const contactDbPath = findDbByName('contact.db')
       const contactInfoMap = new Map<string, { displayName: string; avatarUrl?: string }>()
       let selfAvatarUrl: string | undefined
 
-      if (fs.existsSync(contactDbPath)) {
+      if (contactDbPath) {
         try {
-          const contactDb = new Database(contactDbPath, { readonly: true })
-          
           // 获取自己的头像
           try {
-            const self = contactDb.prepare(`
-              SELECT small_head_url FROM contact WHERE username = ?
-            `).get(cleanedWxid) as { small_head_url?: string } | undefined
+            const self = await dbAdapter.get<{ small_head_url?: string }>(
+              'contact',
+              '',
+              'SELECT small_head_url FROM contact WHERE username = ?',
+              [cleanedWxid]
+            )
             selfAvatarUrl = self?.small_head_url
           } catch { /* skip */ }
 
           for (const sessionId of Array.from(contactStats.keys())) {
             try {
-              const contact = contactDb.prepare(`
-                SELECT nick_name, remark, small_head_url FROM contact WHERE username = ?
-              `).get(sessionId) as { nick_name?: string; remark?: string; small_head_url?: string } | undefined
+              const contact = await dbAdapter.get<{ nick_name?: string; remark?: string; small_head_url?: string }>(
+                'contact',
+                '',
+                'SELECT nick_name, remark, small_head_url FROM contact WHERE username = ?',
+                [sessionId]
+              )
               if (contact) {
                 contactInfoMap.set(sessionId, {
                   displayName: contact.remark || contact.nick_name || sessionId,
@@ -621,7 +514,6 @@ class AnnualReportService {
               }
             } catch { /* skip */ }
           }
-          contactDb.close()
         } catch { /* skip */ }
       }
 
@@ -876,10 +768,7 @@ class AnnualReportService {
   }
 
   close() {
-    this.messageDbCache.forEach(db => {
-      try { db.close() } catch { /* ignore */ }
-    })
-    this.messageDbCache.clear()
+    this.myRowIdCache.clear()
   }
 }
 

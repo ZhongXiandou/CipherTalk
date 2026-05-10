@@ -62,7 +62,7 @@ export function registerMediaHandlers(ctx: MainProcessContext): void {
   // 视频相关
   ipcMain.handle('video:getVideoInfo', async (_, videoMd5: string, rawContent?: string) => {
     try {
-      const result = videoService.getVideoInfo(videoMd5, rawContent)
+      const result = await videoService.getVideoInfo(videoMd5, rawContent)
       return { success: true, ...result }
     } catch (e) {
       return { success: false, error: String(e), exists: false }

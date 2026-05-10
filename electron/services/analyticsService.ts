@@ -1,8 +1,6 @@
 import { ConfigService } from './config'
-import Database from 'better-sqlite3'
-import * as fs from 'fs'
-import * as path from 'path'
-import { app } from 'electron'
+import { dbAdapter } from './dbAdapter'
+import { findMessageDbPaths } from './dbStoragePaths'
 
 export interface ChatStatistics {
   totalMessages: number
@@ -43,155 +41,37 @@ type TimeRangeFilter = {
 
 class AnalyticsService {
   private configService: ConfigService
-  private messageDbCache: Map<string, Database.Database> = new Map()
   private myRowIdCache: Map<string, number | null> = new Map()
   private messageTableCache: Map<string, string[]> = new Map()
+  private hasName2IdCache: Map<string, boolean> = new Map()
 
   constructor() {
     this.configService = new ConfigService()
   }
 
-  private getDecryptedDbDir(): string {
-    const cachePath = this.configService.get('cachePath')
-    if (cachePath) return cachePath
-    
-    // 开发环境使用文档目录
-    if (process.env.VITE_DEV_SERVER_URL) {
-      const documentsPath = app.getPath('documents')
-      return path.join(documentsPath, 'CipherTalkData')
-    }
-    
-    // 生产环境
-    const exePath = app.getPath('exe')
-    const installDir = path.dirname(exePath)
-    
-    // 检查是否安装在 C 盘
-    const isOnCDrive = /^[cC]:/i.test(installDir) || installDir.startsWith('\\')
-    
-    if (isOnCDrive) {
-      const documentsPath = app.getPath('documents')
-      return path.join(documentsPath, 'CipherTalkData')
-    }
-    
-    return path.join(installDir, 'CipherTalkData')
-  }
-
   private cleanAccountDirName(name: string): string {
     const trimmed = name.trim()
     if (!trimmed) return trimmed
-    
-    // wxid_ 开头的标准格式: wxid_xxx_yyyy -> wxid_xxx
     if (trimmed.toLowerCase().startsWith('wxid_')) {
       const match = trimmed.match(/^(wxid_[a-zA-Z0-9]+)/i)
       if (match) return match[1]
       return trimmed
     }
-    
-    // 自定义微信号格式: xxx_yyyy (4位后缀) -> xxx
-    // 例如: xiangchao1985_b29d -> xiangchao1985
     const suffixMatch = trimmed.match(/^(.+)_([a-zA-Z0-9]{4})$/)
     if (suffixMatch) return suffixMatch[1]
-    
     return trimmed
   }
 
-  /**
-   * 查找账号对应的实际目录名
-   * 支持多种匹配方式以兼容不同版本的目录命名
-   */
-  private findAccountDir(baseDir: string, wxid: string): string | null {
-    if (!fs.existsSync(baseDir)) return null
-
-    const cleanedWxid = this.cleanAccountDirName(wxid)
-    
-    // 1. 直接匹配原始 wxid
-    const directPath = path.join(baseDir, wxid)
-    if (fs.existsSync(directPath)) {
-      return wxid
-    }
-    
-    // 2. 直接匹配清理后的 wxid
-    if (cleanedWxid !== wxid) {
-      const cleanedPath = path.join(baseDir, cleanedWxid)
-      if (fs.existsSync(cleanedPath)) {
-        return cleanedWxid
-      }
-    }
-
-    // 3. 扫描目录，查找匹配的账号目录
-    try {
-      const entries = fs.readdirSync(baseDir, { withFileTypes: true })
-      
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue
-        
-        const dirName = entry.name
-        const dirNameLower = dirName.toLowerCase()
-        const wxidLower = wxid.toLowerCase()
-        const cleanedWxidLower = cleanedWxid.toLowerCase()
-        
-        // 精确匹配（忽略大小写）
-        if (dirNameLower === wxidLower || dirNameLower === cleanedWxidLower) {
-          return dirName
-        }
-        
-        // 前缀匹配: 目录名以 wxid 或 cleanedWxid 开头
-        if (dirNameLower.startsWith(wxidLower + '_') || dirNameLower.startsWith(cleanedWxidLower + '_')) {
-          return dirName
-        }
-        
-        // 反向前缀匹配: wxid 或 cleanedWxid 以目录名开头
-        if (wxidLower.startsWith(dirNameLower + '_') || cleanedWxidLower.startsWith(dirNameLower + '_')) {
-          return dirName
-        }
-        
-        // 清理目录名后匹配
-        const cleanedDirName = this.cleanAccountDirName(dirName)
-        if (cleanedDirName.toLowerCase() === wxidLower || cleanedDirName.toLowerCase() === cleanedWxidLower) {
-          return dirName
-        }
-      }
-    } catch (e) {
-      console.error('查找账号目录失败:', e)
-    }
-
-    return null
-  }
-
-  private findMessageDbFiles(dbDir: string): string[] {
-    try {
-      const files = fs.readdirSync(dbDir)
-      return files.filter(f => {
-        const lower = f.toLowerCase()
-        return (lower.startsWith('msg') || lower.startsWith('message')) && lower.endsWith('.db')
-      }).map(f => path.join(dbDir, f))
-    } catch {
-      return []
-    }
-  }
-
-  private getMessageDb(dbPath: string): Database.Database | null {
-    if (this.messageDbCache.has(dbPath)) {
-      return this.messageDbCache.get(dbPath)!
-    }
-    try {
-      const db = new Database(dbPath, { readonly: true })
-      this.messageDbCache.set(dbPath, db)
-      return db
-    } catch (e) {
-      return null
-    }
-  }
-
-  private getMessageTables(db: Database.Database, dbPath: string): string[] {
+  private async getMessageTables(dbPath: string): Promise<string[]> {
     const cached = this.messageTableCache.get(dbPath)
     if (cached) return cached
     try {
-      const tables = db.prepare(`
-        SELECT name FROM sqlite_master 
-        WHERE type='table' AND name LIKE 'Msg_%'
-      `).all() as { name: string }[]
-      const result = tables.map(t => t.name)
+      const rows = await dbAdapter.all<{ name: string }>(
+        'message',
+        dbPath,
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'Msg_%'"
+      )
+      const result = rows.map(t => t.name)
       this.messageTableCache.set(dbPath, result)
       return result
     } catch {
@@ -200,34 +80,44 @@ class AnalyticsService {
     }
   }
 
-  private hasName2IdTable(db: Database.Database): boolean {
+  private async hasName2IdTable(dbPath: string): Promise<boolean> {
+    if (this.hasName2IdCache.has(dbPath)) return this.hasName2IdCache.get(dbPath)!
     try {
-      const result = db.prepare(
+      const row = await dbAdapter.get<any>(
+        'message',
+        dbPath,
         "SELECT name FROM sqlite_master WHERE type='table' AND name = 'Name2Id'"
-      ).get()
-      return !!result
+      )
+      const result = !!row
+      this.hasName2IdCache.set(dbPath, result)
+      return result
     } catch {
+      this.hasName2IdCache.set(dbPath, false)
       return false
     }
   }
 
-  private getMyRowId(db: Database.Database, dbPath: string, myWxid: string): number | null {
+  private async getMyRowId(dbPath: string, myWxid: string): Promise<number | null> {
     const cacheKey = `${dbPath}:${myWxid}`
-    if (this.myRowIdCache.has(cacheKey)) {
-      return this.myRowIdCache.get(cacheKey)!
-    }
+    if (this.myRowIdCache.has(cacheKey)) return this.myRowIdCache.get(cacheKey)!
     try {
-      // 先尝试原始 wxid
-      let row = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(myWxid) as any
-      
-      // 如果没找到，尝试清理后的 wxid
+      let row = await dbAdapter.get<any>(
+        'message',
+        dbPath,
+        'SELECT rowid FROM Name2Id WHERE user_name = ?',
+        [myWxid]
+      )
       if (!row) {
         const cleanedWxid = this.cleanAccountDirName(myWxid)
         if (cleanedWxid !== myWxid) {
-          row = db.prepare('SELECT rowid FROM Name2Id WHERE user_name = ?').get(cleanedWxid) as any
+          row = await dbAdapter.get<any>(
+            'message',
+            dbPath,
+            'SELECT rowid FROM Name2Id WHERE user_name = ?',
+            [cleanedWxid]
+          )
         }
       }
-      
       const rowId = row?.rowid ?? null
       this.myRowIdCache.set(cacheKey, rowId)
       return rowId
@@ -245,28 +135,16 @@ class AnalyticsService {
   private normalizeTimeRange(startTime?: number, endTime?: number): TimeRangeFilter {
     const startTimeSec = this.toTimestampSeconds(startTime)
     const endTimeSec = this.toTimestampSeconds(endTime)
-
     if (startTimeSec && endTimeSec && startTimeSec > endTimeSec) {
-      return {
-        startTimeSec: endTimeSec,
-        endTimeSec: startTimeSec
-      }
+      return { startTimeSec: endTimeSec, endTimeSec: startTimeSec }
     }
-
     return { startTimeSec, endTimeSec }
   }
 
   private buildTimeWhereClause(range: TimeRangeFilter, columnName: string = 'create_time'): string {
     const clauses: string[] = []
-
-    if (range.startTimeSec) {
-      clauses.push(`${columnName} >= ${range.startTimeSec}`)
-    }
-
-    if (range.endTimeSec) {
-      clauses.push(`${columnName} <= ${range.endTimeSec}`)
-    }
-
+    if (range.startTimeSec) clauses.push(`${columnName} >= ${range.startTimeSec}`)
+    if (range.endTimeSec) clauses.push(`${columnName} <= ${range.endTimeSec}`)
     return clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : ''
   }
 
@@ -275,20 +153,10 @@ class AnalyticsService {
    */
   private isPrivateSession(username: string, cleanedWxid: string): boolean {
     if (!username) return false
-    
-    // 排除自己
     if (username.toLowerCase() === cleanedWxid.toLowerCase()) return false
-    
-    // 排除群聊
     if (username.includes('@chatroom')) return false
-    
-    // 排除文件传输助手
     if (username === 'filehelper') return false
-    
-    // 排除公众号
     if (username.startsWith('gh_')) return false
-
-    // 排除系统账号
     const excludeList = [
       'weixin', 'qqmail', 'fmessage', 'medianote', 'floatbottle',
       'newsapp', 'brandsessionholder', 'brandservicesessionholder',
@@ -296,73 +164,41 @@ class AnalyticsService {
       'userexperience_alarm', 'helper_folders', 'placeholder_foldgroup',
       '@helper_folders', '@placeholder_foldgroup'
     ]
-
     for (const prefix of excludeList) {
       if (username.startsWith(prefix) || username === prefix) return false
     }
-
-    // 排除客服和 OpenIM
     if (username.includes('@kefu.openim') || username.includes('@openim')) return false
     if (username.includes('service_')) return false
-
     return true
   }
 
   /**
    * 获取私聊会话列表
    */
-  private getPrivateSessions(sessionDb: Database.Database, cleanedWxid: string): string[] {
-    const sessions = sessionDb.prepare(`
-      SELECT username FROM SessionTable
-    `).all() as { username: string }[]
-    
-    return sessions
-      .map(s => s.username)
-      .filter(u => this.isPrivateSession(u, cleanedWxid))
+  private async getPrivateSessions(cleanedWxid: string): Promise<string[]> {
+    const sessions = await dbAdapter.all<{ username: string }>(
+      'session',
+      '',
+      'SELECT username FROM SessionTable'
+    )
+    return sessions.map(s => s.username).filter(u => this.isPrivateSession(u, cleanedWxid))
   }
-
 
   async getOverallStatistics(startTime?: number, endTime?: number): Promise<{ success: boolean; data?: ChatStatistics; error?: string }> {
     try {
       const wxid = this.configService.get('myWxid')
-      if (!wxid) {
-        return { success: false, error: '未配置微信ID' }
-      }
-
-      const baseDir = this.getDecryptedDbDir()
-      const accountDir = this.findAccountDir(baseDir, wxid)
-      
-      if (!accountDir) {
-        return { success: false, error: `未找到账号 ${wxid} 的数据库目录` }
-      }
+      if (!wxid) return { success: false, error: '未配置微信ID' }
 
       const cleanedWxid = this.cleanAccountDirName(wxid)
-      const dbDir = path.join(baseDir, accountDir)
+      const dbFiles = findMessageDbPaths()
+      if (dbFiles.length === 0) return { success: false, error: '未找到消息数据库' }
 
-      const dbFiles = this.findMessageDbFiles(dbDir)
-      
-      if (dbFiles.length === 0) {
-        return { success: false, error: '未找到消息数据库' }
-      }
-
-      // 获取私聊会话列表（排除群聊、公众号等）
-      const sessionDbPath = path.join(dbDir, 'session.db')
-      if (!fs.existsSync(sessionDbPath)) {
-        return { success: false, error: '未找到 session.db' }
-      }
-
-      const sessionDb = new Database(sessionDbPath, { readonly: true })
-      const privateUsernames = this.getPrivateSessions(sessionDb, cleanedWxid)
-      sessionDb.close()
+      const privateUsernames = await this.getPrivateSessions(cleanedWxid)
 
       const crypto = require('crypto')
-      const getTableHash = (username: string) => {
-        return crypto.createHash('md5').update(username).digest('hex')
-      }
+      const getTableHash = (username: string) => crypto.createHash('md5').update(username).digest('hex')
       const timeRange = this.normalizeTimeRange(startTime, endTime)
       const timeWhere = this.buildTimeWhereClause(timeRange)
-
-      // 构建私聊表名的 hash 集合
       const privateTableHashes = new Set(privateUsernames.map(u => getTableHash(u)))
 
       let totalMessages = 0
@@ -377,30 +213,22 @@ class AnalyticsService {
       let firstMessageTime: number | null = null
       let lastMessageTime: number | null = null
       const messageTypeCounts: Record<number, number> = {}
-      // 用 Set 收集所有活跃日期，避免重复计算
       const activeDatesSet = new Set<string>()
 
       for (const dbPath of dbFiles) {
-        const db = this.getMessageDb(dbPath)
-        if (!db) continue
-
-        const hasName2Id = this.hasName2IdTable(db)
-        const myRowId = hasName2Id ? this.getMyRowId(db, dbPath, cleanedWxid) : null
-
-        const tables = this.getMessageTables(db, dbPath)
+        const hasName2Id = await this.hasName2IdTable(dbPath)
+        const myRowId = hasName2Id ? await this.getMyRowId(dbPath, cleanedWxid) : null
+        const tables = await this.getMessageTables(dbPath)
 
         for (const tableName of tables) {
-          // 检查表名是否属于私聊会话
           const tableHash = tableName.replace('Msg_', '')
-          if (!privateTableHashes.has(tableHash)) {
-            continue // 跳过群聊和其他非私聊表
-          }
+          if (!privateTableHashes.has(tableHash)) continue
 
           try {
             let statsQuery: string
             if (hasName2Id && myRowId !== null) {
               statsQuery = `
-                SELECT 
+                SELECT
                   COUNT(*) as total,
                   SUM(CASE WHEN local_type = 1 OR local_type = 244813135921 THEN 1 ELSE 0 END) as text_count,
                   SUM(CASE WHEN local_type = 3 THEN 1 ELSE 0 END) as image_count,
@@ -415,7 +243,7 @@ class AnalyticsService {
               `
             } else {
               statsQuery = `
-                SELECT 
+                SELECT
                   COUNT(*) as total,
                   SUM(CASE WHEN local_type = 1 OR local_type = 244813135921 THEN 1 ELSE 0 END) as text_count,
                   SUM(CASE WHEN local_type = 3 THEN 1 ELSE 0 END) as image_count,
@@ -430,7 +258,7 @@ class AnalyticsService {
               `
             }
 
-            const stats = db.prepare(statsQuery).get() as any
+            const stats = await dbAdapter.get<any>('message', dbPath, statsQuery)
 
             if (stats && stats.total > 0) {
               totalMessages += stats.total
@@ -443,33 +271,26 @@ class AnalyticsService {
               receivedMessages += stats.received_count || 0
 
               if (stats.first_time) {
-                if (!firstMessageTime || stats.first_time < firstMessageTime) {
-                  firstMessageTime = stats.first_time
-                }
+                if (!firstMessageTime || stats.first_time < firstMessageTime) firstMessageTime = stats.first_time
               }
               if (stats.last_time) {
-                if (!lastMessageTime || stats.last_time > lastMessageTime) {
-                  lastMessageTime = stats.last_time
-                }
+                if (!lastMessageTime || stats.last_time > lastMessageTime) lastMessageTime = stats.last_time
               }
 
-              // 收集该会话的所有活跃日期
-              const dates = db.prepare(`
-                SELECT DISTINCT date(create_time, 'unixepoch', 'localtime') as day
-                FROM "${tableName}"${timeWhere}
-              `).all() as { day: string }[]
-              
+              const dates = await dbAdapter.all<{ day: string }>(
+                'message',
+                dbPath,
+                `SELECT DISTINCT date(create_time, 'unixepoch', 'localtime') as day FROM "${tableName}"${timeWhere}`
+              )
               for (const { day } of dates) {
                 if (day) activeDatesSet.add(day)
               }
 
-              const typeCounts = db.prepare(`
-                SELECT local_type, COUNT(*) as count
-                FROM "${tableName}"
-                ${timeWhere ? timeWhere : ''}
-                GROUP BY local_type
-              `).all() as { local_type: number; count: number }[]
-
+              const typeCounts = await dbAdapter.all<{ local_type: number; count: number }>(
+                'message',
+                dbPath,
+                `SELECT local_type, COUNT(*) as count FROM "${tableName}"${timeWhere ? timeWhere : ''} GROUP BY local_type`
+              )
               for (const { local_type, count } of typeCounts) {
                 messageTypeCounts[local_type] = (messageTypeCounts[local_type] || 0) + count
               }
@@ -505,39 +326,18 @@ class AnalyticsService {
     }
   }
 
-
   async getContactRankings(limit: number = 20, startTime?: number, endTime?: number): Promise<{ success: boolean; data?: ContactRanking[]; error?: string }> {
     try {
       const wxid = this.configService.get('myWxid')
-      if (!wxid) {
-        return { success: false, error: '未配置微信ID' }
-      }
-
-      const baseDir = this.getDecryptedDbDir()
-      const accountDir = this.findAccountDir(baseDir, wxid)
-      
-      if (!accountDir) {
-        return { success: false, error: `未找到账号 ${wxid} 的数据库目录` }
-      }
+      if (!wxid) return { success: false, error: '未配置微信ID' }
 
       const cleanedWxid = this.cleanAccountDirName(wxid)
-      const dbDir = path.join(baseDir, accountDir)
+      const dbFiles = findMessageDbPaths()
+      if (dbFiles.length === 0) return { success: false, error: '未找到消息数据库' }
 
-      const dbFiles = this.findMessageDbFiles(dbDir)
-      if (dbFiles.length === 0) {
-        return { success: false, error: '未找到消息数据库' }
-      }
+      const privateUsernames = await this.getPrivateSessions(cleanedWxid)
 
-      const sessionDbPath = path.join(dbDir, 'session.db')
-      if (!fs.existsSync(sessionDbPath)) {
-        return { success: false, error: '未找到 session.db' }
-      }
-
-      const sessionDb = new Database(sessionDbPath, { readonly: true })
-      const privateUsernames = this.getPrivateSessions(sessionDb, cleanedWxid)
-      sessionDb.close()
-
-      const contactStats: Map<string, { 
+      const contactStats: Map<string, {
         messageCount: number
         sentCount: number
         receivedCount: number
@@ -545,9 +345,7 @@ class AnalyticsService {
       }> = new Map()
 
       const crypto = require('crypto')
-      const getTableHash = (username: string) => {
-        return crypto.createHash('md5').update(username).digest('hex')
-      }
+      const getTableHash = (username: string) => crypto.createHash('md5').update(username).digest('hex')
       const timeRange = this.normalizeTimeRange(startTime, endTime)
       const timeWhere = this.buildTimeWhereClause(timeRange)
 
@@ -557,12 +355,9 @@ class AnalyticsService {
       }
 
       for (const dbPath of dbFiles) {
-        const db = this.getMessageDb(dbPath)
-        if (!db) continue
-
-        const hasName2Id = this.hasName2IdTable(db)
-        const myRowId = hasName2Id ? this.getMyRowId(db, dbPath, cleanedWxid) : null
-        const tables = this.getMessageTables(db, dbPath)
+        const hasName2Id = await this.hasName2IdTable(dbPath)
+        const myRowId = hasName2Id ? await this.getMyRowId(dbPath, cleanedWxid) : null
+        const tables = await this.getMessageTables(dbPath)
 
         for (const tableName of tables) {
           const tableHash = tableName.startsWith('Msg_') ? tableName.slice(4) : tableName.replace('Msg_', '')
@@ -573,7 +368,7 @@ class AnalyticsService {
             let statsQuery: string
             if (hasName2Id && myRowId !== null) {
               statsQuery = `
-                SELECT 
+                SELECT
                   COUNT(*) as total,
                   SUM(CASE WHEN real_sender_id = ${myRowId} THEN 1 ELSE 0 END) as sent_count,
                   SUM(CASE WHEN real_sender_id != ${myRowId} THEN 1 ELSE 0 END) as received_count,
@@ -582,7 +377,7 @@ class AnalyticsService {
               `
             } else {
               statsQuery = `
-                SELECT 
+                SELECT
                   COUNT(*) as total,
                   SUM(CASE WHEN is_send = 1 THEN 1 ELSE 0 END) as sent_count,
                   SUM(CASE WHEN is_send = 0 OR is_send IS NULL THEN 1 ELSE 0 END) as received_count,
@@ -591,7 +386,7 @@ class AnalyticsService {
               `
             }
 
-            const stats = db.prepare(statsQuery).get() as any
+            const stats = await dbAdapter.get<any>('message', dbPath, statsQuery)
 
             if (stats && stats.total > 0) {
               const existing = contactStats.get(username)
@@ -616,41 +411,47 @@ class AnalyticsService {
         }
       }
 
-      const contactDbPath = path.join(dbDir, 'contact.db')
+      // 查询联系人信息（昵称 / 头像）
       const contactInfo: Map<string, { displayName: string; avatarUrl?: string }> = new Map()
-      
-      if (fs.existsSync(contactDbPath)) {
-        const contactDb = new Database(contactDbPath, { readonly: true })
-        const usernames = Array.from(contactStats.keys())
-        
-        // 检查表结构
-        const columns = contactDb.prepare("PRAGMA table_info(contact)").all() as { name: string }[]
+      const usernames = Array.from(contactStats.keys())
+
+      if (usernames.length > 0) {
+        // 检查 contact 表结构
+        const columns = await dbAdapter.all<{ name: string }>(
+          'contact',
+          '',
+          'PRAGMA table_info(contact)'
+        )
         const columnNames = columns.map(c => c.name)
         const hasBigHeadUrl = columnNames.includes('big_head_url')
         const hasSmallHeadUrl = columnNames.includes('small_head_url')
-        
-        if (usernames.length > 0) {
-          const selectCols = ['username', 'nick_name', 'remark']
-          if (hasBigHeadUrl) selectCols.push('big_head_url')
-          if (hasSmallHeadUrl) selectCols.push('small_head_url')
-          const placeholders = usernames.map(() => '?').join(',')
-          const contacts = contactDb.prepare(`
-            SELECT ${selectCols.join(', ')} FROM contact WHERE username IN (${placeholders})
-          `).all(...usernames) as Array<{ username: string; nick_name?: string; remark?: string; big_head_url?: string; small_head_url?: string }>
 
-          for (const contact of contacts) {
-            const avatarUrl = (hasBigHeadUrl && contact.big_head_url)
-              ? contact.big_head_url
-              : (hasSmallHeadUrl && contact.small_head_url)
-                ? contact.small_head_url
-                : undefined
-            contactInfo.set(contact.username, {
-              displayName: contact.remark || contact.nick_name || contact.username,
-              avatarUrl
-            })
-          }
+        const selectCols = ['username', 'nick_name', 'remark']
+        if (hasBigHeadUrl) selectCols.push('big_head_url')
+        if (hasSmallHeadUrl) selectCols.push('small_head_url')
+        const placeholders = usernames.map(() => '?').join(',')
+
+        const contacts = await dbAdapter.all<{
+          username: string; nick_name?: string; remark?: string;
+          big_head_url?: string; small_head_url?: string
+        }>(
+          'contact',
+          '',
+          `SELECT ${selectCols.join(', ')} FROM contact WHERE username IN (${placeholders})`,
+          usernames
+        )
+
+        for (const contact of contacts) {
+          const avatarUrl = (hasBigHeadUrl && contact.big_head_url)
+            ? contact.big_head_url
+            : (hasSmallHeadUrl && contact.small_head_url)
+              ? contact.small_head_url
+              : undefined
+          contactInfo.set(contact.username, {
+            displayName: contact.remark || contact.nick_name || contact.username,
+            avatarUrl
+          })
         }
-        contactDb.close()
       }
 
       const rankings: ContactRanking[] = Array.from(contactStats.entries())
@@ -679,117 +480,73 @@ class AnalyticsService {
     }
   }
 
-
   async getTimeDistribution(startTime?: number, endTime?: number): Promise<{ success: boolean; data?: TimeDistribution; error?: string }> {
     try {
       const wxid = this.configService.get('myWxid')
-      if (!wxid) {
-        return { success: false, error: '未配置微信ID' }
-      }
-
-      const baseDir = this.getDecryptedDbDir()
-      const accountDir = this.findAccountDir(baseDir, wxid)
-      
-      if (!accountDir) {
-        return { success: false, error: `未找到账号 ${wxid} 的数据库目录` }
-      }
+      if (!wxid) return { success: false, error: '未配置微信ID' }
 
       const cleanedWxid = this.cleanAccountDirName(wxid)
-      const dbDir = path.join(baseDir, accountDir)
-
-      // 获取私聊会话列表
-      const sessionDbPath = path.join(dbDir, 'session.db')
-      if (!fs.existsSync(sessionDbPath)) {
-        return { success: false, error: '未找到 session.db' }
-      }
-
-      const sessionDb = new Database(sessionDbPath, { readonly: true })
-      const privateUsernames = this.getPrivateSessions(sessionDb, cleanedWxid)
-      sessionDb.close()
+      const privateUsernames = await this.getPrivateSessions(cleanedWxid)
 
       const crypto = require('crypto')
-      const getTableHash = (username: string) => {
-        return crypto.createHash('md5').update(username).digest('hex')
-      }
-
+      const getTableHash = (username: string) => crypto.createHash('md5').update(username).digest('hex')
       const privateTableHashes = new Set(privateUsernames.map(u => getTableHash(u)))
       const timeRange = this.normalizeTimeRange(startTime, endTime)
       const timeWhere = this.buildTimeWhereClause(timeRange)
 
-      const dbFiles = this.findMessageDbFiles(dbDir)
-      
+      const dbFiles = findMessageDbPaths()
+
       const hourlyDistribution: Record<number, number> = {}
       const weekdayDistribution: Record<number, number> = {}
       const monthlyDistribution: Record<string, number> = {}
-
       for (let i = 0; i < 24; i++) hourlyDistribution[i] = 0
       for (let i = 1; i <= 7; i++) weekdayDistribution[i] = 0
 
       for (const dbPath of dbFiles) {
-        const db = this.getMessageDb(dbPath)
-        if (!db) continue
-
-        const tables = this.getMessageTables(db, dbPath)
+        const tables = await this.getMessageTables(dbPath)
 
         for (const tableName of tables) {
-          // 只统计私聊表
           const tableHash = tableName.replace('Msg_', '')
-          if (!privateTableHashes.has(tableHash)) {
-            continue
-          }
+          if (!privateTableHashes.has(tableHash)) continue
 
           try {
-            const hourly = db.prepare(`
-              SELECT 
-                CAST(strftime('%H', create_time, 'unixepoch', 'localtime') AS INTEGER) as hour,
-                COUNT(*) as count
-              FROM "${tableName}"${timeWhere}
-              GROUP BY hour
-            `).all() as { hour: number; count: number }[]
-
+            const hourly = await dbAdapter.all<{ hour: number; count: number }>(
+              'message',
+              dbPath,
+              `SELECT CAST(strftime('%H', create_time, 'unixepoch', 'localtime') AS INTEGER) as hour, COUNT(*) as count FROM "${tableName}"${timeWhere} GROUP BY hour`
+            )
             for (const { hour, count } of hourly) {
               hourlyDistribution[hour] = (hourlyDistribution[hour] || 0) + count
             }
 
-            const weekday = db.prepare(`
-              SELECT 
-                CAST(strftime('%w', create_time, 'unixepoch', 'localtime') AS INTEGER) as dow,
-                COUNT(*) as count
-              FROM "${tableName}"${timeWhere}
-              GROUP BY dow
-            `).all() as { dow: number; count: number }[]
-
+            const weekday = await dbAdapter.all<{ dow: number; count: number }>(
+              'message',
+              dbPath,
+              `SELECT CAST(strftime('%w', create_time, 'unixepoch', 'localtime') AS INTEGER) as dow, COUNT(*) as count FROM "${tableName}"${timeWhere} GROUP BY dow`
+            )
             for (const { dow, count } of weekday) {
               const weekdayNum = dow === 0 ? 7 : dow
               weekdayDistribution[weekdayNum] = (weekdayDistribution[weekdayNum] || 0) + count
             }
 
-            const monthly = db.prepare(`
-              SELECT 
-                strftime('%Y-%m', create_time, 'unixepoch', 'localtime') as month,
-                COUNT(*) as count
-              FROM "${tableName}"${timeWhere}
-              GROUP BY month
-            `).all() as { month: string; count: number }[]
-
+            const monthly = await dbAdapter.all<{ month: string; count: number }>(
+              'message',
+              dbPath,
+              `SELECT strftime('%Y-%m', create_time, 'unixepoch', 'localtime') as month, COUNT(*) as count FROM "${tableName}"${timeWhere} GROUP BY month`
+            )
             for (const { month, count } of monthly) {
-              if (month) {
-                monthlyDistribution[month] = (monthlyDistribution[month] || 0) + count
-              }
+              if (month) monthlyDistribution[month] = (monthlyDistribution[month] || 0) + count
             }
           } catch (e) {
             // skip
           }
+
         }
       }
 
       return {
         success: true,
-        data: {
-          hourlyDistribution,
-          weekdayDistribution,
-          monthlyDistribution
-        }
+        data: { hourlyDistribution, weekdayDistribution, monthlyDistribution }
       }
     } catch (e) {
       return { success: false, error: String(e) }
@@ -797,16 +554,9 @@ class AnalyticsService {
   }
 
   close() {
-    this.messageDbCache.forEach(db => {
-      try {
-        db.close()
-      } catch (e) {
-        // ignore
-      }
-    })
-    this.messageDbCache.clear()
     this.myRowIdCache.clear()
     this.messageTableCache.clear()
+    this.hasName2IdCache.clear()
   }
 }
 

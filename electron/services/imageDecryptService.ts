@@ -4,8 +4,8 @@ import { pathToFileURL } from 'url'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { writeFile } from 'fs/promises'
 import crypto from 'crypto'
-import Database from 'better-sqlite3'
 import { Worker } from 'worker_threads'
+import { dbAdapter } from './dbAdapter'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { ConfigService } from './config'
@@ -39,7 +39,6 @@ type DecryptResult = {
 }
 
 type HardlinkState = {
-  db: Database.Database
   imageTable?: string
   dirTable?: string
 }
@@ -711,7 +710,7 @@ export class ImageDecryptService {
 
     // 优先通过 hardlink.db 查询
     if (imageMd5) {
-      const hardlinkPath = this.resolveHardlinkPath(accountDir, imageMd5, sessionId)
+      const hardlinkPath = await this.resolveHardlinkPath(accountDir, imageMd5, sessionId)
       if (hardlinkPath) {
         const isThumb = this.isThumbnailPath(hardlinkPath)
         if (allowThumbnail || !isThumb) {
@@ -746,7 +745,7 @@ export class ImageDecryptService {
     }
 
     if (!imageMd5 && imageDatName && this.looksLikeMd5(imageDatName)) {
-      const hardlinkPath = this.resolveHardlinkPath(accountDir, imageDatName, sessionId)
+      const hardlinkPath = await this.resolveHardlinkPath(accountDir, imageDatName, sessionId)
       if (hardlinkPath) {
         const isThumb = this.isThumbnailPath(hardlinkPath)
         if (allowThumbnail || !isThumb) {
@@ -937,12 +936,12 @@ export class ImageDecryptService {
     sessionId?: string
   ): Promise<string | null> {
     if (imageMd5) {
-      const hardlinkPath = this.resolveHardlinkPath(accountDir, imageMd5, sessionId)
+      const hardlinkPath = await this.resolveHardlinkPath(accountDir, imageMd5, sessionId)
       if (hardlinkPath && this.isThumbnailPath(hardlinkPath)) return hardlinkPath
     }
 
     if (!imageMd5 && imageDatName && this.looksLikeMd5(imageDatName)) {
-      const hardlinkPath = this.resolveHardlinkPath(accountDir, imageDatName, sessionId)
+      const hardlinkPath = await this.resolveHardlinkPath(accountDir, imageDatName, sessionId)
       if (hardlinkPath && this.isThumbnailPath(hardlinkPath)) return hardlinkPath
     }
 
@@ -1010,12 +1009,12 @@ export class ImageDecryptService {
     return /^[a-fA-F0-9]{16,32}$/.test(value)
   }
 
-  private resolveHardlinkPath(accountDir: string, md5: string, sessionId?: string): string | null {
-    // 优先从解密后的缓存目录查找 hardlink.db
+  private async resolveHardlinkPath(accountDir: string, md5: string, sessionId?: string): Promise<string | null> {
+    // 优先从解密后的缓存目录查找 hardlink.db 路径（仅用于判断是否存在，native 负责实际打开）
     const wxid = this.configService.get('myWxid')
     const cacheDir = wxid ? this.getDecryptedCacheDir(wxid) : null
 
-    // 收集所有可能的 hardlink.db 路径
+    // 收集所有可能的 hardlink.db 路径（用于判断是否有任一可用）
     const hardlinkPaths: string[] = []
     if (cacheDir) {
       const cachePath = join(cacheDir, 'hardlink.db')
@@ -1030,92 +1029,99 @@ export class ImageDecryptService {
       return null
     }
 
-    // 依次尝试每个 hardlink.db
-    for (const hardlinkPath of hardlinkPaths) {
-      try {
-        const state = this.getHardlinkState(hardlinkPath, hardlinkPath)
-        if (!state.imageTable) {
-          continue
-        }
-
-        const row = state.db
-          .prepare(`SELECT dir1, dir2, file_name FROM ${state.imageTable} WHERE lower(md5) = lower(?) LIMIT 1`)
-          .get(md5) as { dir1?: number; dir2?: number; file_name?: string } | undefined
-
-        if (!row) {
-          continue
-        }
-
-        const { dir1, dir2, file_name: fileName } = row
-        if (dir1 === undefined || dir2 === undefined || !fileName) continue
-
-        const lowerFileName = fileName.toLowerCase()
-        if (lowerFileName.endsWith('.dat')) {
-          const baseLower = lowerFileName.slice(0, -4)
-          if (!this.isLikelyImageDatBase(baseLower) && !this.looksLikeMd5(baseLower)) {
-            continue
-          }
-        }
-
-        // dir1 和 dir2 是 rowid，需要从 dir2id 表查询对应的目录名
-        let dir1Name: string | null = null
-        let dir2Name: string | null = null
-
-        if (state.dirTable) {
-          try {
-            // 通过 rowid 查询目录名
-            const dir1Row = state.db
-              .prepare(`SELECT username FROM ${state.dirTable} WHERE rowid = ? LIMIT 1`)
-              .get(dir1) as { username?: string } | undefined
-            if (dir1Row?.username) dir1Name = dir1Row.username
-
-            const dir2Row = state.db
-              .prepare(`SELECT username FROM ${state.dirTable} WHERE rowid = ? LIMIT 1`)
-              .get(dir2) as { username?: string } | undefined
-            if (dir2Row?.username) dir2Name = dir2Row.username
-          } catch {
-            // ignore
-          }
-        }
-
-        if (!dir1Name || !dir2Name) {
-          continue
-        }
-
-        // 构建可能的所有路径结构（仅限 msg/attach）
-        const possiblePaths = [
-          // 常见结构: msg/attach/xx/yy/Img/name
-          join(accountDir, 'msg', 'attach', dir1Name, dir2Name, 'Img', fileName),
-          join(accountDir, 'msg', 'attach', dir1Name, dir2Name, 'mg', fileName),
-          join(accountDir, 'msg', 'attach', dir1Name, dir2Name, fileName),
-        ]
-
-        for (const fullPath of possiblePaths) {
-          if (existsSync(fullPath)) {
-            return fullPath
-          }
-        }
-      } catch {
-        // ignore
+    try {
+      const state = await this.getHardlinkState(accountDir)
+      if (!state.imageTable) {
+        return null
       }
+
+      const row = await dbAdapter.get<{ dir1?: number; dir2?: number; file_name?: string }>(
+        'hardlink',
+        '',
+        `SELECT dir1, dir2, file_name FROM ${state.imageTable} WHERE lower(md5) = lower(?) LIMIT 1`,
+        [md5]
+      )
+
+      if (!row) {
+        return null
+      }
+
+      const { dir1, dir2, file_name: fileName } = row
+      if (dir1 === undefined || dir2 === undefined || !fileName) return null
+
+      const lowerFileName = fileName.toLowerCase()
+      if (lowerFileName.endsWith('.dat')) {
+        const baseLower = lowerFileName.slice(0, -4)
+        if (!this.isLikelyImageDatBase(baseLower) && !this.looksLikeMd5(baseLower)) {
+          return null
+        }
+      }
+
+      // dir1 和 dir2 是 rowid，需要从 dir2id 表查询对应的目录名
+      let dir1Name: string | null = null
+      let dir2Name: string | null = null
+
+      if (state.dirTable) {
+        try {
+          const dir1Row = await dbAdapter.get<{ username?: string }>(
+            'hardlink',
+            '',
+            `SELECT username FROM ${state.dirTable} WHERE rowid = ? LIMIT 1`,
+            [dir1]
+          )
+          if (dir1Row?.username) dir1Name = dir1Row.username
+
+          const dir2Row = await dbAdapter.get<{ username?: string }>(
+            'hardlink',
+            '',
+            `SELECT username FROM ${state.dirTable} WHERE rowid = ? LIMIT 1`,
+            [dir2]
+          )
+          if (dir2Row?.username) dir2Name = dir2Row.username
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!dir1Name || !dir2Name) {
+        return null
+      }
+
+      // 构建可能的所有路径结构（仅限 msg/attach）
+      const possiblePaths = [
+        // 常见结构: msg/attach/xx/yy/Img/name
+        join(accountDir, 'msg', 'attach', dir1Name, dir2Name, 'Img', fileName),
+        join(accountDir, 'msg', 'attach', dir1Name, dir2Name, 'mg', fileName),
+        join(accountDir, 'msg', 'attach', dir1Name, dir2Name, fileName),
+      ]
+
+      for (const fullPath of possiblePaths) {
+        if (existsSync(fullPath)) {
+          return fullPath
+        }
+      }
+    } catch {
+      // ignore
     }
 
     return null
   }
 
-  private getHardlinkState(accountDir: string, hardlinkPath: string): HardlinkState {
+  private async getHardlinkState(accountDir: string): Promise<HardlinkState> {
     const cached = this.hardlinkCache.get(accountDir)
     if (cached) return cached
 
-    const db = new Database(hardlinkPath, { readonly: true, fileMustExist: true })
-    const imageRow = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'image_hardlink_info%' ORDER BY name DESC LIMIT 1")
-      .get() as { name?: string } | undefined
-    const dirRow = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'dir2id%' LIMIT 1")
-      .get() as { name?: string } | undefined
+    const imageRow = await dbAdapter.get<{ name?: string }>(
+      'hardlink',
+      '',
+      "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'image_hardlink_info%' ORDER BY name DESC LIMIT 1"
+    )
+    const dirRow = await dbAdapter.get<{ name?: string }>(
+      'hardlink',
+      '',
+      "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'dir2id%' LIMIT 1"
+    )
     const state: HardlinkState = {
-      db,
       imageTable: imageRow?.name as string | undefined,
       dirTable: dirRow?.name as string | undefined
     }
@@ -2926,13 +2932,6 @@ export class ImageDecryptService {
    * 清理 hardlink 数据库缓存（用于增量更新时释放文件）
    */
   clearHardlinkCache(): void {
-    this.hardlinkCache.forEach((state, accountDir) => {
-      try {
-        state.db.close()
-      } catch (e) {
-        console.warn(`关闭 hardlink 数据库失败: ${accountDir}`, e)
-      }
-    })
     this.hardlinkCache.clear()
   }
 

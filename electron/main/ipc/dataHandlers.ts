@@ -1,5 +1,4 @@
 import { ipcMain } from 'electron'
-import { wechatDecryptService } from '../../services/decryptService'
 import type { MainProcessContext } from '../context'
 
 export function registerDataHandlers(ctx: MainProcessContext): void {
@@ -13,13 +12,5 @@ export function registerDataHandlers(ctx: MainProcessContext): void {
 
   ipcMain.handle('db:close', async () => {
     return ctx.getDbService()?.close()
-  })
-
-  ipcMain.handle('decrypt:database', async (_, sourcePath: string, key: string, outputPath: string) => {
-    return wechatDecryptService.decryptDatabase(sourcePath, outputPath, key)
-  })
-
-  ipcMain.handle('decrypt:image', async () => {
-    return null
   })
 }

@@ -1027,7 +1027,7 @@ class HttpApiService {
 
         if (shouldResolveMediaPath && kind.messageKind === 'video' && base.videoMd5) {
           try {
-            const videoInfo = videoService.getVideoInfo(String(base.videoMd5), String(base.rawContent || ''))
+            const videoInfo = await videoService.getVideoInfo(String(base.videoMd5), String(base.rawContent || ''))
             if (videoInfo.exists && videoInfo.videoUrl) {
               media.videoCachePath = this.fileUrlToPathMaybe(videoInfo.videoUrl)
             }
