@@ -606,6 +606,8 @@ function App() {
 
   // 主窗口 - 完整布局
   const disableContentOverflow = ['/data-management', '/settings'].includes(location.pathname)
+  const fullPageRoutes = ['/agent']
+  const isFullPage = fullPageRoutes.includes(location.pathname)
 
   return (
     <div className="app-container">
@@ -713,9 +715,9 @@ function App() {
           sx={{
             flex: 1,
             minWidth: 0,
-            overflow: disableContentOverflow ? 'hidden' : 'auto',
-            px: 3,
-            pt: 3,
+            overflow: (disableContentOverflow || isFullPage) ? 'hidden' : 'auto',
+            px: isFullPage ? 0 : 3,
+            pt: isFullPage ? 0 : 3,
             pb: 0,
           }}
         >
