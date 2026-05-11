@@ -80,6 +80,13 @@ export async function checkAndConnectOnStartup(ctx: MainProcessContext): Promise
       if (ctx.getSplashReady()) {
         clearInterval(checkReady)
         openConfiguredWcdb(String(dbPath), String(decryptKey), String(wxid)).then(async (connected) => {
+          if (connected) {
+            // 预加载会话、联系人和前 5 个会话的消息，最多等 5s 以免阻塞启动屏
+            await Promise.race([
+              chatService.preloadData(),
+              new Promise<void>(resolve => setTimeout(resolve, 5000))
+            ])
+          }
           await ctx.getWindowManager().closeSplashWindow()
           ctx.setStartupDbConnected(connected)
           resolve(connected)

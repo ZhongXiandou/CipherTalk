@@ -3,6 +3,7 @@ import type { ChatSession, Message, Contact } from '../types/models'
 
 const SESSION_MESSAGE_CACHE_LIMIT = 20
 const SESSION_MESSAGE_CACHE_MAX_MESSAGES = 300
+export const MAX_ACTIVE_MESSAGES = 300
 
 export interface SessionMessageCacheEntry {
   messages: Message[]
@@ -124,7 +125,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     messages: sortMessagesAsc(typeof messages === 'function' ? messages(state.messages) : messages)
   })),
 
-  appendMessages: (newMessages, _prepend = false) => set((state) => {
+  appendMessages: (newMessages, prepend = false) => set((state) => {
     // 使用与后端一致的多维 Key (serverId + localId + createTime + sortSeq) 进行去重
     const existingKeys = new Set(
       state.messages.map(messageKey)
@@ -140,9 +141,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return state
     }
 
-    return {
-      messages: sortMessagesAsc([...state.messages, ...uniqueNewMessages])
+    const merged = sortMessagesAsc([...state.messages, ...uniqueNewMessages])
+
+    // 滑动窗口：超出上限时裁剪
+    if (merged.length > MAX_ACTIVE_MESSAGES) {
+      return {
+        // 加载旧消息(prepend)：保留最旧的，裁掉最新端
+        // 加载新消息(append)：保留最新的，裁掉最旧端
+        messages: prepend
+          ? merged.slice(0, MAX_ACTIVE_MESSAGES)
+          : merged.slice(merged.length - MAX_ACTIVE_MESSAGES)
+      }
     }
+
+    return { messages: merged }
   }),
 
   setLoadingMessages: (loading) => set({ isLoadingMessages: loading }),

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react'
 import { MessageSquare } from 'lucide-react'
-import { useChatStore } from '../../stores/chatStore'
+import { useChatStore, MAX_ACTIVE_MESSAGES } from '../../stores/chatStore'
 import { useUpdateStatusStore } from '../../stores/updateStatusStore'
 import ChatBackground from '../../components/ChatBackground'
 import { parseDateValue } from '../../components/AppDatePicker'
@@ -839,6 +839,21 @@ function ChatPage(_props: ChatPageProps) {
             appendMessages(msgs, true)
             setHasMoreMessages(hasMore)
             setCurrentOffset(newOffset)
+
+            // 滑动窗口：首次触达上限时切换到双向游标模式
+            const afterAppend = useChatStore.getState().messages
+            if (afterAppend.length >= MAX_ACTIVE_MESSAGES && !isDateJumpModeRef.current) {
+              const oldest = afterAppend[0]
+              const newest = afterAppend[afterAppend.length - 1]
+              setIsDateJumpMode(true)
+              setDateJumpCursorSortSeq(oldest?.sortSeq ?? null)
+              setDateJumpCursorCreateTime(typeof oldest?.createTime === 'number' ? oldest.createTime : null)
+              setDateJumpCursorLocalId(typeof oldest?.localId === 'number' ? oldest.localId : null)
+              setDateJumpCursorSortSeqEnd(newest?.sortSeq ?? null)
+              setDateJumpCursorCreateTimeEnd(typeof newest?.createTime === 'number' ? newest.createTime : null)
+              setDateJumpCursorLocalIdEnd(typeof newest?.localId === 'number' ? newest.localId : null)
+              setHasMoreMessagesAfter(true)
+            }
           }
         }
         if (offset === 0) {
@@ -1087,6 +1102,19 @@ function ChatPage(_props: ChatPageProps) {
           setDateJumpCursorCreateTime(typeof oldestCreateTime === 'number' ? oldestCreateTime : null)
           setDateJumpCursorLocalId(typeof oldestLocalId === 'number' ? oldestLocalId : null)
           setHasMoreMessages(result.hasMore ?? false)
+        }
+
+        // 滑动窗口：若 appendMessages 裁剪了最新端，同步更新向下游标
+        const afterAppend = useChatStore.getState().messages
+        const newestAfter = afterAppend[afterAppend.length - 1]
+        if (
+          typeof newestAfter?.sortSeq === 'number' &&
+          newestAfter.sortSeq !== dateJumpCursorSortSeqEnd
+        ) {
+          setDateJumpCursorSortSeqEnd(newestAfter.sortSeq)
+          setDateJumpCursorCreateTimeEnd(typeof newestAfter.createTime === 'number' ? newestAfter.createTime : null)
+          setDateJumpCursorLocalIdEnd(typeof newestAfter.localId === 'number' ? newestAfter.localId : null)
+          setHasMoreMessagesAfter(true)
         }
       } else {
         setHasMoreMessages(false)

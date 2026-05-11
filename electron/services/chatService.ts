@@ -178,6 +178,15 @@ class ChatService extends EventEmitter {
   // 记录每个会话已读取的最大 sortSeq (用于此后的增量查询)
   private sessionCursor: Map<string, number> = new Map()
 
+  // 启动屏预加载缓存（DB 连接后预热，首次访问时消费）
+  private preloadCache: {
+    sessions: { success: boolean; sessions?: ChatSession[]; hasMore?: boolean } | null
+    contacts: { success: boolean; contacts?: ContactInfo[]; error?: string } | null
+    messages: Map<string, { success: boolean; messages?: Message[]; hasMore?: boolean }>
+    builtAt: number
+  } = { sessions: null, contacts: null, messages: new Map(), builtAt: 0 }
+  private readonly PRELOAD_CACHE_TTL = 5 * 60 * 1000
+
   constructor() {
     super()
     this.configService = new ConfigService()
@@ -189,6 +198,44 @@ class ChatService extends EventEmitter {
    */
   setCurrentSession(sessionId: string | null): void {
     this.currentSessionId = sessionId
+  }
+
+  /**
+   * 启动屏预加载：DB 连接成功后在后台预热会话列表、联系人和前几个会话的消息。
+   * startup.ts 通过 Promise.race 加 5s 超时调用此方法，保证不会无限阻塞启动屏。
+   */
+  async preloadData(): Promise<void> {
+    const t0 = Date.now()
+    try {
+      const sessionsResult = await this.getSessions(0, 300)
+      this.preloadCache.sessions = {
+        success: sessionsResult.success,
+        sessions: sessionsResult.sessions,
+        hasMore: sessionsResult.hasMore
+      }
+
+      const contactsResult = await this.getContacts()
+      this.preloadCache.contacts = contactsResult
+
+      if (sessionsResult.success && sessionsResult.sessions?.length) {
+        const topSessions = sessionsResult.sessions.slice(0, 5)
+        await Promise.all(topSessions.map(async (session) => {
+          const result = await this.getMessages(session.username, 0, 50)
+          if (result.success) {
+            this.preloadCache.messages.set(session.username, {
+              success: result.success,
+              messages: result.messages,
+              hasMore: result.hasMore
+            })
+          }
+        }))
+      }
+
+      this.preloadCache.builtAt = Date.now()
+      console.log(`[ChatService] 预加载完成，耗时 ${Date.now() - t0}ms，会话 ${this.preloadCache.sessions?.sessions?.length ?? 0} 条，消息缓存 ${this.preloadCache.messages.size} 个会话`)
+    } catch (e) {
+      console.warn('[ChatService] 预加载失败:', e)
+    }
   }
 
   /**
@@ -325,6 +372,10 @@ class ChatService extends EventEmitter {
     this.hasName2IdCache.clear()
     this.contactColumnsCache = null
     this.avatarBase64Cache.clear()
+    this.preloadCache.sessions = null
+    this.preloadCache.contacts = null
+    this.preloadCache.messages.clear()
+    this.preloadCache.builtAt = 0
   }
 
   /**
@@ -356,6 +407,16 @@ class ChatService extends EventEmitter {
    */
   async getSessions(offset?: number, limit?: number): Promise<{ success: boolean; sessions?: ChatSession[]; hasMore?: boolean; error?: string }> {
     try {
+      // 消费预加载缓存（仅首页请求）
+      const isFirstPage = !offset || offset === 0
+      if (isFirstPage && this.preloadCache.builtAt > 0 &&
+          Date.now() - this.preloadCache.builtAt < this.PRELOAD_CACHE_TTL &&
+          this.preloadCache.sessions) {
+        const cached = this.preloadCache.sessions
+        this.preloadCache.sessions = null
+        return cached
+      }
+
       // 获取表列表
       const tables = await dbAdapter.all<{ name: string }>(
         'session',
@@ -493,6 +554,15 @@ class ChatService extends EventEmitter {
    */
   async getContacts(): Promise<{ success: boolean; contacts?: ContactInfo[]; error?: string }> {
     try {
+      // 消费预加载缓存
+      if (this.preloadCache.builtAt > 0 &&
+          Date.now() - this.preloadCache.builtAt < this.PRELOAD_CACHE_TTL &&
+          this.preloadCache.contacts) {
+        const cached = this.preloadCache.contacts
+        this.preloadCache.contacts = null
+        return cached
+      }
+
       // 获取会话表的最后联系时间
       const lastContactTimeMap = new Map<string, number>()
       try {
@@ -1124,6 +1194,15 @@ class ChatService extends EventEmitter {
     limit: number = 50
   ): Promise<{ success: boolean; messages?: Message[]; hasMore?: boolean; error?: string }> {
     try {
+      // 消费预加载缓存（仅首页且缓存中有该会话）
+      if (!offset && this.preloadCache.builtAt > 0 &&
+          Date.now() - this.preloadCache.builtAt < this.PRELOAD_CACHE_TTL &&
+          this.preloadCache.messages.has(sessionId)) {
+        const cached = this.preloadCache.messages.get(sessionId)!
+        this.preloadCache.messages.delete(sessionId)
+        return cached
+      }
+
       const normalizedLimit = Math.max(1, Math.min(500, Math.floor(Number(limit) || 50)))
 
       if (Math.max(0, Math.floor(Number(offset) || 0)) === 0) {
@@ -4784,7 +4863,7 @@ class ChatService extends EventEmitter {
             `SELECT COUNT(*) as count FROM ${safeTable} ${where.sql}`,
             where.params
           )
-          const count = countResult?.count || 0
+          const count = Number(countResult?.count ?? 0)
           totalMessageCount += count
 
           // 获取时间范围
