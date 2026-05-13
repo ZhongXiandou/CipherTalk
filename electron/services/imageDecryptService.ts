@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron'
+import type { BrowserWindow as BrowserWindowT } from 'electron'
 import { basename, dirname, extname, join } from 'path'
 import { pathToFileURL } from 'url'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'fs'
@@ -2227,7 +2227,18 @@ export class ImageDecryptService {
     return this.hasXVariant(baseLower)
   }
 
+  private getBrowserWindowClass(): typeof BrowserWindowT | null {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      return require('electron').BrowserWindow ?? null
+    } catch {
+      return null
+    }
+  }
+
   private emitImageUpdate(payload: { sessionId?: string; imageMd5?: string; imageDatName?: string }, cacheKey: string): void {
+    const BrowserWindow = this.getBrowserWindowClass()
+    if (!BrowserWindow) return
     const message = { cacheKey, imageMd5: payload.imageMd5, imageDatName: payload.imageDatName }
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) {
@@ -2237,6 +2248,8 @@ export class ImageDecryptService {
   }
 
   private emitCacheResolved(payload: { sessionId?: string; imageMd5?: string; imageDatName?: string }, cacheKey: string, localPath: string): void {
+    const BrowserWindow = this.getBrowserWindowClass()
+    if (!BrowserWindow) return
     const message = { cacheKey, imageMd5: payload.imageMd5, imageDatName: payload.imageDatName, localPath }
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) {
