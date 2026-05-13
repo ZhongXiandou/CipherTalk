@@ -1141,17 +1141,159 @@
   }
 }
 
+@mixin chat-message-skel-shimmer-overlay {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 20%,
+    rgba(255, 255, 255, 0.13) 50%,
+    rgba(255, 255, 255, 0) 80%
+  );
+  background-size: 200% 100%;
+  animation: chat-message-skel-shimmer 1.5s infinite;
+  pointer-events: none;
+}
+
 // 消息加载
+.message-list--loading {
+  position: relative;
+}
+
 .loading-messages {
+  position: relative;
+  z-index: 1;
   flex: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
+  gap: 18px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 28px 22px 56px;
   color: var(--text-tertiary);
+}
 
-  svg {
-    animation: spin 1s linear infinite;
+.message-skeleton-date {
+  position: relative;
+  align-self: center;
+  width: 92px;
+  height: 22px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-tertiary) 82%, transparent);
+
+  &::after {
+    @include chat-message-skel-shimmer-overlay;
   }
+}
+
+.message-skeleton-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: min(72%, 620px);
+  min-width: 0;
+
+  &.sent {
+    align-self: flex-end;
+    flex-direction: row-reverse;
+
+    .message-skeleton-main {
+      align-items: flex-end;
+    }
+
+    .message-skeleton-bubble {
+      border-radius: 18px 18px 4px 18px;
+    }
+
+    .message-skeleton-name {
+      width: min(34%, 110px);
+    }
+  }
+
+  &.received {
+    align-self: flex-start;
+
+    .message-skeleton-bubble {
+      border-radius: 18px 18px 18px 4px;
+    }
+  }
+}
+
+.message-skeleton-avatar {
+  position: relative;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+
+  &::after {
+    @include chat-message-skel-shimmer-overlay;
+  }
+}
+
+.message-skeleton-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.message-skeleton-name {
+  position: relative;
+  width: min(42%, 150px);
+  height: 13px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+
+  &::after {
+    @include chat-message-skel-shimmer-overlay;
+  }
+}
+
+.message-skeleton-bubble {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 74px;
+  padding: 10px 14px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+
+  &::after {
+    @include chat-message-skel-shimmer-overlay;
+  }
+}
+
+.message-skeleton-line {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 94%;
+  height: 10px;
+  border-radius: 4px;
+  background: var(--text-primary);
+  opacity: 0.08;
+
+  &--mid {
+    width: 82%;
+  }
+
+  &--short {
+    width: 58%;
+  }
+}
+
+@keyframes chat-message-skel-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }

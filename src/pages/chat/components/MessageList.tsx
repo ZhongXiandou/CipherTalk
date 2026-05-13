@@ -130,9 +130,30 @@ export function MessageList({
 
   if (isLoadingMessages && messages.length === 0) {
     return (
-      <div className="loading-messages">
-        <Loader2 size={24} />
-        <span>加载消息中...</span>
+      <div
+        className="message-list message-list--loading"
+        ref={messageListRef}
+      >
+        <ChatBackground />
+        <div className="loading-messages" aria-busy="true" aria-label="加载消息中">
+          <div className="message-skeleton-date" />
+          {[0, 1, 2, 3, 4].map(i => (
+            <div
+              className={`message-skeleton-row ${i === 1 || i === 4 ? 'sent' : 'received'}`}
+              key={i}
+            >
+              <div className="message-skeleton-avatar" />
+              <div className="message-skeleton-main">
+                <div className="message-skeleton-name" />
+                <div className="message-skeleton-bubble">
+                  <span className="message-skeleton-line" />
+                  <span className="message-skeleton-line message-skeleton-line--mid" />
+                  {i !== 1 ? <span className="message-skeleton-line message-skeleton-line--short" /> : null}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     )
   }
