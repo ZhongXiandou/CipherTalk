@@ -1,5 +1,5 @@
 import OpenAI from 'openai'
-import { BaseAIProvider, type ChatOptions } from './base'
+import { BaseAIProvider, type AIStreamEvent, type ChatOptions } from './base'
 
 const XIAOMI_DEFAULT_BASE_URL = 'https://api.xiaomimimo.com/v1'
 const XIAOMI_TOKEN_PLAN_BASE_URL = 'https://token-plan-cn.xiaomimimo.com/v1'
@@ -59,7 +59,7 @@ export class XiaomiProvider extends BaseAIProvider {
   async streamChat(
     messages: OpenAI.Chat.ChatCompletionMessageParam[],
     options: ChatOptions,
-    onChunk: (chunk: string) => void
+    onEvent: (event: AIStreamEvent) => void
   ): Promise<void> {
     const client = await this.getClient()
     const enableThinking = options?.enableThinking !== false
@@ -80,30 +80,32 @@ export class XiaomiProvider extends BaseAIProvider {
 
     const stream = await client.chat.completions.create(requestParams) as any
 
-    let isThinking = false
+    let contentText = ''
+    let reasoningText = ''
+    let finishReason: string | null = null
 
     for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta
+      const choice = chunk.choices[0]
+      finishReason = choice?.finish_reason || finishReason
+      const delta = choice?.delta
       const content = delta?.content || ''
       const reasoning = delta?.reasoning_content || ''
 
       if (reasoning) {
-        if (!isThinking) {
-          onChunk('<think>')
-          isThinking = true
-        }
-        onChunk(reasoning)
-      } else if (content) {
-        if (isThinking) {
-          onChunk('</think>')
-          isThinking = false
-        }
-        onChunk(content)
+        reasoningText += reasoning
+        onEvent({ type: 'reasoning_delta', text: reasoning })
+      }
+      if (content) {
+        contentText += content
+        onEvent({ type: 'content_delta', text: content })
       }
     }
 
-    if (isThinking) {
-      onChunk('</think>')
-    }
+    onEvent({
+      type: 'message_done',
+      content: contentText,
+      reasoningContent: reasoningText || undefined,
+      finishReason
+    })
   }
 }

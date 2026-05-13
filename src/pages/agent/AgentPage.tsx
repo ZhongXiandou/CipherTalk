@@ -8,7 +8,7 @@ import { AGENT_ATTACH_MENU, AGENT_HISTORY, AGENT_SLASH_COMMANDS, AGENT_SUGGESTIO
 import './AgentPage.scss'
 
 function AgentPage() {
-  const { messages, loading, send } = useAgentChat()
+  const { messages, loading, send, cancel } = useAgentChat()
   const { mcpServers, skills, busyServers, toggleServer } = useMcpSkillsData()
   const [collapsed, setCollapsed] = useState(false)
   const [activeConversationId, setActiveConversationId] = useState('new')
@@ -29,6 +29,7 @@ function AgentPage() {
         <MessageList
           messages={messages}
           loading={loading}
+          onCancel={cancel}
         />
         <ChatInput
           onSend={send}

@@ -1,4 +1,4 @@
-import { BaseAIProvider } from './base'
+﻿import { BaseAIProvider } from './base'
 
 /**
  * OpenAI提供商元数据
@@ -85,8 +85,8 @@ export class OpenAIProvider extends BaseAIProvider {
   /**
    * 重写 streamChat 方法以使用映射后的模型ID
    */
-  async streamChat(messages: any[], options: any, onChunk: (chunk: string) => void): Promise<void> {
+  async streamChat(messages: any[], options: any, onEvent: (event: import('./base').AIStreamEvent) => void): Promise<void> {
     const modelId = this.getModelId(options?.model || this.models[0])
-    return super.streamChat(messages, { ...options, model: modelId }, onChunk)
+    return super.streamChat(messages, { ...options, model: modelId }, onEvent)
   }
 }

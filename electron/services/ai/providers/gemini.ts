@@ -1,4 +1,4 @@
-import { BaseAIProvider } from './base'
+import { BaseAIProvider, type AIStreamEvent } from './base'
 import OpenAI from 'openai'
 
 /**
@@ -80,7 +80,7 @@ export class GeminiProvider extends BaseAIProvider {
   async streamChat(
     messages: OpenAI.Chat.ChatCompletionMessageParam[],
     options: any,
-    onChunk: (chunk: string) => void
+    onEvent: (event: AIStreamEvent) => void
   ): Promise<void> {
     const client = await this.getClient()
     const enableThinking = options?.enableThinking !== false
@@ -135,61 +135,70 @@ export class GeminiProvider extends BaseAIProvider {
 
     let buffer = ''
     let isInThought = false
+    let contentText = ''
+    let reasoningText = ''
+    let finishReason: string | null = null
+
+    const emitContent = (text: string) => {
+      if (!text) return
+      contentText += text
+      onEvent({ type: 'content_delta', text })
+    }
+
+    const emitReasoning = (text: string) => {
+      if (!text) return
+      reasoningText += text
+      onEvent({ type: 'reasoning_delta', text })
+    }
 
     for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta
+      const choice = chunk.choices[0]
+      finishReason = choice?.finish_reason || finishReason
+      const delta = choice?.delta
       const content = delta?.content || ''
 
       if (!content) continue
 
       buffer += content
 
-      // 处理 Gemini 的 <thought> 标签
-      // 检测开始标签
-      if (buffer.includes('<thought>')) {
-        const parts = buffer.split('<thought>')
-        // 发送标签前的内容
-        if (parts[0]) {
-          onChunk(parts[0])
+      // Gemini 用 <thought>...</thought> 标记思考内容，归一成 reasoning_delta
+      while (buffer.length > 0) {
+        if (isInThought) {
+          const closeIdx = buffer.indexOf('</thought>')
+          if (closeIdx === -1) {
+            // 可能存在部分结束标签，保留末尾
+            const safe = buffer.length > 10 ? buffer.slice(0, buffer.length - 10) : ''
+            if (safe) { emitReasoning(safe); buffer = buffer.slice(safe.length) }
+            break
+          }
+          emitReasoning(buffer.slice(0, closeIdx))
+          buffer = buffer.slice(closeIdx + '</thought>'.length)
+          isInThought = false
+        } else {
+          const openIdx = buffer.indexOf('<thought>')
+          if (openIdx === -1) {
+            // 可能存在部分开始标签，保留末尾
+            const partialMatch = ['<thought>', '<though', '<thoug', '<thou', '<tho', '<th', '<t', '<'].find(p => buffer.endsWith(p))
+            const safe = partialMatch ? buffer.slice(0, buffer.length - partialMatch.length) : buffer
+            if (safe) { emitContent(safe); buffer = buffer.slice(safe.length) }
+            break
+          }
+          if (openIdx > 0) { emitContent(buffer.slice(0, openIdx)) }
+          buffer = buffer.slice(openIdx + '<thought>'.length)
+          isInThought = true
         }
-        // 切换到思考模式，使用我们的标签
-        onChunk('<think>')
-        isInThought = true
-        buffer = parts[1] || ''
-      }
-
-      // 检测结束标签
-      if (buffer.includes('</thought>')) {
-        const parts = buffer.split('</thought>')
-        // 发送思考内容
-        if (parts[0]) {
-          onChunk(parts[0])
-        }
-        // 结束思考模式
-        onChunk('</think>')
-        isInThought = false
-        buffer = parts[1] || ''
-
-        // 如果还有剩余内容，继续发送
-        if (buffer) {
-          onChunk(buffer)
-          buffer = ''
-        }
-      } else if (buffer.length > 100 || !buffer.includes('<') && !buffer.includes('>')) {
-        // 如果缓冲区太大或明确不包含标签，直接发送
-        onChunk(buffer)
-        buffer = ''
       }
     }
 
-    // 发送剩余内容
-    if (buffer) {
-      onChunk(buffer)
-    }
+    // 发送剩余 buffer
+    if (buffer && !isInThought) emitContent(buffer)
+    if (buffer && isInThought) emitReasoning(buffer)
 
-    // 确保思考标签闭合
-    if (isInThought) {
-      onChunk('</think>')
-    }
+    onEvent({
+      type: 'message_done',
+      content: contentText,
+      reasoningContent: reasoningText || undefined,
+      finishReason
+    })
   }
 }

@@ -255,14 +255,14 @@ export class AgentContext {
     const prefix = this.answerText && !/\s$/.test(this.answerText) ? '\n\n' : ''
     const visible = `${prefix}${text}`
     this.answerText += visible
-    this.options.onChunk(visible)
+    this.options.onStreamEvent({ type: 'content_delta', text: visible })
   }
 
   /** 流式输出回答片段 */
   emitAnswerChunk(chunk: string) {
     if (!chunk) return
     this.answerText += chunk
-    this.options.onChunk(chunk)
+    this.options.onStreamEvent({ type: 'content_delta', text: chunk })
   }
 
   /** 在决策说明和最终回答之间补一个自然分隔 */

@@ -2,9 +2,8 @@ export type MessageRole = 'user' | 'assistant'
 
 export interface ThinkingBlock {
   type: 'thinking'
-  open?: boolean
-  lines: string[]
-  duration?: string
+  text: string
+  streaming?: boolean
 }
 
 export interface ToolResult {

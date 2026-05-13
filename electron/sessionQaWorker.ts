@@ -1,5 +1,6 @@
 import { parentPort, workerData } from 'worker_threads'
 import type {
+  AIStreamEvent,
   SessionQAProgressEvent,
   SessionQAResult
 } from '../src/types/ai'
@@ -13,7 +14,7 @@ type SessionQAWorkerData = {
 
 type WorkerEvent =
   | { kind: 'progress'; progress: SessionQAProgressEvent }
-  | { kind: 'chunk'; chunk: string }
+  | { kind: 'stream'; streamEvent: AIStreamEvent }
   | { kind: 'final'; result: SessionQAResult }
   | { kind: 'error'; error: string }
 
@@ -36,8 +37,8 @@ async function run() {
 
     const result = await aiService.answerSessionQuestion(
       data.options,
-      (chunk) => {
-        post({ kind: 'chunk', chunk })
+      (streamEvent) => {
+        post({ kind: 'stream', streamEvent })
       },
       (progress) => {
         post({

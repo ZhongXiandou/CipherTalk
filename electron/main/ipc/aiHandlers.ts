@@ -362,8 +362,10 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
           model: options.model,
           enableThinking: options.enableThinking
         },
-        (chunk: string) => {
-          event.sender.send('ai:sessionQaChunk', chunk)
+        (streamEvent) => {
+          if (streamEvent.type === 'content_delta') {
+            event.sender.send('ai:sessionQaChunk', streamEvent.text)
+          }
         },
         (progress) => {
           event.sender.send('ai:sessionQaProgress', progress)

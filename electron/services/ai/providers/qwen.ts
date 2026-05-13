@@ -1,4 +1,4 @@
-import { BaseAIProvider, type ChatOptions, type ChatWithToolsOptions } from './base'
+﻿import { BaseAIProvider, type ChatOptions, type ChatWithToolsOptions } from './base'
 
 /**
  * 通义千问提供商元数据
@@ -99,8 +99,8 @@ export class QwenProvider extends BaseAIProvider {
   /**
    * 重写 streamChat 方法以使用映射后的模型ID
    */
-  async streamChat(messages: any[], options: any, onChunk: (chunk: string) => void): Promise<void> {
+  async streamChat(messages: any[], options: any, onEvent: (event: import('./base').AIStreamEvent) => void): Promise<void> {
     const modelId = this.getModelId(options?.model || this.models[0])
-    return super.streamChat(messages, { ...options, model: modelId }, onChunk)
+    return super.streamChat(messages, { ...options, model: modelId }, onEvent)
   }
 }

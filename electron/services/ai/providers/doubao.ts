@@ -1,4 +1,4 @@
-import { BaseAIProvider } from './base'
+﻿import { BaseAIProvider } from './base'
 
 /**
  * 豆包提供商元数据
@@ -57,8 +57,8 @@ export class DoubaoProvider extends BaseAIProvider {
     return super.chat(messages, { ...options, model: modelId })
   }
 
-  async streamChat(messages: any[], options: any, onChunk: (chunk: string) => void): Promise<void> {
+  async streamChat(messages: any[], options: any, onEvent: (event: import('./base').AIStreamEvent) => void): Promise<void> {
     const modelId = this.getModelId(options?.model || this.models[0])
-    return super.streamChat(messages, { ...options, model: modelId }, onChunk)
+    return super.streamChat(messages, { ...options, model: modelId }, onEvent)
   }
 }

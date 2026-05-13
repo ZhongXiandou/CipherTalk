@@ -16,6 +16,29 @@ export interface AIProviderInfo {
   logo?: string  // logo 文件路径
 }
 
+export interface AIStreamToolCall {
+  id: string
+  type: 'function'
+  function: {
+    name: string
+    arguments: string
+  }
+}
+
+export type AIStreamEvent =
+  | { type: 'reasoning_delta'; text: string }
+  | { type: 'content_delta'; text: string }
+  | { type: 'tool_call_delta'; index: number; delta: unknown }
+  | { type: 'tool_call_done'; toolCall: AIStreamToolCall }
+  | { type: 'tool_result'; toolCallId?: string; toolName: string; result: unknown; error?: string }
+  | {
+      type: 'message_done'
+      content: string
+      reasoningContent?: string
+      toolCalls?: AIStreamToolCall[]
+      finishReason?: string | null
+    }
+
 /**
  * 获取所有 AI 提供商（从后端获取）
  */
@@ -256,7 +279,7 @@ export interface SessionQATimelineProgressItem {
 
 export type SessionQATimelineItem = SessionQATimelineTextItem | SessionQATimelineProgressItem
 
-export type SessionQAJobEventKind = 'progress' | 'chunk' | 'final' | 'error' | 'cancelled'
+export type SessionQAJobEventKind = 'progress' | 'stream' | 'final' | 'error' | 'cancelled'
 
 export interface SessionQAJobEvent {
   requestId: SessionQARequestId
@@ -265,7 +288,7 @@ export interface SessionQAJobEvent {
   createdAt: number
   progress?: SessionQAProgressEvent
   timelineItems?: SessionQATimelineItem[]
-  chunk?: string
+  streamEvent?: AIStreamEvent
   result?: SessionQAResult
   error?: string
 }

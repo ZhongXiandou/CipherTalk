@@ -842,7 +842,8 @@ function AISummaryWindow() {
 
     setQaMessages(prev => prev.map(message => {
       const chunk = chunks.get(message.id)
-      return chunk ? appendQAChunkToMessage(message, chunk) : message
+      if (!chunk) return message
+      return { ...message, content: `${message.content}${chunk}` }
     }))
   }
 
@@ -1976,13 +1977,34 @@ function AISummaryWindow() {
         return
       }
 
-      if (event.kind === 'chunk' && event.chunk) {
-        const isThinkBoundaryChunk = event.chunk.includes('<think>') || event.chunk.includes('</think>')
+      if (event.kind === 'stream' && event.streamEvent?.type === 'reasoning_delta') {
+        const text = event.streamEvent.text
+        setQaMessages(prev => prev.map(message => (
+          message.id === assistantId
+            ? {
+                ...message,
+                thinkContent: `${message.thinkContent || ''}${text}`,
+                isThinking: true,
+                showThink: true,
+                timelineEvents: event.timelineItems?.length
+                  ? upsertQATimelineItems(message.timelineEvents, event.timelineItems)
+                  : message.timelineEvents
+              }
+            : message
+        )))
+        return
+      }
+
+      if (event.kind === 'stream' && event.streamEvent?.type === 'content_delta') {
+        const text = event.streamEvent.text
         if (event.timelineItems?.length) {
           setQaMessages(prev => prev.map(message => (
             message.id === assistantId
               ? {
-                  ...appendQAChunkToMessage(message, event.chunk!),
+                  ...message,
+                  content: `${message.content}${text}`,
+                  isThinking: false,
+                  showThink: message.isThinking ? false : message.showThink,
                   timelineEvents: upsertQATimelineItems(message.timelineEvents, event.timelineItems)
                 }
               : message
@@ -1990,17 +2012,16 @@ function AISummaryWindow() {
           return
         }
 
-        if (isThinkBoundaryChunk) {
+        if (qaChunkBufferRef.current.has(assistantId) === false) {
           setQaMessages(prev => prev.map(message => (
-            message.id === assistantId
-              ? appendQAChunkToMessage(message, event.chunk!)
+            message.id === assistantId && message.isThinking
+              ? { ...message, isThinking: false, showThink: false }
               : message
           )))
-          return
         }
 
         const previous = qaChunkBufferRef.current.get(assistantId) || ''
-        qaChunkBufferRef.current.set(assistantId, `${previous}${event.chunk}`)
+        qaChunkBufferRef.current.set(assistantId, `${previous}${text}`)
         scheduleQAChunkFlush()
         return
       }

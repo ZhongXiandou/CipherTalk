@@ -1,14 +1,16 @@
-import { useState } from 'react'
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import {
-  Brain,
+  Atom,
   Check,
   ChevronDown,
-  ChevronRight,
   CircleStop,
   Database,
   FileText,
   Globe2,
+  Loader2,
+  ChevronRight,
   Search,
   Wrench,
   X,
@@ -19,6 +21,7 @@ import type { AssistantBlock, TextBlock as AgentTextBlock, ToolBlock as AgentToo
 interface Props {
   blocks: AssistantBlock[]
   streaming?: boolean
+  onStop?: () => void
 }
 
 const toolMeta: Record<string, { label: string; tone: string; Icon: LucideIcon }> = {
@@ -29,7 +32,17 @@ const toolMeta: Record<string, { label: string; tone: string; Icon: LucideIcon }
   web_fetch: { label: 'web_fetch', tone: 'blue', Icon: Globe2 },
 }
 
-export function AssistantBlocks({ blocks, streaming }: Props) {
+function normalizeMarkdownTables(text: string) {
+  return text
+    .replace(/([：:])\n(\|[^\n]+\|\n\|[\s:|-]+\|)/g, '$1\n\n$2')
+}
+
+function renderMarkdown(text: string) {
+  const html = marked.parse(normalizeMarkdownTables(text || '')) as string
+  return { __html: DOMPurify.sanitize(html) }
+}
+
+export function AssistantBlocks({ blocks, streaming, onStop }: Props) {
   return (
     <>
       {blocks.map((block, index) => {
@@ -37,32 +50,43 @@ export function AssistantBlocks({ blocks, streaming }: Props) {
         if (block.type === 'tool') return <ToolBlock block={block} key={`${block.type}-${index}`} />
         return <TextBlock block={block} key={`${block.type}-${index}`} streaming={streaming && index === blocks.length - 1} />
       })}
-      {streaming ? <StreamingIndicator /> : null}
+      {streaming ? <StreamingIndicator onStop={onStop} /> : null}
     </>
   )
 }
 
 function ThinkingBlock({ block }: { block: Extract<AssistantBlock, { type: 'thinking' }> }) {
-  const [open, setOpen] = useState(Boolean(block.open))
+  const [open, setOpen] = useState(Boolean(block.streaming))
+  const prevStreamingRef = useRef(block.streaming)
+
+  useEffect(() => {
+    if (block.streaming) {
+      setOpen(true)
+    }
+    if (prevStreamingRef.current && !block.streaming) {
+      setOpen(false)
+    }
+    prevStreamingRef.current = block.streaming
+  }, [block.streaming])
 
   return (
-    <div className={`agent-thinking${open ? ' is-open' : ''}`}>
-      <button className="agent-thinking__header" type="button" onClick={() => setOpen(value => !value)}>
-        <Brain size={14} />
-        <span>思考过程</span>
-        <em>{block.lines.length} 条线索 · {block.duration || '进行中'}</em>
-        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+    <div className={`think-panel qa-think-panel agent-thinking${!open ? ' collapsed' : ''} ${block.streaming ? 'thinking is-thinking' : ''}`}>
+      <button className="think-header agent-thinking__header" type="button" onClick={() => setOpen(value => !value)}>
+        <span className="think-title">
+          {block.streaming
+            ? <Loader2 size={14} className="think-icon animate-spin agent-thinking__spin" />
+            : <Atom size={14} className="think-icon" />}
+          <span>{block.streaming ? '深度思考中...' : '深度思考'}</span>
+        </span>
+        <ChevronDown
+          size={16}
+          className={`toggle-icon ${open ? 'expanded' : ''}`}
+        />
       </button>
-      {open ? (
-        <div className="agent-thinking__body">
-          {block.lines.map((line, index) => (
-            <div className="agent-thinking__line" key={`${line}-${index}`}>
-              <span>·</span>
-              {line}
-            </div>
-          ))}
-        </div>
-      ) : null}
+      <div
+        className="think-content agent-thinking__body markdown-body"
+        dangerouslySetInnerHTML={renderMarkdown(block.text)}
+      />
     </div>
   )
 }
@@ -112,10 +136,11 @@ function ToolBlock({ block }: { block: AgentToolBlock }) {
 
 function TextBlock({ block, streaming }: { block: AgentTextBlock; streaming?: boolean }) {
   return (
-    <div className="agent-text-block">
-      {block.text.split('\n\n').map((paragraph, index) => (
-        <p key={`${paragraph}-${index}`}>{renderInline(paragraph)}</p>
-      ))}
+    <div className="qa-bubble agent-answer-bubble">
+      <div
+        className="qa-answer markdown-body agent-text-block"
+        dangerouslySetInnerHTML={renderMarkdown(block.text)}
+      />
       {streaming ? <span className="agent-cursor" /> : null}
     </div>
   )
@@ -152,12 +177,12 @@ function ToolResultView({ result }: { result: ToolResult }) {
   )
 }
 
-function StreamingIndicator() {
+function StreamingIndicator({ onStop }: { onStop?: () => void }) {
   return (
     <div className="agent-streaming">
       <span className="agent-spinner" />
       <span>正在生成回复</span>
-      <button type="button">
+      <button type="button" onClick={onStop}>
         <CircleStop size={12} />
         停止
       </button>
@@ -172,52 +197,4 @@ function formatArgs(args?: Record<string, unknown>) {
   const [key, value] = entries[0]
   const text = typeof value === 'string' ? value : JSON.stringify(value)
   return `${key}: ${text}${entries.length > 1 ? ` +${entries.length - 1}` : ''}`
-}
-
-function renderInline(text: string) {
-  const nodes: ReactNode[] = []
-  let buffer = ''
-  let index = 0
-
-  const flush = () => {
-    if (buffer) {
-      nodes.push(buffer)
-      buffer = ''
-    }
-  }
-
-  while (index < text.length) {
-    if (text[index] === '*' && text[index + 1] === '*') {
-      const end = text.indexOf('**', index + 2)
-      if (end > -1) {
-        flush()
-        nodes.push(<strong key={nodes.length}>{text.slice(index + 2, end)}</strong>)
-        index = end + 2
-        continue
-      }
-    }
-
-    if (text[index] === '`') {
-      const end = text.indexOf('`', index + 1)
-      if (end > -1) {
-        flush()
-        nodes.push(<code className="agent-inline-code" key={nodes.length}>{text.slice(index + 1, end)}</code>)
-        index = end + 1
-        continue
-      }
-    }
-
-    if (text[index] === '\n') {
-      flush()
-      nodes.push(<br key={nodes.length} />)
-      index += 1
-      continue
-    }
-
-    buffer += text[index]
-    index += 1
-  }
-
-  flush()
-  return nodes
 }

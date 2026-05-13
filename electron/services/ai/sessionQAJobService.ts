@@ -209,8 +209,13 @@ class SessionQAJobService {
     const timelineItems: SessionQATimelineItem[] = []
     let nextProgress = event.progress
 
-    if (event.kind === 'chunk' && event.chunk) {
-      timelineItems.push(...this.appendAssistantChunk(job, event.chunk, nextSeq, nextCreatedAt))
+    if (event.kind === 'stream' && event.streamEvent) {
+      if (event.streamEvent.type === 'content_delta') {
+        timelineItems.push(...this.appendAssistantChunk(job, event.streamEvent.text, nextSeq, nextCreatedAt))
+      }
+      if (event.streamEvent.type === 'reasoning_delta') {
+        timelineItems.push(...this.appendAssistantThinkChunk(job, event.streamEvent.text, nextSeq, nextCreatedAt))
+      }
     }
 
     if (event.kind === 'progress' && event.progress) {
@@ -249,7 +254,7 @@ class SessionQAJobService {
       createdAt: nextCreatedAt,
       progress: nextProgress,
       timelineItems: timelineItems.length ? timelineItems : event.timelineItems,
-      chunk: event.chunk,
+      streamEvent: event.streamEvent,
       result: event.result,
       error: event.error
     }
@@ -353,6 +358,37 @@ class SessionQAJobService {
       remaining = remaining.slice(openIndex + '<think>'.length)
     }
 
+    return Array.from(changed.values())
+  }
+
+  private appendAssistantThinkChunk(
+    job: SessionQAJob,
+    chunk: string,
+    order: number,
+    createdAt: number
+  ): SessionQATimelineItem[] {
+    if (!chunk) return []
+    job.assistantThinkContent += chunk
+
+    const changed = new Map<string, SessionQATimelineItem>()
+    const lastItem = job.timelineEvents[job.timelineEvents.length - 1]
+    if (lastItem?.type === 'text' && lastItem.channel === 'think') {
+      lastItem.content += chunk
+      changed.set(lastItem.id, lastItem)
+      return Array.from(changed.values())
+    }
+
+    const item: SessionQATimelineItem = {
+      type: 'text',
+      id: `text:${++job.timelineItemSeq}`,
+      order: order + (job.timelineItemSeq / 1_000_000),
+      createdAt,
+      requestId: job.requestId,
+      channel: 'think',
+      content: chunk
+    }
+    job.timelineEvents.push(item)
+    changed.set(item.id, item)
     return Array.from(changed.values())
   }
 

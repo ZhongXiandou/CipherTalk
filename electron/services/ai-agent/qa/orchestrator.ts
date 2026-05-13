@@ -30,7 +30,7 @@ import {
   MAX_AGENT_ANSWER_MAX_TOKENS
 } from './types'
 import type { StructuredAnalysis } from '../types/analysis'
-import { compactText, stripThinkBlocks, filterThinkChunk, clampTokenBudget } from './utils/text'
+import { compactText, stripThinkBlocks, clampTokenBudget } from './utils/text'
 import { clampToolLimit } from './utils/text'
 import { inferTimeRangeFromQuestion, formatTimeRangeLabel } from './utils/time'
 import { normalizeSearchQuery, isGenericSearchQuery, generateAlternativeQueries } from './utils/search'
@@ -676,12 +676,15 @@ ${historyText || '无'}
   ]
 
   emitProgress(ctx.options, { id: 'answer', stage: 'answer', status: 'running', title: '生成回答', detail: '直接回答，无需调用工具' })
-  const thinkFilterState = { isThinking: false }
-  await ctx.options.provider.streamChat(messages, { model: ctx.options.model, temperature: 0.4, maxTokens, enableThinking: false }, (chunk) => {
-    const visibleChunk = filterThinkChunk(chunk, thinkFilterState)
-    if (!visibleChunk) return
-    ctx.answerText += visibleChunk
-    ctx.options.onChunk(visibleChunk)
+  await ctx.options.provider.streamChat(messages, { model: ctx.options.model, temperature: 0.4, maxTokens, enableThinking: false }, (event) => {
+    if (event.type === 'content_delta') {
+      ctx.answerText += event.text
+      ctx.options.onStreamEvent(event)
+      return
+    }
+    if (event.type !== 'message_done') {
+      ctx.options.onStreamEvent(event)
+    }
   })
 
   const finalAnswerText = stripThinkBlocks(ctx.answerText)
@@ -880,9 +883,15 @@ export async function answerSessionQuestionWithAgent(
           toolChoice: 'auto'
         }
         if (typeof options.provider.streamChatWithTools === 'function') {
-          nativeResponse = await options.provider.streamChatWithTools(toolLoopMessages, toolOptions, (chunk) => {
-            streamedDecisionText += chunk
-            ctx.emitAnswerChunk(chunk)
+          nativeResponse = await options.provider.streamChatWithTools(toolLoopMessages, toolOptions, (event) => {
+            if (event.type === 'content_delta') {
+              streamedDecisionText += event.text
+              ctx.emitAnswerChunk(event.text)
+              return
+            }
+            if (event.type !== 'message_done') {
+              options.onStreamEvent(event)
+            }
           })
         } else {
           nativeResponse = await options.provider.chatWithTools(toolLoopMessages, toolOptions)
@@ -1098,12 +1107,15 @@ export async function answerSessionQuestionWithAgent(
   emitProgress(options, { id: 'answer', stage: 'answer', status: 'running', title: '生成回答', detail: '正在基于上下文生成回答' })
 
   const enableThinking = options.enableThinking !== false
-  const thinkFilterState = { isThinking: false }
   ctx.ensureAnswerSeparator()
-  await options.provider.streamChat(messages, { model: options.model, temperature: 0.3, maxTokens: agentAnswerMaxTokens, enableThinking }, (chunk) => {
-    const visibleChunk = enableThinking ? chunk : filterThinkChunk(chunk, thinkFilterState)
-    if (!visibleChunk) return
-    ctx.emitAnswerChunk(visibleChunk)
+  await options.provider.streamChat(messages, { model: options.model, temperature: 0.3, maxTokens: agentAnswerMaxTokens, enableThinking }, (event) => {
+    if (event.type === 'content_delta') {
+      ctx.emitAnswerChunk(event.text)
+      return
+    }
+    if (event.type !== 'message_done') {
+      options.onStreamEvent(event)
+    }
   })
 
   const finalAnswerText = stripThinkBlocks(ctx.answerText)

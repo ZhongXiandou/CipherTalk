@@ -70,7 +70,7 @@ export interface SessionQAAgentOptions {
   enableThinking?: boolean
   agentDecisionMaxTokens?: number
   agentAnswerMaxTokens?: number
-  onChunk: (chunk: string) => void
+  onStreamEvent: (event: import('../../ai/providers/base').AIStreamEvent) => void
   onProgress?: (event: SessionQAProgressEvent) => void
   /** 取消信号，支持中途中断 */
   signal?: AbortSignal

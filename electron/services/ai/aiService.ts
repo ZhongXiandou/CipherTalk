@@ -47,6 +47,7 @@ import { memoryProfileService } from '../memory/memoryProfileService'
 import type { SessionProfileMemoryState } from '../memory/memoryProfileService'
 import type { MemoryEvidenceRef, MemoryItem, MemoryItemInput, MemorySourceType } from '../memory/memorySchema'
 import type {
+  AIStreamEvent,
   SessionQAConversationDetail,
   SessionQAConversationSummary,
   SessionQATimelineItem
@@ -657,9 +658,10 @@ ${detailInstructions[detail as keyof typeof detailInstructions] || detailInstruc
         model,
         enableThinking: options.enableThinking !== false  // 默认启用，除非明确设置为 false
       },
-      (chunk) => {
-        summaryText += chunk
-        onChunk(chunk)
+      (event) => {
+        if (event.type !== 'content_delta') return
+        summaryText += event.text
+        onChunk(event.text)
       }
     )
 
@@ -929,8 +931,8 @@ ${detailInstructions[detail as keyof typeof detailInstructions] || detailInstruc
    */
   async answerSessionQuestion(
     options: SessionQAOptions,
-    onChunk: (chunk: string) => void,
-    onProgress?: (event: SessionQAProgressEvent) => void
+    onStreamEvent: (event: AIStreamEvent) => void,
+    onProgress?: (event: SessionQAProgressEvent) => void,
   ): Promise<SessionQAResult> {
     if (!this.initialized) {
       this.init()
@@ -958,7 +960,7 @@ ${detailInstructions[detail as keyof typeof detailInstructions] || detailInstruc
       enableThinking: options.enableThinking,
       agentDecisionMaxTokens,
       agentAnswerMaxTokens,
-      onChunk,
+      onStreamEvent,
       onProgress
     })
 

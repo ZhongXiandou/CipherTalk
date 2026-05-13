@@ -1,5 +1,5 @@
 import OpenAI from 'openai'
-import { BaseAIProvider, ChatOptions } from './base'
+import { BaseAIProvider, ChatOptions, type AIStreamEvent } from './base'
 
 /**
  * MiniMax 提供商元数据
@@ -31,8 +31,6 @@ export const MiniMaxMetadata = {
   logo: './AI-logo/minimax.svg'
 }
 
-const THINK_OPEN_TAG = '<think>'
-const THINK_CLOSE_TAG = '</think>'
 
 function extractIncrementalText(current: string, previous: string): string {
   if (!current) return ''
@@ -57,10 +55,9 @@ export class MiniMaxProvider extends BaseAIProvider {
   async streamChat(
     messages: OpenAI.Chat.ChatCompletionMessageParam[],
     options: ChatOptions,
-    onChunk: (chunk: string) => void
+    onEvent: (event: AIStreamEvent) => void
   ): Promise<void> {
     const client = await this.getClient()
-    const enableThinking = options?.enableThinking !== false
 
     const requestParams: any = {
       model: options?.model || this.models[0],
@@ -80,24 +77,14 @@ export class MiniMaxProvider extends BaseAIProvider {
 
     let reasoningBuffer = ''
     let textBuffer = ''
-    let isThinking = false
-
-    const emitThinkOpen = () => {
-      if (!enableThinking || isThinking) return
-      onChunk(THINK_OPEN_TAG)
-      isThinking = true
-    }
-
-    const emitThinkClose = () => {
-      if (!isThinking) return
-      if (enableThinking) {
-        onChunk(THINK_CLOSE_TAG)
-      }
-      isThinking = false
-    }
+    let contentText = ''
+    let reasoningText = ''
+    let finishReason: string | null = null
 
     for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta
+      const choice = chunk.choices[0]
+      finishReason = choice?.finish_reason || finishReason
+      const delta = choice?.delta
       if (!delta) continue
 
       const reasoningDetails = Array.isArray(delta.reasoning_details)
@@ -106,43 +93,38 @@ export class MiniMaxProvider extends BaseAIProvider {
 
       if (reasoningDetails.length > 0) {
         for (const detail of reasoningDetails) {
-          const reasoningText = typeof detail?.text === 'string' ? detail.text : ''
-          const newReasoning = extractIncrementalText(reasoningText, reasoningBuffer)
-          reasoningBuffer = reasoningText || reasoningBuffer
-
-          if (!newReasoning) continue
-
-          emitThinkOpen()
-          if (enableThinking) {
-            onChunk(newReasoning)
+          const detailText = typeof detail?.text === 'string' ? detail.text : ''
+          const newReasoning = extractIncrementalText(detailText, reasoningBuffer)
+          reasoningBuffer = detailText || reasoningBuffer
+          if (newReasoning) {
+            reasoningText += newReasoning
+            onEvent({ type: 'reasoning_delta', text: newReasoning })
           }
         }
       } else if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) {
         const newReasoning = extractIncrementalText(delta.reasoning_content, reasoningBuffer)
         reasoningBuffer = delta.reasoning_content
-
         if (newReasoning) {
-          emitThinkOpen()
-          if (enableThinking) {
-            onChunk(newReasoning)
-          }
+          reasoningText += newReasoning
+          onEvent({ type: 'reasoning_delta', text: newReasoning })
         }
       }
 
-      // reasoning_split=true 时 content 是纯文本，不会混入 <think> 标签
       if (typeof delta.content === 'string' && delta.content) {
         const newContent = extractIncrementalText(delta.content, textBuffer)
         textBuffer = delta.content
-
         if (newContent) {
-          if (isThinking) {
-            emitThinkClose()
-          }
-          onChunk(newContent)
+          contentText += newContent
+          onEvent({ type: 'content_delta', text: newContent })
         }
       }
     }
 
-    emitThinkClose()
+    onEvent({
+      type: 'message_done',
+      content: contentText,
+      reasoningContent: reasoningText || undefined,
+      finishReason
+    })
   }
 }

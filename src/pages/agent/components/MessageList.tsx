@@ -6,15 +6,18 @@ import type { Message } from '../types'
 interface Props {
   messages: Message[]
   loading: boolean
+  onCancel?: () => void
 }
 
-export function MessageList({ messages, loading }: Props) {
+export function MessageList({ messages, loading, onCancel }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages, loading])
+
+  const hasStreamingMessage = messages.some(message => message.streaming)
 
   return (
     <div className="agent-message-list" ref={scrollRef}>
@@ -24,9 +27,9 @@ export function MessageList({ messages, loading }: Props) {
             <div className="agent-empty-state">暂无对话内容</div>
           ) : null}
           {messages.map(msg => (
-            <MessageBubble key={msg.id} message={msg} />
+            <MessageBubble key={msg.id} message={msg} onCancel={onCancel} />
           ))}
-          {loading && <TypingIndicator />}
+          {loading && !hasStreamingMessage && <TypingIndicator onCancel={onCancel} />}
         </div>
         <div className="agent-message-list__end" ref={bottomRef} />
       </div>

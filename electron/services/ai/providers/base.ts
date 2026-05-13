@@ -1,5 +1,6 @@
 import OpenAI from 'openai'
 import { proxyService } from '../proxyService'
+import type { AIStreamEvent, AIStreamToolCall } from '../../../../src/types/ai'
 
 /**
  * AI 提供商基础接口
@@ -32,7 +33,7 @@ export interface AIProvider {
   streamChatWithTools?(
     messages: OpenAI.Chat.ChatCompletionMessageParam[],
     options: ChatWithToolsOptions,
-    onChunk: (chunk: string) => void
+    onEvent: (event: AIStreamEvent) => void
   ): Promise<NativeToolCallResult>
 
   /**
@@ -41,7 +42,7 @@ export interface AIProvider {
   streamChat(
     messages: OpenAI.Chat.ChatCompletionMessageParam[],
     options: ChatOptions,
-    onChunk: (chunk: string) => void
+    onEvent: (event: AIStreamEvent) => void
   ): Promise<void>
 
   /**
@@ -57,7 +58,7 @@ export interface ChatOptions {
   model?: string
   temperature?: number
   maxTokens?: number
-  enableThinking?: boolean  // 是否启用思考模式（处理 reasoning_content）
+  enableThinking?: boolean
 }
 
 export type NativeToolDefinition = OpenAI.Chat.ChatCompletionTool
@@ -71,6 +72,44 @@ export interface ChatWithToolsOptions extends ChatOptions {
 export interface NativeToolCallResult {
   message: OpenAI.Chat.ChatCompletionMessage & { reasoning_content?: string | null }
   finishReason?: string | null
+}
+
+export type { AIStreamEvent, AIStreamToolCall }
+
+type MutableToolCall = AIStreamToolCall
+
+function getToolCallIndex(delta: unknown, fallback: number): number {
+  const value = typeof delta === 'object' && delta && 'index' in delta
+    ? Number((delta as { index?: unknown }).index)
+    : NaN
+  return Number.isInteger(value) ? value : fallback
+}
+
+function appendToolCallDelta(existing: MutableToolCall | undefined, delta: any, index: number): MutableToolCall {
+  const next: MutableToolCall = existing || {
+    id: '',
+    type: 'function',
+    function: { name: '', arguments: '' }
+  }
+
+  next.id = next.id || delta.id || `tool-call-${index}`
+  next.type = 'function'
+  if (delta.function?.name) next.function.name += delta.function.name
+  if (delta.function?.arguments) next.function.arguments += delta.function.arguments
+  return next
+}
+
+function collectToolCalls(toolCallByIndex: Map<number, MutableToolCall>): AIStreamToolCall[] {
+  return Array.from(toolCallByIndex.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([, toolCall], index) => ({
+      id: toolCall.id || `tool-call-${index}`,
+      type: 'function' as const,
+      function: {
+        name: toolCall.function.name,
+        arguments: toolCall.function.arguments
+      }
+    }))
 }
 
 export const NATIVE_TOOL_CALLING_UNSUPPORTED_MESSAGE = '当前模型/服务商不支持原生工具调用，请切换支持 tools 的 OpenAI-compatible 模型'
@@ -226,7 +265,7 @@ export abstract class BaseAIProvider implements AIProvider {
   async streamChatWithTools(
     messages: OpenAI.Chat.ChatCompletionMessageParam[],
     options: ChatWithToolsOptions,
-    onChunk: (chunk: string) => void
+    onEvent: (event: AIStreamEvent) => void
   ): Promise<NativeToolCallResult> {
     const client = await this.getClient()
     const model = this.resolveModelId(options?.model || this.models[0])
@@ -251,13 +290,8 @@ export abstract class BaseAIProvider implements AIProvider {
       let role: 'assistant' = 'assistant'
       let content = ''
       let reasoningContent = ''
-      let isThinking = false
       let finishReason: string | null = null
-      const toolCallByIndex = new Map<number, {
-        id: string
-        type: string
-        function: { name: string; arguments: string }
-      }>()
+      const toolCallByIndex = new Map<number, MutableToolCall>()
 
       for await (const chunk of stream) {
         const choice = chunk.choices?.[0]
@@ -271,55 +305,25 @@ export abstract class BaseAIProvider implements AIProvider {
           ? delta.reasoning_content
           : ''
         if (reasoning) {
-          if (!isThinking) {
-            onChunk('<think>')
-            isThinking = true
-          }
           reasoningContent += reasoning
-          onChunk(reasoning)
+          onEvent({ type: 'reasoning_delta', text: reasoning })
         }
 
         if (typeof delta.content === 'string' && delta.content) {
-          if (isThinking) {
-            onChunk('</think>')
-            isThinking = false
-          }
           content += delta.content
-          onChunk(delta.content)
+          onEvent({ type: 'content_delta', text: delta.content })
         }
 
         const toolCalls = Array.isArray(delta.tool_calls) ? delta.tool_calls : []
         for (const toolCallDelta of toolCalls) {
-          const index = Number.isInteger(toolCallDelta.index)
-            ? toolCallDelta.index
-            : toolCallByIndex.size
-          const existing = toolCallByIndex.get(index) || {
-            id: '',
-            type: 'function',
-            function: { name: '', arguments: '' }
-          }
-
-          existing.id = existing.id || toolCallDelta.id || ''
-          existing.type = toolCallDelta.type || existing.type || 'function'
-
-          if (toolCallDelta.function?.name) {
-            existing.function.name += toolCallDelta.function.name
-          }
-          if (toolCallDelta.function?.arguments) {
-            existing.function.arguments += toolCallDelta.function.arguments
-          }
-
-          toolCallByIndex.set(index, existing)
+          const index = getToolCallIndex(toolCallDelta, toolCallByIndex.size)
+          onEvent({ type: 'tool_call_delta', index, delta: toolCallDelta })
+          toolCallByIndex.set(index, appendToolCallDelta(toolCallByIndex.get(index), toolCallDelta, index))
         }
       }
 
-      const toolCalls = Array.from(toolCallByIndex.entries())
-        .sort(([a], [b]) => a - b)
-        .map(([, toolCall], index) => ({
-          id: toolCall.id || `tool-call-${index}`,
-          type: toolCall.type || 'function',
-          function: toolCall.function
-        }))
+      const toolCalls = collectToolCalls(toolCallByIndex)
+      toolCalls.forEach((toolCall) => onEvent({ type: 'tool_call_done', toolCall }))
 
       const message: any = {
         role,
@@ -332,9 +336,13 @@ export abstract class BaseAIProvider implements AIProvider {
         message.tool_calls = toolCalls
       }
 
-      if (isThinking) {
-        onChunk('</think>')
-      }
+      onEvent({
+        type: 'message_done',
+        content,
+        reasoningContent: reasoningContent || undefined,
+        toolCalls,
+        finishReason
+      })
 
       return { message, finishReason }
     } catch (error) {
@@ -345,7 +353,7 @@ export abstract class BaseAIProvider implements AIProvider {
   async streamChat(
     messages: OpenAI.Chat.ChatCompletionMessageParam[],
     options: ChatOptions,
-    onChunk: (chunk: string) => void
+    onEvent: (event: AIStreamEvent) => void
   ): Promise<void> {
     const client = await this.getClient()
     const enableThinking = options?.enableThinking !== false  // 默认启用
@@ -385,34 +393,34 @@ export abstract class BaseAIProvider implements AIProvider {
     // 使用 as any 避免类型检查，因为我们添加了额外的参数
     const stream = await client.chat.completions.create(requestParams) as any
 
-    let isThinking = false
+    let contentText = ''
+    let reasoningText = ''
+    let finishReason: string | null = null
 
     for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta
+      const choice = chunk.choices[0]
+      finishReason = choice?.finish_reason || finishReason
+      const delta = choice?.delta
       const content = delta?.content || ''
       const reasoning = delta?.reasoning_content || ''
 
-      // 始终处理推理内容（如果模型返回了的话）
-      // 因为某些模型（如 Gemini 2.5 Pro、Gemini 3）无法完全关闭推理功能
       if (reasoning) {
-        if (!isThinking) {
-          onChunk('<think>')
-          isThinking = true
-        }
-        onChunk(reasoning)
-      } else if (content) {
-        if (isThinking) {
-          onChunk('</think>')
-          isThinking = false
-        }
-        onChunk(content)
+        reasoningText += reasoning
+        onEvent({ type: 'reasoning_delta', text: reasoning })
+      }
+
+      if (content) {
+        contentText += content
+        onEvent({ type: 'content_delta', text: content })
       }
     }
 
-    // 确保思考标签闭合
-    if (isThinking) {
-      onChunk('</think>')
-    }
+    onEvent({
+      type: 'message_done',
+      content: contentText,
+      reasoningContent: reasoningText || undefined,
+      finishReason
+    })
   }
 
   async testConnection(): Promise<{ success: boolean; error?: string; needsProxy?: boolean }> {

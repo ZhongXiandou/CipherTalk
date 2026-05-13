@@ -28,14 +28,22 @@ type SessionQATimelineItem = {
 type SessionQAJobEvent = {
   requestId: string
   seq: number
-  kind: 'progress' | 'chunk' | 'final' | 'error' | 'cancelled'
+  kind: 'progress' | 'stream' | 'final' | 'error' | 'cancelled'
   createdAt: number
   progress?: SessionQAProgressEvent
   timelineItems?: SessionQATimelineItem[]
-  chunk?: string
+  streamEvent?: AIStreamEvent
   result?: unknown
   error?: string
 }
+
+type AIStreamEvent =
+  | { type: 'reasoning_delta'; text: string }
+  | { type: 'content_delta'; text: string }
+  | { type: 'tool_call_delta'; index: number; delta: unknown }
+  | { type: 'tool_call_done'; toolCall: { id: string; type: 'function'; function: { name: string; arguments: string } } }
+  | { type: 'tool_result'; toolCallId?: string; toolName: string; result: unknown; error?: string }
+  | { type: 'message_done'; content: string; reasoningContent?: string; toolCalls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>; finishReason?: string | null }
 
 type SessionQAConversationEvent = {
   id: number
@@ -717,6 +725,56 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onEmbeddingModelDownloadProgress: (callback: (event: EmbeddingModelDownloadProgress) => void) => {
       ipcRenderer.on('ai:embeddingModelDownloadProgress', (_, event) => callback(event))
       return () => ipcRenderer.removeAllListeners('ai:embeddingModelDownloadProgress')
+    }
+  },
+  agent: {
+    sendMessage: (opts: {
+      requestId?: string
+      conversationId?: number
+      history: Array<{ role: string; content: string }>
+      message: string
+      provider: string
+      apiKey: string
+      model: string
+      enableThinking?: boolean
+      systemPrompt?: string
+      enabledTools?: Array<{ type: string; function: { name: string; description?: string; parameters?: Record<string, unknown> } }>
+    }) => ipcRenderer.invoke('agent:sendMessage', opts),
+
+    cancel: (requestId: string) => ipcRenderer.invoke('agent:cancel', requestId),
+
+    listConversations: () => ipcRenderer.invoke('agent:listConversations'),
+
+    loadConversation: (id: number) => ipcRenderer.invoke('agent:loadConversation', id),
+
+    deleteConversation: (id: number) => ipcRenderer.invoke('agent:deleteConversation', id),
+
+    newConversation: () => ipcRenderer.invoke('agent:newConversation'),
+
+    updateTitle: (id: number, title: string) => ipcRenderer.invoke('agent:updateTitle', id, title),
+
+    onStreamEvent: (cb: (data: { requestId: string; event: AIStreamEvent }) => void) => {
+      const handler = (_: unknown, data: any) => cb(data)
+      ipcRenderer.on('agent:streamEvent', handler)
+      return () => ipcRenderer.off('agent:streamEvent', handler)
+    },
+
+    onDone: (cb: (data: { requestId: string; conversationId?: number }) => void) => {
+      const handler = (_: unknown, data: any) => cb(data)
+      ipcRenderer.on('agent:done', handler)
+      return () => ipcRenderer.off('agent:done', handler)
+    },
+
+    onError: (cb: (data: { requestId: string; message: string }) => void) => {
+      const handler = (_: unknown, data: any) => cb(data)
+      ipcRenderer.on('agent:error', handler)
+      return () => ipcRenderer.off('agent:error', handler)
+    },
+
+    removeListeners: () => {
+      ipcRenderer.removeAllListeners('agent:streamEvent')
+      ipcRenderer.removeAllListeners('agent:done')
+      ipcRenderer.removeAllListeners('agent:error')
     }
   }
 })

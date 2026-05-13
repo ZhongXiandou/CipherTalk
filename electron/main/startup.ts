@@ -6,6 +6,7 @@ import { httpApiService } from '../services/httpApiService'
 import { getMcpProxyConfig } from '../services/mcp/runtime'
 import { mcpProxyService } from '../services/mcp/proxyService'
 import { mcpClientService } from '../services/mcpClientService'
+import { agentConversationDb } from '../services/agentConversationDb'
 import { wcdbService } from '../services/wcdbService'
 import { monitorBridge } from '../services/monitorBridge'
 import type { MainProcessContext } from './context'
@@ -235,6 +236,12 @@ export async function startLocalIntegrationServices(ctx: MainProcessContext): Pr
   mcpClientService.restoreSavedConnections().catch((e) => {
     console.error('[McpClient] 自动恢复连接失败:', e)
   })
+
+  try {
+    agentConversationDb.init()
+  } catch (e) {
+    console.error('[AgentConversationDb] 初始化失败:', e)
+  }
 }
 
 export function stopLocalIntegrationServices(): void {

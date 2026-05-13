@@ -1,20 +1,21 @@
 import { Bot } from 'lucide-react'
 import { AssistantBlocks } from './AssistantBlocks'
 
-export function TypingIndicator() {
+export function TypingIndicator({ onCancel }: { onCancel?: () => void }) {
   return (
-    <article className="agent-message agent-message--assistant">
+    <article className="agent-message agent-message--assistant qa-message assistant">
       <div className="agent-message__avatar" aria-hidden="true">
         <Bot size={16} />
       </div>
-      <div className="agent-message__assistant-body">
+      <div className="agent-message__assistant-body qa-message-body">
         <AssistantBlocks
           streaming
+          onStop={onCancel}
           blocks={[
             {
               type: 'thinking',
-              open: true,
-              lines: ['理解问题意图', '准备检索或调用工具', '组织可读答案'],
+              text: '准备生成回复',
+              streaming: true,
             },
             {
               type: 'tool',
