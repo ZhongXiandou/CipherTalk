@@ -60,10 +60,73 @@ export interface KeyService {
   getKey(config: RuntimeConfig, options?: { save?: boolean }): Promise<{ keyHex: string; saved: boolean }>
 }
 
+export interface SearchResult {
+  sessionId: string
+  sessionName: string
+  messages: MessageRow[]
+  total: number
+}
+
+export interface StatsOptions {
+  type: 'global' | 'contacts' | 'time' | 'session' | 'keywords' | 'group'
+  session?: string
+  top?: number
+  year?: number
+  from?: string
+  to?: string
+  by?: string
+}
+
+export interface ExportOptions {
+  session?: string
+  all?: boolean
+  output?: string
+  from?: string
+  to?: string
+  withMedia?: boolean
+}
+
+export interface GlobalStats {
+  totalMessages: number
+  totalSessions: number
+  totalContacts: number
+  textMessages: number
+  mediaMessages: number
+  timeRange?: { first: number | null; last: number | null }
+}
+
+export interface ContactStats {
+  contacts: Array<{ wxid: string; displayName: string; messageCount: number }>
+}
+
+export interface TimeStats {
+  distribution: Record<string, number>
+}
+
+export interface SessionStats {
+  totalMessages: number
+  textMessages: number
+  mediaMessages: number
+  sentMessages: number
+  receivedMessages: number
+  activeDays: number
+  firstMessageTime: number | null
+  lastMessageTime: number | null
+}
+
+export interface KeywordStats {
+  keywords: Array<{ word: string; count: number }>
+}
+
+export interface GroupStats {
+  totalMessages: number
+  activeMembers: number
+}
+
 export interface AdvancedService {
-  search(): Promise<never>
-  stats(): Promise<never>
-  exportChat(): Promise<never>
+  search(config: RuntimeConfig, keyword: string, options?: { session?: string; limit?: number; from?: string; to?: string }): Promise<SearchResult>
+  stats(config: RuntimeConfig, options: StatsOptions): Promise<GlobalStats | ContactStats | TimeStats | SessionStats | KeywordStats | GroupStats>
+  exportChat(config: RuntimeConfig, options: ExportOptions): Promise<{ path: string; count: number }>
   moments(): Promise<never>
   report(): Promise<never>
   mcpServe(): Promise<never>

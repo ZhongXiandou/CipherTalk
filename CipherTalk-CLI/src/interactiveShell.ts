@@ -381,20 +381,44 @@ async function runShellCommand(line: string, context: CommandContext, globals: G
         }
         throw new Error('用法: /key setup|get|test|set <hex>')
       }
-      case '/search':
-        await context.services.advanced.search()
+      case '/search': {
+        const keyword = positional.join(' ')
+        if (!keyword) throw new Error('用法: /search <关键词>')
+        const limit = commandLimit(options, config.defaultLimit)
+        const result = await context.services.advanced.search(config, keyword, {
+          limit,
+          session: asString(options.session)
+        })
+        writeEnvelope(context.output, successEnvelope({ messages: result.messages }, { total: result.total, keyword, limit }), format)
         return true
-      case '/stats':
-        await context.services.advanced.stats()
+      }
+      case '/stats': {
+        const sub = positional[0] || 'global'
+        const result = await context.services.advanced.stats(config, {
+          type: sub as any,
+          session: positional[1],
+          top: typeof options.top === 'string' ? Number(options.top) : undefined
+        })
+        writeEnvelope(context.output, successEnvelope(result), format)
         return true
-      case '/export':
-        await context.services.advanced.exportChat()
+      }
+      case '/export': {
+        const result = await context.services.advanced.exportChat(config, {
+          session: positional[0],
+          all: options.all === true,
+          output: asString(options.output),
+          from: asString(options.from),
+          to: asString(options.to),
+          withMedia: options['with-media'] === true
+        })
+        writeEnvelope(context.output, successEnvelope(result), format)
         return true
+      }
       case '/moments':
-        await context.services.advanced.moments()
+        context.output.stderr('朋友圈功能暂不支持。请使用桌面版密语查看朋友圈。')
         return true
       case '/report':
-        await context.services.advanced.report()
+        context.output.stderr('年度报告功能暂不支持。请使用桌面版密语生成年度报告。')
         return true
       case '/mcp':
         if (positional[0] === 'serve') {
