@@ -13,6 +13,7 @@ import type {
 import { agentDataRepository, buildAgentFtsQuery } from './repository'
 import { embeddingRuntimeService } from '../../../search/embeddingRuntimeService'
 import { loadSqliteVecExtension } from '../../../vector/sqliteVec0VectorStore'
+import { localRerankerService, type RerankDocument } from '../../../retrieval/rerankerService'
 
 type IndexRow = {
   id: number
@@ -316,13 +317,26 @@ export class AgentRetriever {
       diagnostics.push('记忆库不存在，跳过记忆检索。')
     }
 
-    const vector = indexDb ? await this.searchVector(indexDb, input, displayNameMap) : {
-      diagnostics: ['语义向量索引库不可用。'],
-      hits: [],
-      vectorSearch: { requested: true, attempted: false, providerAvailable: false, indexComplete: false, hitCount: 0, indexedMessages: 0, vectorizedMessages: 0, skippedReason: 'index_db_missing' } satisfies AgentVectorDiagnostics
+    const semanticQueriesList = uniqueQueries([
+      input.semanticQuery,
+      ...(input.semanticQueries || [])
+    ])
+    let lastVectorSearch: AgentVectorDiagnostics = {
+      requested: true, attempted: false, providerAvailable: false, indexComplete: false,
+      hitCount: 0, indexedMessages: 0, vectorizedMessages: 0, skippedReason: 'index_db_missing'
     }
-    hitBuckets.push(...vector.hits)
-    diagnostics.push(...vector.diagnostics)
+    if (indexDb && semanticQueriesList.length > 0) {
+      for (const sq of semanticQueriesList) {
+        const vector = await this.searchVector(indexDb, { ...input, semanticQuery: sq }, displayNameMap)
+        hitBuckets.push(...vector.hits)
+        diagnostics.push(...vector.diagnostics)
+        lastVectorSearch = vector.vectorSearch
+      }
+    } else if (!indexDb) {
+      diagnostics.push('语义向量索引库不可用。')
+    } else {
+      diagnostics.push('语义查询为空，跳过向量搜索。')
+    }
 
     if (hitBuckets.length === 0) {
       for (const keywordQuery of keywordQueries) {
@@ -334,7 +348,8 @@ export class AgentRetriever {
       }
     }
 
-    const hits = this.fuseHits(hitBuckets).slice(0, limit)
+    const fused = this.fuseHits(hitBuckets)
+    const hits = await this.rerankHits(fused, query, limit)
     const resultSource = this.detectResultSource(hits, indexStatus)
     const contextWindows = input.expandEvidence === false
       ? []
@@ -353,7 +368,7 @@ export class AgentRetriever {
           truncated: hitBuckets.length > limit,
           source: resultSource,
         indexStatus,
-        vectorSearch: vector.vectorSearch,
+        vectorSearch: lastVectorSearch,
         diagnostics
       },
       contextWindows
@@ -508,7 +523,7 @@ export class AgentRetriever {
     }
 
     try {
-      const semanticQuery = input.semanticQuery || input.semanticQueries?.[0] || input.query
+      const semanticQuery = input.semanticQuery || input.query
       const embedding = float32ArrayToBuffer(await embeddingRuntimeService.embedText(semanticQuery, { inputType: 'query' }))
       const scanLimit = Math.max((input.limit || 20) * VECTOR_OVERFETCH, (input.limit || 20) + 20)
       const vectorRows = db.prepare(`
@@ -639,17 +654,51 @@ export class AgentRetriever {
   }
 
   private fuseHits(hits: AgentSearchHit[]): AgentSearchHit[] {
-    const byKey = new Map<string, AgentSearchHit>()
+    const buckets = new Map<string, AgentSearchHit[]>()
     for (const hit of hits) {
-      const key = `${hit.message.cursor.localId}:${hit.message.cursor.createTime}:${hit.message.cursor.sortSeq}`
-      const existing = byKey.get(key)
-      if (!existing || hit.score > existing.score) {
-        byKey.set(key, hit)
-      } else if (existing.retrievalSource !== hit.retrievalSource) {
-        existing.score = Number((existing.score + 25).toFixed(2))
+      const src = hit.retrievalSource
+      if (!buckets.has(src)) buckets.set(src, [])
+      buckets.get(src)!.push(hit)
+    }
+    for (const bucket of buckets.values()) {
+      bucket.sort((a, b) => b.score - a.score)
+    }
+    const K = 60
+    const rrfMap = new Map<string, { hit: AgentSearchHit; rrf: number }>()
+    for (const bucket of buckets.values()) {
+      for (let rank = 0; rank < bucket.length; rank++) {
+        const hit = bucket[rank]
+        const key = `${hit.message.cursor.localId}:${hit.message.cursor.createTime}:${hit.message.cursor.sortSeq}`
+        const inc = 1 / (K + rank + 1)
+        const existing = rrfMap.get(key)
+        if (!existing || hit.score > existing.hit.score) {
+          rrfMap.set(key, { hit, rrf: (existing?.rrf ?? 0) + inc })
+        } else {
+          existing.rrf += inc
+        }
       }
     }
-    return Array.from(byKey.values()).sort((a, b) => b.score - a.score || compareCursorAsc(b.message.cursor, a.message.cursor))
+    return Array.from(rrfMap.values())
+      .sort((a, b) => b.rrf - a.rrf || compareCursorAsc(b.hit.message.cursor, a.hit.message.cursor))
+      .map((item) => ({ ...item.hit, score: Number((item.rrf * 10000).toFixed(2)) }))
+  }
+
+  private async rerankHits(hits: AgentSearchHit[], query: string, limit: number): Promise<AgentSearchHit[]> {
+    const candidates = hits.slice(0, Math.max(limit * 2, 40))
+    if (!localRerankerService.isEnabled()) return candidates.slice(0, limit)
+    try {
+      const status = await localRerankerService.getModelStatus()
+      if (!status.exists) return candidates.slice(0, limit)
+      const docs: RerankDocument[] = candidates.map((hit, i) => ({
+        id: String(i),
+        text: hit.excerpt || hit.message.text || '',
+        originalScore: hit.score
+      }))
+      const results = await localRerankerService.rerank(query, docs, { limit })
+      return results.map((r) => ({ ...candidates[Number(r.id)]!, score: Number((r.combinedScore * 1000).toFixed(2)) }))
+    } catch {
+      return candidates.slice(0, limit)
+    }
   }
 }
 

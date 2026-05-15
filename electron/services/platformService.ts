@@ -1,6 +1,6 @@
-import { app } from 'electron'
 import { dirname, join } from 'path'
 import { existsSync } from 'fs'
+import { getDocumentsPath, getExePath, getUserDataPath } from './runtimePaths'
 
 export interface RuntimePlatformInfo {
   platform: NodeJS.Platform
@@ -21,7 +21,7 @@ export function getRuntimePlatformInfo(): RuntimePlatformInfo {
 }
 
 export function getDefaultCachePath(): string {
-  const documentsPath = app.getPath('documents')
+  const documentsPath = getDocumentsPath()
 
   if (process.platform === 'darwin') {
     return join(documentsPath, 'CipherTalkData')
@@ -31,7 +31,7 @@ export function getDefaultCachePath(): string {
     return join(documentsPath, 'CipherTalkData')
   }
 
-  const exePath = app.getPath('exe')
+  const exePath = getExePath()
   const installDir = dirname(exePath)
   const isOnCDrive = /^[cC]:/i.test(installDir) || installDir.startsWith('\\\\')
 
@@ -42,7 +42,7 @@ export function getDefaultCachePath(): string {
     return join(installDir, 'CipherTalkData')
   }
 
-  return join(app.getPath('userData'), 'CipherTalkData')
+  return join(getUserDataPath(), 'CipherTalkData')
 }
 
 export function getBestCachePath(): CachePathResult {
