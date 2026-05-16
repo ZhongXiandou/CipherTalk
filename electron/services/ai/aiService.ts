@@ -226,6 +226,10 @@ class AIService {
     ]
   }
 
+  createProvider(providerName?: string, apiKey?: string): AIProvider {
+    return this.getProvider(providerName, apiKey)
+  }
+
   /**
    * 获取提供商实例
    */

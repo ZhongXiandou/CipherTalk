@@ -15,16 +15,18 @@ function recordToMessage(r: AgentMessageRecord): Message {
   }
 }
 
-async function getProviderSettings(): Promise<{ provider: string; apiKey: string; model: string; enableThinking: boolean }> {
-  const defaults = { provider: 'zhipu', apiKey: '', model: '', enableThinking: true }
+async function getProviderSettings(): Promise<{ provider: string; apiKey: string; model: string; enableThinking: boolean; temperature: number }> {
+  const defaults = { provider: 'zhipu', apiKey: '', model: '', enableThinking: true, temperature: 0.7 }
   try {
     const api = window.electronAPI
     if (!api?.config) return defaults
     const currentProvider = (await api.config.get('aiCurrentProvider') as string) || defaults.provider
     const providerConfigs = (await api.config.get('aiProviderConfigs') as Record<string, { apiKey: string; model: string }>) || {}
     const enableThinking = (await api.config.get('aiEnableThinking')) !== false
+    const rawTemperature = await api.config.get('agentTemperature' as any)
+    const temperature = typeof rawTemperature === 'number' ? rawTemperature : 0.7
     const cfg = providerConfigs[currentProvider] || { apiKey: '', model: '' }
-    return { provider: currentProvider, apiKey: cfg.apiKey || '', model: cfg.model || '', enableThinking }
+    return { provider: currentProvider, apiKey: cfg.apiKey || '', model: cfg.model || '', enableThinking, temperature }
   } catch {
     return defaults
   }
@@ -653,6 +655,7 @@ export function useAgentChat() {
       apiKey: providerSettings.apiKey,
       model: providerSettings.model,
       enableThinking: forceThinking ?? providerSettings.enableThinking,
+      temperature: providerSettings.temperature,
       commandHint,
       readLimit,
       scopedSessions: scopedSessions.length > 0 ? scopedSessions : undefined,
@@ -718,6 +721,7 @@ export function useAgentChat() {
       apiKey: providerSettings.apiKey,
       model: providerSettings.model,
       enableThinking: providerSettings.enableThinking,
+      temperature: providerSettings.temperature,
       readLimit,
       scopedSessions: scopedSessions.length > 0 ? scopedSessions : undefined,
     })

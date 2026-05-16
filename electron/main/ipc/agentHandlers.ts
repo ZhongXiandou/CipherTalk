@@ -237,6 +237,7 @@ export function registerAgentHandlers(ctx: MainProcessContext): void {
     systemPrompt?: string
     commandHint?: string
     readLimit?: number
+    temperature?: number
     enabledTools?: Array<{ type: string; function: { name: string; description?: string; parameters?: Record<string, unknown> } }>
     scopedSessions?: Array<{ id: string; name: string }>
     skillIds?: string[]
@@ -330,6 +331,7 @@ export function registerAgentHandlers(ctx: MainProcessContext): void {
             apiKey: options.apiKey,
             model: options.model,
             enableThinking: options.enableThinking !== false,
+            temperature: options.temperature,
             systemPrompt: options.systemPrompt || undefined,
             systemPromptSuffix,
             signal: controller.signal,

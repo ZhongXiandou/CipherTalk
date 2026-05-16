@@ -27,8 +27,6 @@ interface Props {
   skills: AgentSkill[]
 }
 
-type ContextLength = '2k' | '8k' | '32k'
-
 const READ_LIMIT_OPTIONS = [500, 1000, 1500, 2000] as const
 type ReadLimit = typeof READ_LIMIT_OPTIONS[number]
 
@@ -52,6 +50,26 @@ async function saveReadLimit(v: ReadLimit): Promise<void> {
   }
 }
 
+const AGENT_TEMPERATURE_KEY = 'agentTemperature'
+
+async function loadTemperature(): Promise<number> {
+  try {
+    const v = await window.electronAPI?.config?.get(AGENT_TEMPERATURE_KEY as any)
+    const n = Number(v)
+    return Number.isFinite(n) && n >= 0 && n <= 1 ? n : 0.7
+  } catch {
+    return 0.7
+  }
+}
+
+async function saveTemperature(v: number): Promise<void> {
+  try {
+    await window.electronAPI?.config?.set(AGENT_TEMPERATURE_KEY as any, v as any)
+  } catch {
+    // ignore
+  }
+}
+
 export function ChatInput({
   onSend, disabled, suggestions, slashCommands,
   mcpServers, busyServers, onToggleServer, skills,
@@ -65,7 +83,6 @@ export function ChatInput({
   const [attached, setAttached] = useState<AttachedResource[]>([])
   const [enabledSkills, setEnabledSkills] = useState<Set<string>>(new Set())
   const [temperature, setTemperature] = useState(0.7)
-  const [contextLength, setContextLength] = useState<ContextLength>('8k')
   const [readLimit, setReadLimit] = useState<ReadLimit>(500)
   const [mentionSessions, setMentionSessions] = useState<Array<{ id: string; name: string; summary?: string; avatarUrl?: string }>>([])
   const [mentionLoading, setMentionLoading] = useState(false)
@@ -111,6 +128,7 @@ export function ChatInput({
 
   useEffect(() => {
     loadReadLimit().then(setReadLimit)
+    loadTemperature().then(setTemperature)
   }, [])
 
   // 弹窗打开时自动聚焦搜索框
@@ -457,26 +475,11 @@ export function ChatInput({
                       max={1}
                       step={0.1}
                       value={temperature}
-                      onChange={e => setTemperature(Number(e.target.value))}
+                      onChange={e => { const v = Number(e.target.value); setTemperature(v); void saveTemperature(v) }}
                     />
                     <div className="agent-ctx-slider-labels">
                       <span>精确</span>
                       <span>创意</span>
-                    </div>
-                  </div>
-                  <div className="agent-ctx-row">
-                    <label>上下文长度</label>
-                    <div className="agent-ctx-chips">
-                      {(['2k', '8k', '32k'] as ContextLength[]).map(len => (
-                        <button
-                          key={len}
-                          type="button"
-                          className={`agent-ctx-chip${contextLength === len ? ' is-active' : ''}`}
-                          onClick={() => setContextLength(len)}
-                        >
-                          {len.toUpperCase()}
-                        </button>
-                      ))}
                     </div>
                   </div>
                   <div className="agent-ctx-row">

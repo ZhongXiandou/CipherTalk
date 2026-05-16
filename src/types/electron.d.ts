@@ -1428,6 +1428,7 @@ export interface AgentSendMessageOptions {
   apiKey: string
   model: string
   enableThinking?: boolean
+  temperature?: number
   systemPrompt?: string
   commandHint?: string
   readLimit?: number

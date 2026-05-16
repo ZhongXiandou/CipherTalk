@@ -43,6 +43,7 @@ type AIStreamEvent =
   | { type: 'tool_call_delta'; index: number; delta: unknown }
   | { type: 'tool_call_done'; toolCall: { id: string; type: 'function'; function: { name: string; arguments: string } } }
   | { type: 'tool_result'; toolCallId?: string; toolName: string; result: unknown; error?: string }
+  | { type: 'round_start' }
   | { type: 'message_done'; content: string; reasoningContent?: string; toolCalls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>; finishReason?: string | null }
 
 type SessionQAConversationEvent = {
