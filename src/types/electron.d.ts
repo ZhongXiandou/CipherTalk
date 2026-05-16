@@ -1393,7 +1393,16 @@ export interface ElectronAPI {
     loadConversation(id: number): Promise<{ success: boolean; messages?: AgentMessageRecord[]; error?: string }>
     deleteConversation(id: number): Promise<{ success: boolean; error?: string }>
     newConversation(): Promise<{ success: boolean; id?: number; error?: string }>
+    appendLocalMessages(opts: {
+      conversationId?: number
+      messages: Array<{
+        role: 'user' | 'assistant'
+        content?: string
+        blocks?: unknown[]
+      }>
+    }): Promise<{ success: boolean; conversationId?: number; error?: string }>
     updateTitle(id: number, title: string): Promise<{ success: boolean; error?: string }>
+    getLastConversationId(): Promise<{ success: boolean; id?: number; error?: string }>
     generateTitle(opts: {
       conversationId: number
       userMessage: string
@@ -1420,6 +1429,8 @@ export interface AgentSendMessageOptions {
   model: string
   enableThinking?: boolean
   systemPrompt?: string
+  commandHint?: string
+  readLimit?: number
   enabledTools?: Array<{ type: string; function: { name: string; description?: string; parameters?: Record<string, unknown> } }>
   scopedSessions?: Array<{ id: string; name: string }>
 }

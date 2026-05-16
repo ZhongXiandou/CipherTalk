@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Search, Download, FolderOpen, RefreshCw, Check, FileJson, FileText, Table, Loader2, X, FileSpreadsheet, Database, FileCode, CheckCircle, XCircle, ExternalLink, MessageSquare, Users, User, Filter, Image, Video, CircleUserRound, Smile, Mic } from 'lucide-react'
 import DateRangePicker from '../components/DateRangePicker'
 import { useTitleBarStore } from '../stores/titleBarStore'
@@ -59,6 +60,8 @@ type SessionTypeFilter = 'all' | 'group' | 'private'
 function ExportPage() {
   const [activeTab, setActiveTab] = useState<ExportTab>('chat')
   const setTitleBarContent = useTitleBarStore(state => state.setRightContent)
+  const location = useLocation()
+  const preSelectAppliedRef = useRef(false)
 
   // 聊天导出状态
   const [sessions, setSessions] = useState<ChatSession[]>([])
@@ -195,13 +198,20 @@ function ExportPage() {
       if (sessionsResult.success && sessionsResult.sessions) {
         setSessions(sessionsResult.sessions)
         setFilteredSessions(sessionsResult.sessions)
+        if (!preSelectAppliedRef.current) {
+          const state = location.state as { preSelectedSessions?: string[] } | null
+          if (state?.preSelectedSessions?.length) {
+            preSelectAppliedRef.current = true
+            setSelectedSessions(new Set(state.preSelectedSessions))
+          }
+        }
       }
     } catch (e) {
       console.error('加载会话失败:', e)
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [location.state])
 
   // 加载通讯录
   const loadContacts = useCallback(async () => {

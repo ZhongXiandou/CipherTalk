@@ -737,6 +737,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       model: string
       enableThinking?: boolean
       systemPrompt?: string
+      commandHint?: string
+      readLimit?: number
       enabledTools?: Array<{ type: string; function: { name: string; description?: string; parameters?: Record<string, unknown> } }>
       scopedSessions?: Array<{ id: string; name: string }>
     }) => ipcRenderer.invoke('agent:sendMessage', opts),
@@ -751,7 +753,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     newConversation: () => ipcRenderer.invoke('agent:newConversation'),
 
+    appendLocalMessages: (opts: {
+      conversationId?: number
+      messages: Array<{
+        role: 'user' | 'assistant'
+        content?: string
+        blocks?: unknown[]
+      }>
+    }) => ipcRenderer.invoke('agent:appendLocalMessages', opts),
+
     updateTitle: (id: number, title: string) => ipcRenderer.invoke('agent:updateTitle', id, title),
+
+    getLastConversationId: () => ipcRenderer.invoke('agent:getLastConversationId'),
 
     generateTitle: (opts: {
       conversationId: number

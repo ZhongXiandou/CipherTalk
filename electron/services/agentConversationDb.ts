@@ -132,6 +132,13 @@ class AgentConversationDb {
   updateTitle(id: number, title: string): void {
     this.getDb().prepare('UPDATE agent_conversations SET title = ? WHERE id = ?').run(title, id)
   }
+
+  hasConversation(id: number): boolean {
+    const row = this.getDb()
+      .prepare('SELECT 1 as ok FROM agent_conversations WHERE id = ? LIMIT 1')
+      .get(id) as { ok?: number } | undefined
+    return Boolean(row?.ok)
+  }
 }
 
 export const agentConversationDb = new AgentConversationDb()

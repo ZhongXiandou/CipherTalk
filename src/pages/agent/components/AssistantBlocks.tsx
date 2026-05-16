@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import {
@@ -15,6 +15,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
+import { ExportCard } from './ExportCard'
 import type { AssistantBlock, TextBlock as AgentTextBlock, ToolBlock as AgentToolBlock, ToolResult } from '../types'
 
 interface Props {
@@ -47,6 +48,7 @@ export function AssistantBlocks({ blocks }: Props) {
       {blocks.map((block, index) => {
         if (block.type === 'thinking') return <ThinkingBlock block={block} key={`${block.type}-${index}`} />
         if (block.type === 'tool') return <ToolBlock block={block} key={`${block.type}-${index}`} />
+        if (block.type === 'card') return <ExportCard key={`card-${index}`} sessionId={block.sessionId} sessionName={block.sessionName} />
         return <TextBlock block={block} key={`${block.type}-${index}`} />
       })}
     </>
@@ -54,18 +56,7 @@ export function AssistantBlocks({ blocks }: Props) {
 }
 
 function ThinkingBlock({ block }: { block: Extract<AssistantBlock, { type: 'thinking' }> }) {
-  const [open, setOpen] = useState(Boolean(block.streaming))
-  const prevStreamingRef = useRef(block.streaming)
-
-  useEffect(() => {
-    if (block.streaming) {
-      setOpen(true)
-    }
-    if (prevStreamingRef.current && !block.streaming) {
-      setOpen(false)
-    }
-    prevStreamingRef.current = block.streaming
-  }, [block.streaming])
+  const [open, setOpen] = useState(false)
 
   return (
     <div className={`think-panel qa-think-panel agent-thinking${!open ? ' collapsed' : ''} ${block.streaming ? 'thinking is-thinking' : ''}`}>
@@ -90,7 +81,7 @@ function ThinkingBlock({ block }: { block: Extract<AssistantBlock, { type: 'thin
 }
 
 function ToolBlock({ block }: { block: AgentToolBlock }) {
-  const [open, setOpen] = useState(block.status !== 'running')
+  const [open, setOpen] = useState(false)
   const meta = toolMeta[block.name] || { label: block.name, tone: 'amber', Icon: Wrench }
   const Icon = meta.Icon
   const running = block.status === 'running'

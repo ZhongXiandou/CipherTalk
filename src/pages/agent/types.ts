@@ -27,7 +27,14 @@ export interface TextBlock {
   text: string
 }
 
-export type AssistantBlock = ThinkingBlock | ToolBlock | TextBlock
+export interface CardBlock {
+  type: 'card'
+  kind: 'export-wizard'
+  sessionId?: string
+  sessionName?: string
+}
+
+export type AssistantBlock = ThinkingBlock | ToolBlock | TextBlock | CardBlock
 
 export interface Message {
   id: string
@@ -55,17 +62,10 @@ export interface SlashCommand {
   description: string
 }
 
-export interface AttachMenuItem {
-  id: string
-  label: string
-  description: string
-  icon: 'file' | 'image' | 'database' | 'globe' | 'cpu'
-}
-
 export interface AttachedResource {
   id: string
   label: string
-  icon: AttachMenuItem['icon']
+  icon: 'database'
 }
 
 export type McpServerStatus = 'disconnected' | 'connecting' | 'connected' | 'error'

@@ -4,7 +4,7 @@ import { ChatInput } from './components/ChatInput'
 import { AgentSidebar } from './components/AgentSidebar'
 import { useAgentChat } from './hooks/useAgentChat'
 import { useMcpSkillsData } from '../../hooks/useMcpSkillsData'
-import { AGENT_ATTACH_MENU, AGENT_SLASH_COMMANDS, AGENT_SUGGESTIONS } from './data'
+import { AGENT_SLASH_COMMANDS, AGENT_SUGGESTIONS } from './data'
 import type { AgentConversationSummary } from '../../types/electron'
 import type { ConversationGroup, ConversationItem } from './types'
 import './AgentPage.scss'
@@ -55,7 +55,7 @@ function groupConversations(convs: AgentConversationSummary[]): ConversationGrou
 function AgentPage() {
   const {
     messages, loading, conversationId, conversations,
-    send, cancel, reset,
+    send, cancel, reset, regenerate,
     selectConversation, deleteConversation, renameConversation,
   } = useAgentChat()
   const { mcpServers, skills, busyServers, toggleServer } = useMcpSkillsData()
@@ -91,6 +91,7 @@ function AgentPage() {
           messages={messages}
           loading={loading}
           onCancel={cancel}
+          onRegenerate={regenerate}
           aiProvider={aiProvider}
         />
         <ChatInput
@@ -98,7 +99,6 @@ function AgentPage() {
           disabled={loading}
           suggestions={AGENT_SUGGESTIONS}
           slashCommands={AGENT_SLASH_COMMANDS}
-          attachMenu={AGENT_ATTACH_MENU}
           mcpServers={mcpServers}
           busyServers={busyServers}
           onToggleServer={toggleServer}

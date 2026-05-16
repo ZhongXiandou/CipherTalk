@@ -42,6 +42,7 @@ interface ConfigSchema {
   cachePath: string
   lastOpenedDb: string
   lastSession: string
+  lastAgentConversationId: number
 
   // 导出相关
   exportPath: string
@@ -109,6 +110,7 @@ interface ConfigSchema {
   aiEnableCache: boolean
   aiEnableThinking: boolean  // 是否显示思考过程
   aiMessageLimit: number     // 摘要提取的消息条数限制
+  agentReadLimit: number     // Agent 内置工具单次读取消息条数上限（500-2000）
   aiAgentDecisionMaxTokens: number // 会话问答 Agent 每轮决策输出 token 上限
   aiAgentAnswerMaxTokens: number   // 会话问答最终回答输出 token 上限
   aiEmbeddingMode: 'local' | 'online'
@@ -148,6 +150,7 @@ const defaults: ConfigSchema = {
   cachePath: '',
   lastOpenedDb: '',
   lastSession: '',
+  lastAgentConversationId: 0,
   exportPath: '',
   theme: 'cloud-dancer',
   themeMode: 'light',
@@ -190,6 +193,7 @@ const defaults: ConfigSchema = {
   aiEnableCache: true,
   aiEnableThinking: true,  // 默认显示思考过程
   aiMessageLimit: 3000,    // 默认3000条，用户可调至5000
+  agentReadLimit: 500,     // 默认500条
   aiAgentDecisionMaxTokens: 2048,
   aiAgentAnswerMaxTokens: 8192,
   aiEmbeddingMode: 'local',

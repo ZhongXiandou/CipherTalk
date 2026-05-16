@@ -2,14 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import {
   AtSign,
-  Cpu,
   Database,
-  FileText,
-  Globe2,
   Hammer,
-  Image,
   Mic,
-  Plus,
   Send,
   Slash,
   SlidersHorizontal,
@@ -19,37 +14,50 @@ import {
 } from 'lucide-react'
 import { MCP } from '@lobehub/icons'
 import type { McpServerStatus } from '../../../hooks/useMcpSkillsData'
-import type { AgentSkill, AttachedResource, AttachMenuItem, McpServer, SlashCommand } from '../types'
+import type { AgentSkill, AttachedResource, McpServer, SlashCommand } from '../types'
 
 interface Props {
-  onSend: (text: string, attached: AttachedResource[]) => void
+  onSend: (text: string, attached: AttachedResource[], readLimit: number) => void
   disabled?: boolean
   suggestions: string[]
   slashCommands: SlashCommand[]
-  attachMenu: AttachMenuItem[]
   mcpServers: McpServer[]
   busyServers: Set<string>
   onToggleServer: (name: string, status: McpServerStatus) => void
   skills: AgentSkill[]
 }
 
-const attachIcons = {
-  file: FileText,
-  image: Image,
-  database: Database,
-  globe: Globe2,
-  cpu: Cpu,
-}
-
 type ContextLength = '2k' | '8k' | '32k'
 
+const READ_LIMIT_OPTIONS = [500, 1000, 1500, 2000] as const
+type ReadLimit = typeof READ_LIMIT_OPTIONS[number]
+
+const AGENT_READ_LIMIT_KEY = 'agentReadLimit'
+
+async function loadReadLimit(): Promise<ReadLimit> {
+  try {
+    const v = await window.electronAPI?.config?.get(AGENT_READ_LIMIT_KEY as any)
+    const n = Number(v)
+    return (READ_LIMIT_OPTIONS as readonly number[]).includes(n) ? n as ReadLimit : 500
+  } catch {
+    return 500
+  }
+}
+
+async function saveReadLimit(v: ReadLimit): Promise<void> {
+  try {
+    await window.electronAPI?.config?.set(AGENT_READ_LIMIT_KEY as any, v as any)
+  } catch {
+    // ignore
+  }
+}
+
 export function ChatInput({
-  onSend, disabled, suggestions, slashCommands, attachMenu,
+  onSend, disabled, suggestions, slashCommands,
   mcpServers, busyServers, onToggleServer, skills,
 }: Props) {
   const [value, setValue] = useState('')
   const [showSlash, setShowSlash] = useState(false)
-  const [showAttach, setShowAttach] = useState(false)
   const [showMention, setShowMention] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
   const [showSkills, setShowSkills] = useState(false)
@@ -58,6 +66,7 @@ export function ChatInput({
   const [enabledSkills, setEnabledSkills] = useState<Set<string>>(new Set())
   const [temperature, setTemperature] = useState(0.7)
   const [contextLength, setContextLength] = useState<ContextLength>('8k')
+  const [readLimit, setReadLimit] = useState<ReadLimit>(500)
   const [mentionSessions, setMentionSessions] = useState<Array<{ id: string; name: string; summary?: string; avatarUrl?: string }>>([])
   const [mentionLoading, setMentionLoading] = useState(false)
   const [mentionQuery, setMentionQuery] = useState('')
@@ -100,6 +109,10 @@ export function ChatInput({
     )
   }, [mentionSessions, mentionQuery])
 
+  useEffect(() => {
+    loadReadLimit().then(setReadLimit)
+  }, [])
+
   // 弹窗打开时自动聚焦搜索框
   useEffect(() => {
     if (showMention) {
@@ -109,23 +122,22 @@ export function ChatInput({
     }
   }, [showMention])
 
-  const visibleSlashCommands = useMemo(() => {
-    if (!value.startsWith('/')) return slashCommands
-    const commandPrefix = value.split(' ')[0]
-    return slashCommands.filter(item => item.command.startsWith(commandPrefix))
-  }, [slashCommands, value])
-
   const closeAll = () => {
     setShowSlash(false)
-    setShowAttach(false)
     setShowMention(false)
     setShowMcp(false)
     setShowSkills(false)
     setShowContext(false)
   }
 
+  const visibleSlashCommands = useMemo(() => {
+    if (!value.startsWith('/')) return slashCommands
+    const commandPrefix = value.split(' ')[0]
+    return slashCommands.filter(item => item.command.startsWith(commandPrefix))
+  }, [slashCommands, value])
+
   useEffect(() => {
-    if (!showSlash && !showAttach && !showMention && !showMcp && !showSkills && !showContext) return
+    if (!showSlash && !showMention && !showMcp && !showSkills && !showContext) return
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target
       if (!(target instanceof Element)) return
@@ -134,12 +146,12 @@ export function ChatInput({
     }
     document.addEventListener('pointerdown', handlePointerDown)
     return () => document.removeEventListener('pointerdown', handlePointerDown)
-  }, [showAttach, showMention, showSlash, showMcp, showSkills, showContext])
+  }, [showMention, showSlash, showMcp, showSkills, showContext])
 
   const submit = () => {
     const text = value.trim()
     if (!text || disabled) return
-    onSend(text, attached)
+    onSend(text, attached, readLimit)
     setValue('')
     setAttached([])
     closeAll()
@@ -155,7 +167,7 @@ export function ChatInput({
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
-    if (e.key === '/' && !value) { setShowSlash(true); setShowAttach(false) }
+    if (e.key === '/' && !value) { setShowSlash(true) }
     if (e.key === 'Escape' && showMention) { setShowMention(false); return }
     if (e.key === 'Escape') closeAll()
   }
@@ -177,7 +189,7 @@ export function ChatInput({
       {suggestions.length ? (
         <div className="agent-suggestions">
           {suggestions.map(suggestion => (
-            <button key={suggestion} type="button" onClick={() => onSend(suggestion, [])} disabled={disabled}>
+            <button key={suggestion} type="button" onClick={() => onSend(suggestion, [], readLimit)} disabled={disabled}>
               <Sparkles size={12} />
               {suggestion}
             </button>
@@ -188,25 +200,22 @@ export function ChatInput({
       <div className="agent-composer" onClick={() => textareaRef.current?.focus()}>
         {attached.length ? (
           <div className="agent-composer__attached">
-            {attached.map(item => {
-              const Icon = attachIcons[item.icon]
-              return (
-                <span className="agent-attached-chip" key={item.id}>
-                  <Icon size={13} />
-                  {item.label}
-                  <button
-                    type="button"
-                    onClick={event => {
-                      event.stopPropagation()
-                      setAttached(current => current.filter(r => r.id !== item.id))
-                    }}
-                    title="移除附件"
-                  >
-                    <X size={11} />
-                  </button>
-                </span>
-              )
-            })}
+            {attached.map(item => (
+              <span className="agent-attached-chip" key={item.id}>
+                <Database size={13} />
+                {item.label}
+                <button
+                  type="button"
+                  onClick={event => {
+                    event.stopPropagation()
+                    setAttached(current => current.filter(r => r.id !== item.id))
+                  }}
+                  title="移除附件"
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            ))}
           </div>
         ) : null}
 
@@ -227,7 +236,7 @@ export function ChatInput({
               if (!showMention) { setShowMention(true); loadMentionSessions() }
               setMentionQuery(match[1])
             }
-            setShowSlash(text.startsWith('/'))
+            setShowSlash(text.startsWith('/') && !text.includes(' '))
             resizeTextarea()
           }}
           onKeyDown={handleKeyDown}
@@ -235,45 +244,6 @@ export function ChatInput({
 
         <div className="agent-composer__bar">
           <div className="agent-composer__left">
-            {/* 附加资源 */}
-            <div className="agent-popover-host">
-              <button
-                type="button"
-                className={`agent-round-button${showAttach ? ' is-open' : ''}`}
-                onClick={event => { event.stopPropagation(); closeAll(); setShowAttach(v => !v) }}
-                title="附加资源"
-              >
-                <Plus size={15} />
-              </button>
-              {showAttach ? (
-                <ComposerPopover title="附加资源" onClose={() => setShowAttach(false)}>
-                  {attachMenu.map(item => {
-                    const Icon = attachIcons[item.icon]
-                    return (
-                      <button
-                        className="agent-popover-row"
-                        key={item.id}
-                        type="button"
-                        onClick={() => {
-                          setAttached(current => [
-                            ...current,
-                            { id: `${item.id}-${Date.now()}`, label: item.label, icon: item.icon },
-                          ])
-                          setShowAttach(false)
-                        }}
-                      >
-                        <span className="agent-popover-row__icon"><Icon size={15} /></span>
-                        <span className="agent-popover-row__text">
-                          <strong>{item.label}</strong>
-                          <small>{item.description}</small>
-                        </span>
-                      </button>
-                    )
-                  })}
-                </ComposerPopover>
-              ) : null}
-            </div>
-
             {/* 引用对象 */}
             <div className="agent-popover-host">
               <button
@@ -509,6 +479,21 @@ export function ChatInput({
                       ))}
                     </div>
                   </div>
+                  <div className="agent-ctx-row">
+                    <label>读取条数上限</label>
+                    <div className="agent-ctx-chips">
+                      {READ_LIMIT_OPTIONS.map(n => (
+                        <button
+                          key={n}
+                          type="button"
+                          className={`agent-ctx-chip${readLimit === n ? ' is-active' : ''}`}
+                          onClick={() => { setReadLimit(n); void saveReadLimit(n) }}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </ComposerPopover>
               ) : null}
             </div>
@@ -536,7 +521,7 @@ export function ChatInput({
         <span><kbd>Shift</kbd> + <kbd>Enter</kbd> 换行</span>
         <span><kbd>@</kbd> 引用</span>
         <span><kbd>/</kbd> 命令</span>
-        <span>重要结论请二次确认</span>
+        <span>AI生成，请注意甄别！</span>
       </div>
     </footer>
   )
