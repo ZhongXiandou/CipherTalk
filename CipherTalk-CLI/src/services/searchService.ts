@@ -1,59 +1,10 @@
-import { existsSync, readdirSync, statSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { statSync } from 'node:fs'
 import { dbError } from '../errors.js'
 import { dbAdapter } from './db/dbAdapter.js'
 import { wcdbService } from './db/wcdbService.js'
+import { findMessageDbPaths, resolveDbStoragePath } from './db/messageDbScanner.js'
 import type { MessageRow, SearchResult } from './types.js'
 import type { RuntimeConfig } from '../types.js'
-
-// ---------- 路径解析（与 wcdbCore.resolveDbStoragePath 同步）----------
-function resolveDbStoragePath(dbPath: string, wxid: string): string | null {
-  if (!dbPath) return null
-  const normalized = dbPath.replace(/[\\/]+$/, '')
-  if (basename(normalized).toLowerCase() === 'db_storage' && existsSync(normalized)) return normalized
-  const direct = join(normalized, 'db_storage')
-  if (existsSync(direct)) return direct
-  if (wxid) {
-    const viaWxid = join(normalized, wxid, 'db_storage')
-    if (existsSync(viaWxid)) return viaWxid
-    try {
-      const lowerWxid = wxid.toLowerCase()
-      for (const entry of readdirSync(normalized)) {
-        const entryPath = join(normalized, entry)
-        try { if (!statSync(entryPath).isDirectory()) continue } catch { continue }
-        const lowerEntry = entry.toLowerCase()
-        if (lowerEntry !== lowerWxid && !lowerEntry.startsWith(`${lowerWxid}_`)) continue
-        const candidate = join(entryPath, 'db_storage')
-        if (existsSync(candidate)) return candidate
-      }
-    } catch { /* ignore */ }
-  }
-  return null
-}
-
-function findMessageDbPaths(dbStoragePath: string): string[] {
-  const results: string[] = []
-  function scan(dir: string, depth = 0) {
-    if (depth > 4) return
-    let entries: string[]
-    try { entries = readdirSync(dir) } catch { return }
-    for (const entry of entries) {
-      const full = join(dir, entry)
-      let st: ReturnType<typeof statSync>
-      try { st = statSync(full) } catch { continue }
-      if (st.isFile()) {
-        const lower = entry.toLowerCase()
-        if ((lower.startsWith('msg_') || lower.startsWith('message_')) && lower.endsWith('.db')) {
-          if (!results.includes(full)) results.push(full)
-        }
-      } else if (st.isDirectory()) {
-        scan(full, depth + 1)
-      }
-    }
-  }
-  scan(dbStoragePath)
-  return results
-}
 
 async function buildSessionNameMap(): Promise<Map<string, string>> {
   const map = new Map<string, string>()

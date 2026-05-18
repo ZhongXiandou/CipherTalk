@@ -414,12 +414,41 @@ async function runShellCommand(line: string, context: CommandContext, globals: G
         writeEnvelope(context.output, successEnvelope(result), format)
         return true
       }
-      case '/moments':
-        context.output.stderr('朋友圈功能暂不支持。请使用桌面版密语查看朋友圈。')
+      case '/moments': {
+        const limit = commandLimit(options, 20)
+        const result = await context.services.advanced.moments(config, {
+          limit,
+          user: asString(options.user),
+          from: asString(options.from),
+          to: asString(options.to)
+        })
+        writeEnvelope(context.output, successEnvelope({ entries: result.entries }, {
+          total: result.total,
+          limit: result.limit,
+          ...(result.meta || {})
+        }), format)
         return true
-      case '/report':
-        context.output.stderr('年度报告功能暂不支持。请使用桌面版密语生成年度报告。')
+      }
+      case '/report': {
+        const yearRaw = asString(options.year)
+        const yearNum = yearRaw !== undefined ? Number(yearRaw) : undefined
+        const topContactsRaw = asString(options['top-contacts'])
+        const topKeywordsRaw = asString(options['top-keywords'])
+        const result = await context.services.advanced.report(config, {
+          year: Number.isFinite(yearNum) ? yearNum : undefined,
+          allTime: options['all-time'] === true,
+          session: asString(options.session),
+          topContacts: topContactsRaw !== undefined ? Number(topContactsRaw) : undefined,
+          topKeywords: topKeywordsRaw !== undefined ? Number(topKeywordsRaw) : undefined
+        })
+        writeEnvelope(context.output, successEnvelope(result, {
+          scope: result.scope,
+          year: result.year,
+          sessionId: result.sessionId,
+          ...(result.meta || {})
+        }), format)
         return true
+      }
       case '/mcp':
         if (positional[0] === 'serve') {
           await context.services.advanced.mcpServe()
