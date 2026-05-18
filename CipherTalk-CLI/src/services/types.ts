@@ -123,12 +123,78 @@ export interface GroupStats {
   activeMembers: number
 }
 
+export interface MomentsOptions {
+  limit?: number
+  user?: string
+  from?: string
+  to?: string
+}
+
+export interface MomentsEntry {
+  id: string
+  author: { wxid: string; displayName: string }
+  createTime: number
+  contentText: string
+  mediaUrls: string[]
+  likes: number
+  comments: number
+  raw: unknown
+}
+
+export interface MomentsResult {
+  entries: MomentsEntry[]
+  total: number
+  limit: number
+  meta?: {
+    nativeSupported: boolean
+    note?: string
+  }
+}
+
+export interface ReportOptions {
+  year?: number
+  allTime?: boolean
+  session?: string
+  topContacts?: number
+  topKeywords?: number
+}
+
+export interface ReportMessageRef {
+  time: number | null
+  content: string
+}
+
+export interface ReportSummary {
+  totalMessages: number
+  sentMessages: number
+  receivedMessages: number
+  activeDays: number
+  topContacts: Array<{ wxid: string; displayName: string; count: number }>
+  topKeywords: Array<{ word: string; count: number }>
+  hourlyDistribution: Record<string, number>
+  firstMessage: ReportMessageRef | null
+  lastMessage: ReportMessageRef | null
+}
+
+export interface ReportResult {
+  scope: 'year' | 'all' | 'session'
+  year?: number
+  sessionId?: string
+  summary: ReportSummary
+  meta?: {
+    dbCount: number
+    tableCount: number
+    truncated?: boolean
+    note?: string
+  }
+}
+
 export interface AdvancedService {
   search(config: RuntimeConfig, keyword: string, options?: { session?: string; limit?: number; from?: string; to?: string }): Promise<SearchResult>
   stats(config: RuntimeConfig, options: StatsOptions): Promise<GlobalStats | ContactStats | TimeStats | SessionStats | KeywordStats | GroupStats>
   exportChat(config: RuntimeConfig, options: ExportOptions): Promise<{ path: string; count: number }>
-  moments(): Promise<never>
-  report(): Promise<never>
+  moments(config: RuntimeConfig, options?: MomentsOptions): Promise<MomentsResult>
+  report(config: RuntimeConfig, options?: ReportOptions): Promise<ReportResult>
   mcpServe(): Promise<never>
 }
 
