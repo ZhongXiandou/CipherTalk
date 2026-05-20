@@ -2,19 +2,23 @@ import { useState, useEffect, useRef } from 'react'
 import { useSearchParams, useLocation } from 'react-router-dom'
 import { useAppStore } from '../stores/appStore'
 import { useThemeStore, themes } from '../stores/themeStore'
-import { useActivationStore } from '../stores/activationStore'
 import type { UpdateDownloadProgressPayload } from '../types/electron'
 import type { AccountProfile } from '../types/account'
 import { dialog } from '../services/ipc'
 import * as configService from '../services/config'
 import AISummarySettings from '../components/ai/AISummarySettings'
+import BackgroundFx from '../components/settings/BackgroundFx'
+import AboutTab from '../components/settings/tabs/AboutTab'
+import ActivationTab from '../components/settings/tabs/ActivationTab'
+import SecurityTab from '../components/settings/tabs/SecurityTab'
+import type { UpdateInfo } from '../components/settings/types'
+import { formatFileSize } from '../components/settings/utils'
 import {
   Eye, EyeOff, Key, FolderSearch, FolderOpen, Search,
   RotateCcw, Trash2, Save, Plug, X, Check, Sun, Moon, Monitor,
-  Palette, Database, ImageIcon, Download, HardDrive, Info, RefreshCw, Shield, Clock, CheckCircle, AlertCircle, Mic,
-  Zap, Layers, User, Sparkles, Github, Fingerprint, Lock, ShieldCheck, Minus, Plus, Smile, ChevronDown
+  Palette, Database, ImageIcon, Download, HardDrive, Info, RefreshCw, Shield, CheckCircle, AlertCircle, Mic,
+  Zap, Layers, User, Sparkles, Lock, ShieldCheck, Minus, Plus, Smile, ChevronDown
 } from 'lucide-react'
-import { useAuthStore } from '../stores/authStore'
 import './SettingsPage.scss'
 
 type SettingsTab = 'appearance' | 'database' | 'stt' | 'ai' | 'data' | 'security' | 'activation' | 'about'
@@ -78,24 +82,18 @@ function SettingsPage() {
   const location = useLocation()
   const { setDbConnected, setLoading, setMyWxid: setCurrentWxid, userInfo } = useAppStore()
   const { currentTheme, themeMode, setTheme, setThemeMode } = useThemeStore()
-  const { status: activationStatus, checkStatus: checkActivationStatus } = useActivationStore()
 
-  const { isAuthEnabled, enableAuth, disableAuth, setupPassword, authMethod } = useAuthStore()
-  const [passwordInput, setPasswordInput] = useState('')
-  const [showPasswordInput, setShowPasswordInput] = useState(false)
   const [accountsList, setAccountsList] = useState<AccountProfile[]>([])
   const [activeAccountId, setActiveAccountId] = useState('')
   const [editingAccountId, setEditingAccountId] = useState('')
 
-  // 安全设置确认弹窗状态
+  // 账号相关操作的通用确认弹窗(删除账号、清理配置等)
   const [securityConfirm, setSecurityConfirm] = useState<{
-    show: boolean;
-    title: string;
-    message: string;
-    onConfirm: () => void;
+    show: boolean
+    title: string
+    message: string
+    onConfirm: () => void
   }>({ show: false, title: '', message: '', onConfirm: () => { } })
-
-
 
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
     const tab = searchParams.get('tab')
@@ -104,13 +102,6 @@ function SettingsPage() {
     }
     return 'appearance'
   })
-
-  // 切换到激活 tab 时自动刷新状态
-  useEffect(() => {
-    if (activeTab === 'activation') {
-      checkActivationStatus()
-    }
-  }, [activeTab])
 
   const [decryptKey, setDecryptKey] = useState('')
   const [dbPath, setDbPath] = useState('')
@@ -134,32 +125,7 @@ function SettingsPage() {
   const [downloadProgress, setDownloadProgress] = useState(0)
   const [downloadProgressDetail, setDownloadProgressDetail] = useState<UpdateDownloadProgressPayload | null>(null)
   const [appVersion, setAppVersion] = useState('')
-  const [updateInfo, setUpdateInfo] = useState<{
-    hasUpdate: boolean
-    forceUpdate: boolean
-    currentVersion: string
-    version?: string
-    releaseNotes?: string
-    title?: string
-    message?: string
-    minimumSupportedVersion?: string
-    reason?: 'minimum-version' | 'blocked-version'
-    checkedAt: number
-    updateSource: 'github' | 'custom' | 'none'
-    policySource: 'github' | 'custom' | 'none'
-    diagnostics?: {
-      phase: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'failed'
-      strategy: 'unknown' | 'differential' | 'full'
-      fallbackToFull: boolean
-      lastError?: string
-      lastEvent?: string
-      progressPercent?: number
-      downloadedBytes?: number
-      totalBytes?: number
-      targetVersion?: string
-      lastUpdatedAt: number
-    }
-  } | null>(null)
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [keyStatus, setKeyStatus] = useState('')
   const [message, setMessage] = useState<{ text: string; success: boolean } | null>(null)
   const [showDecryptKey, setShowDecryptKey] = useState(false)
@@ -231,7 +197,6 @@ function SettingsPage() {
   const [initialConfig, setInitialConfig] = useState<any>(null)
   const sttOnlineLanguageRef = useRef<HTMLDivElement>(null)
   const isMac = platformInfo.platform === 'darwin'
-  const biometricLabel = isMac ? 'Touch ID' : 'Windows Hello'
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -661,21 +626,6 @@ function SettingsPage() {
     } catch (e) {
       showMessage('设置日志级别失败', false)
     }
-  }
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 B'
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
-  }
-
-  const formatSpeed = (bytesPerSecond: number): string => {
-    if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return '计算中'
-    if (bytesPerSecond < 1024) return `${bytesPerSecond.toFixed(0)} B/s`
-    if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`
-    return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`
   }
 
   const syncUpdateState = async () => {
@@ -2802,200 +2752,6 @@ function SettingsPage() {
 
 
 
-  const handleSecurityMethodSelect = async (method: 'biometric' | 'password') => {
-    // 1. 如果点击的是当前已激活的方法 -> 关闭
-    if (isAuthEnabled && authMethod === method) {
-      await disableAuth()
-      showMessage('已关闭应用锁', true)
-      if (method === 'password') {
-        setShowPasswordInput(false)
-        setPasswordInput('')
-      }
-      return
-    }
-
-    // 2. 如果点击的是另一个方法 -> 确认切换
-    if (isAuthEnabled && authMethod !== method) {
-      setSecurityConfirm({
-        show: true,
-        title: '切换认证方式',
-        message: method === 'biometric'
-          ? `切换到${biometricLabel}将清除当前的密码设置，是否继续？`
-          : '切换到密码认证将清除当前的生物识别设置，是否继续？',
-        onConfirm: async () => {
-          await disableAuth()
-          if (method === 'biometric') {
-            activateBiometric()
-          } else {
-            setShowPasswordInput(true)
-          }
-          setSecurityConfirm(prev => ({ ...prev, show: false }))
-        }
-      })
-      return
-    }
-
-    // 3. 如果当前未激活任何方法 -> 直接开启
-    if (method === 'biometric') {
-      activateBiometric()
-    } else {
-      setShowPasswordInput(true)
-    }
-  }
-
-  const activateBiometric = async () => {
-    showMessage(`正在等待${biometricLabel}验证...`, true)
-    const result = await enableAuth()
-    if (result.success) {
-      showMessage(`已启用${biometricLabel}`, true)
-      setShowPasswordInput(false)
-    } else {
-      showMessage(result.error || '启用失败', false)
-    }
-  }
-
-  const renderSecurityTab = () => (
-    <div className="tab-content">
-      <h3 className="section-title">安全保护</h3>
-      <div className="section-desc">
-        {isMac ? '配置应用启动时的安全验证方式。macOS 优先使用 Touch ID，设备不支持时可改用自定义密码。' : '配置应用启动时的安全验证方式，保护您的隐私数据。'}
-      </div>
-
-      <div className="security-grid">
-        <div
-          className={`security-card ${isAuthEnabled && authMethod === 'biometric' ? 'active' : ''}`}
-          onClick={() => handleSecurityMethodSelect('biometric')}
-          style={{ cursor: 'pointer' }}
-        >
-          <div className="security-preview-area">
-            <div className="preview-lock-screen">
-              <div className="preview-avatar">
-                <Lock size={20} />
-              </div>
-              <div className="preview-badge">
-                <Fingerprint /> {biometricLabel}
-              </div>
-              <div className="preview-btn" />
-            </div>
-          </div>
-          <div className="security-content">
-            <div className="security-header">
-              <span className="security-title">{biometricLabel}</span>
-              {isAuthEnabled && authMethod === 'biometric' && (
-                <div className="theme-check" style={{ position: 'relative', top: 0, right: 0, transform: 'scale(1)', background: 'var(--primary)', boxShadow: 'none' }}>
-                  <Check size={12} />
-                </div>
-              )}
-            </div>
-            <div className="security-desc">
-              {isMac
-                ? '使用 macOS 系统 Touch ID 进行验证。设备未启用或不支持时，请改用自定义密码。'
-                : '使用系统的面部识别、指纹或 PIN 码进行验证。体验最流畅，安全性高。'}
-            </div>
-          </div>
-        </div>
-
-        {/* Custom Password Card */}
-        <div
-          className={`security-card ${isAuthEnabled && authMethod === 'password' ? 'active' : ''}`}
-          onClick={() => handleSecurityMethodSelect('password')}
-          style={{ cursor: 'pointer' }}
-        >
-          <div className="security-preview-area">
-            <div className="preview-lock-screen">
-              <div className="preview-avatar">
-                <ShieldCheck size={20} />
-              </div>
-              <div className="preview-input" />
-              <div className="preview-btn" style={{ width: '32px' }} />
-            </div>
-          </div>
-          <div className="security-content">
-            <div className="security-header">
-              <span className="security-title">自定义应用密码</span>
-              {isAuthEnabled && authMethod === 'password' && (
-                <div className="theme-check" style={{ position: 'relative', top: 0, right: 0, transform: 'scale(1)', background: 'var(--primary)', boxShadow: 'none' }}>
-                  <Check size={12} />
-                </div>
-              )}
-            </div>
-            <div className="security-desc">
-              {isMac
-                ? '设置应用专属密码。当前 macOS 侧只提供这一种应用锁方式。'
-                : '设置应用专属密码。如果不方便使用生物识别，或者需要在多台设备间同步配置时推荐。'}
-            </div>
-
-            {/* Input area - prevent click propagation to avoid toggling card off while typing */}
-            {(showPasswordInput || (isAuthEnabled && authMethod === 'password')) && (
-              <div
-                className="password-setup-inline"
-                onClick={(e) => e.stopPropagation()}
-                style={{ cursor: 'default' }}
-              >
-                <label className="field-label">
-                  {authMethod === 'password' ? '修改密码 (留空不修改)' : '设置新密码'}
-                </label>
-                <div className="password-input-row">
-                  <input
-                    type="password"
-                    className="field-input"
-                    value={passwordInput}
-                    onChange={(e) => setPasswordInput(e.target.value)}
-                    placeholder="******"
-                  />
-                  <button
-                    className="btn btn-primary"
-                    disabled={!passwordInput}
-                    onClick={async () => {
-                      if (!passwordInput) return
-                      const result = await setupPassword(passwordInput)
-                      if (result.success) {
-                        showMessage(authMethod === 'password' ? '密码已更新' : '已启用密码锁', true)
-                        setPasswordInput('')
-                        setShowPasswordInput(false)
-                      } else {
-                        showMessage(result.error || '设置失败', false)
-                      }
-                    }}
-                  >
-                    <Save size={14} /> 保存
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Confirmation Modal */}
-      {securityConfirm.show && (
-        <div className="clear-dialog-overlay">
-          <div className="clear-dialog">
-            <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <AlertCircle className="text-warning" size={20} color="#f59e0b" />
-              {securityConfirm.title}
-            </h3>
-            <p>{securityConfirm.message}</p>
-            <div className="dialog-actions">
-              <button
-                className="btn btn-secondary"
-                onClick={() => setSecurityConfirm(prev => ({ ...prev, show: false }))}
-              >
-                取消
-              </button>
-                <button
-                  className="btn btn-primary"
-                  onClick={securityConfirm.onConfirm}
-                >
-                  确定
-                </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-
   const renderDataManagementTab = () => (
     <div className="tab-content">
       {/* 导出设置 */}
@@ -3222,79 +2978,6 @@ function SettingsPage() {
 
 
 
-  const getTypeDisplayName = (type: string | null) => {
-    if (!type) return '未激活'
-    const typeMap: Record<string, string> = {
-      '30days': '30天试用版',
-      '90days': '90天标准版',
-      '365days': '365天专业版',
-      'permanent': '永久版'
-    }
-    return typeMap[type] || type
-  }
-
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return '永久'
-    return new Date(dateStr).toLocaleDateString('zh-CN', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    })
-  }
-
-  const renderActivationTab = () => (
-    <div className="tab-content activation-tab">
-      <div className={`activation-status-card ${activationStatus?.isActivated ? 'activated' : 'inactive'}`}>
-        <div className="status-icon">
-          {activationStatus?.isActivated ? (
-            <CheckCircle size={48} />
-          ) : (
-            <AlertCircle size={48} />
-          )}
-        </div>
-        <div className="status-content">
-          <h3>{activationStatus?.isActivated ? '已激活' : '未激活'}</h3>
-          {activationStatus?.isActivated && (
-            <>
-              <p className="status-type">{getTypeDisplayName(activationStatus.type)}</p>
-              {activationStatus.daysRemaining !== null && activationStatus.type !== 'permanent' && (
-                <p className="status-expires">
-                  <Clock size={14} />
-                  {activationStatus.daysRemaining > 0
-                    ? `剩余 ${activationStatus.daysRemaining} 天`
-                    : '已过期'}
-                </p>
-              )}
-              {activationStatus.expiresAt && (
-                <p className="status-date">到期时间：{formatDate(activationStatus.expiresAt)}</p>
-              )}
-              {activationStatus.activatedAt && (
-                <p className="status-date">激活时间：{formatDate(activationStatus.activatedAt)}</p>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      <div className="device-info-card">
-        <h4>设备信息</h4>
-        <div className="device-id-row">
-          <span className="label">设备标识：</span>
-          <code>{activationStatus?.deviceId || '获取中...'}</code>
-        </div>
-      </div>
-
-      <div className="activation-actions">
-        <button className="btn btn-secondary" onClick={() => checkActivationStatus()}>
-          <RefreshCw size={16} /> 刷新状态
-        </button>
-        <button className="btn btn-primary" onClick={() => window.electronAPI.window.openPurchaseWindow()}>
-          <Key size={16} /> 获取激活码
-        </button>
-      </div>
-    </div>
-  )
-
   // 检查导航传递的更新信息
   useEffect(() => {
     if (location.state?.updateInfo) {
@@ -3309,112 +2992,10 @@ function SettingsPage() {
     }
   }, [location.state])
 
-  const renderAboutTab = () => (
-    <div className="tab-content about-tab">
-      <div className="about-card">
-        <div className="about-logo">
-          <img src="./About.png" alt="密语 CipherTalk" />
-        </div>
-        <p className="about-version">v{appVersion || '...'}</p>
-
-        <div className="about-update">
-          {updateInfo?.hasUpdate ? (
-            <>
-              <p className="update-hint">
-                {isDownloading ? `正在下载 v${updateInfo.version}` : updateInfo.forceUpdate ? '检测到强制更新' : `新版本 v${updateInfo.version} 可用`}
-              </p>
-              <p className="update-hint">
-                更新来源：{updateInfo.updateSource === 'github' ? 'GitHub Release' : '未知'} / 策略来源：
-                {updateInfo.policySource === 'github' ? 'GitHub' : updateInfo.policySource === 'custom' ? '自定义源' : '无'}
-              </p>
-              {updateInfo.forceUpdate && updateInfo.minimumSupportedVersion && (
-                <p className="update-hint">最低安全版本：v{updateInfo.minimumSupportedVersion}</p>
-              )}
-              {updateInfo.diagnostics && (
-                <div className="update-hint" style={{ marginTop: '8px' }}>
-                  更新诊断：{updateInfo.diagnostics.phase}
-                  {updateInfo.diagnostics.fallbackToFull ? ' / 已从差分回退到全量' : ''}
-                  {updateInfo.diagnostics.lastEvent ? <><br />最近事件：{updateInfo.diagnostics.lastEvent}</> : null}
-                  {updateInfo.diagnostics.lastError ? <><br />最近错误：{updateInfo.diagnostics.lastError}</> : null}
-                  <br />
-                  详细诊断请查看日志文件中的 AppUpdate 记录。
-                </div>
-              )}
-              {isDownloading ? (
-                <div className="download-progress">
-                  <div className="progress-main">
-                    <div className="progress-bar">
-                      <div className="progress-fill" style={{ width: `${downloadProgress}%` }} />
-                    </div>
-                    <span>{downloadProgress.toFixed(0)}%</span>
-                  </div>
-                  <div className="progress-meta">
-                    <span>
-                      {formatFileSize(downloadProgressDetail?.transferred ?? updateInfo.diagnostics?.downloadedBytes ?? 0)} / {formatFileSize(downloadProgressDetail?.total ?? updateInfo.diagnostics?.totalBytes ?? 0)}
-                    </span>
-                    <span>速度 {formatSpeed(downloadProgressDetail?.bytesPerSecond ?? 0)}</span>
-                    {updateInfo.diagnostics?.fallbackToFull ? <span>已回退全量下载</span> : null}
-                  </div>
-                </div>
-              ) : (
-                <button className="btn btn-primary" onClick={handleUpdateNow} disabled={isDownloading}>
-                  <Download size={16} /> 立即更新
-                </button>
-              )}
-            </>
-          ) : (
-            <button className="btn btn-secondary" onClick={handleCheckUpdate} disabled={isCheckingUpdate || isDownloading}>
-              <RefreshCw size={16} className={isCheckingUpdate ? 'spin' : ''} />
-              {isCheckingUpdate ? '检查中...' : '检查更新'}
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="about-footer">
-        <div className="github-capsules" style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginBottom: '16px' }}>
-          <button
-            className="btn btn-secondary"
-            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', borderRadius: '20px' }}
-            onClick={() => window.electronAPI.shell.openExternal('https://github.com/ILoveBingLu/miyu')}
-          >
-            <Github size={16} />
-            <span>密语 CipherTalk</span>
-          </button>
-          <button
-            className="btn btn-secondary"
-            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', borderRadius: '20px' }}
-            onClick={() => window.electronAPI.shell.openExternal('https://github.com/hicccc77/WeFlow')}
-          >
-            <Github size={16} />
-            <span>WeFlow</span>
-          </button>
-        </div>
-
-        <p className="about-warning" style={{ color: '#ff4d4f', fontWeight: 500, marginBottom: '20px' }}>
-          软件为免费，如果有人找你收钱，请骂死他，太贱了，拿别人东西卖钱！
-        </p>
-
-        <div className="about-links">
-          <a href="#" onClick={(e) => { e.preventDefault(); window.electronAPI.shell.openExternal('https://miyu.aiqji.com') }}>官网</a>
-          <span>·</span>
-          <a href="#" onClick={(e) => { e.preventDefault(); window.electronAPI.shell.openExternal('https://chatlab.fun') }}>ChatLab</a>
-          <span>·</span>
-          <a href="#" onClick={(e) => { e.preventDefault(); window.electronAPI.window.openAgreementWindow() }}>用户协议</a>
-        </div>
-        <p className="copyright">© {new Date().getFullYear()} 密语-CipherTalk. All rights reserved.</p>
-      </div>
-    </div>
-  )
-
   return (
     <div className="settings-page">
       {/* 动态粒子背景 */}
-      <div className="bg-particles">
-        {[...Array(15)].map((_, i) => (
-          <div key={i} className="particle" />
-        ))}
-      </div>
+      <BackgroundFx />
 
       {message && <div className={`message-toast ${message.success ? 'success' : 'error'}`}>{message.text}</div>}
 
@@ -3442,6 +3023,33 @@ function SettingsPage() {
         </div>
       )}
 
+      {/* 账号操作确认对话框 */}
+      {securityConfirm.show && (
+        <div className="clear-dialog-overlay">
+          <div className="clear-dialog">
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertCircle className="text-warning" size={20} color="#f59e0b" />
+              {securityConfirm.title}
+            </h3>
+            <p>{securityConfirm.message}</p>
+            <div className="dialog-actions">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setSecurityConfirm(prev => ({ ...prev, show: false }))}
+              >
+                取消
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={securityConfirm.onConfirm}
+              >
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="settings-tabs">
         {tabs.map(tab => (
           <button key={tab.id} className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
@@ -3454,7 +3062,7 @@ function SettingsPage() {
       <div className="settings-body">
         {activeTab === 'appearance' && renderAppearanceTab()}
         {activeTab === 'database' && renderDatabaseTab()}
-        {activeTab === 'security' && renderSecurityTab()}
+        {activeTab === 'security' && <SecurityTab isMac={isMac} showMessage={showMessage} />}
         {activeTab === 'stt' && renderSttTab()}
         {activeTab === 'ai' && (
           <AISummarySettings
@@ -3484,8 +3092,19 @@ function SettingsPage() {
           />
         )}
         {activeTab === 'data' && renderDataManagementTab()}
-        {activeTab === 'activation' && renderActivationTab()}
-        {activeTab === 'about' && renderAboutTab()}
+        {activeTab === 'activation' && <ActivationTab />}
+        {activeTab === 'about' && (
+          <AboutTab
+            appVersion={appVersion}
+            updateInfo={updateInfo}
+            isDownloading={isDownloading}
+            downloadProgress={downloadProgress}
+            downloadProgressDetail={downloadProgressDetail}
+            isCheckingUpdate={isCheckingUpdate}
+            onUpdateNow={handleUpdateNow}
+            onCheckUpdate={handleCheckUpdate}
+          />
+        )}
       </div>
 
       {/* 悬浮保存按钮 */}
