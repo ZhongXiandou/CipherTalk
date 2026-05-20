@@ -764,21 +764,14 @@
 
           .bubble-quote {
             align-items: flex-end;
+            padding-right: 10px;
+            padding-left: 0;
+            border-right: 2px solid color-mix(in srgb, var(--text-tertiary) 52%, transparent);
+            border-left: 0;
+            text-align: right;
 
             .quote-content {
-              background: var(--primary-light);
-              border-color: transparent;
-              border-top-right-radius: 4px;
-              /* 上方与主气泡连接 */
-              border-bottom-right-radius: 12px;
-              /* 下方圆角恢复 */
-              text-align: left;
-              color: var(--text-secondary);
-              /* 次要信息颜色 */
-            }
-
-            .quote-sender {
-              color: var(--primary);
+              text-align: inherit;
             }
           }
         }
@@ -798,11 +791,14 @@
 
           .bubble-quote {
             align-items: flex-start;
+            padding-left: 10px;
+            padding-right: 0;
+            border-left: 2px solid color-mix(in srgb, var(--text-tertiary) 52%, transparent);
+            border-right: 0;
+            text-align: left;
 
             .quote-content {
-              border-top-left-radius: 4px;
-              /* 上方与主气泡连接 */
-              border-bottom-left-radius: 12px;
+              text-align: left;
             }
           }
         }
@@ -821,52 +817,37 @@
       }
 
       .bubble-quote {
-        margin-top: 2px;
+        margin-top: 6px;
         max-width: 100%;
-        display: flex;
-        flex-direction: column;
+        color: var(--text-tertiary);
+        font-size: 12px;
+        line-height: 1.35;
 
         .quote-content {
-          background: var(--bg-tertiary);
-          padding: 6px 10px;
-          border-radius: 12px;
-          font-size: 11px;
-          /* 字体更小 */
-          color: var(--text-tertiary);
-          /* 颜色更淡，体现次要地位 */
-          position: relative;
-          border: 1px solid var(--border-color);
+          min-width: 0;
           cursor: default;
-          line-height: 1.4;
-          display: flex;
-          align-items: center;
         }
 
         .quote-text {
+          display: block;
           overflow: hidden;
           text-overflow: ellipsis;
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          /* 限制行数 */
-          line-clamp: 2;
-          -webkit-box-orient: vertical;
-          word-break: break-all;
+          white-space: nowrap;
         }
 
         .quote-sender {
-          margin-right: 4px;
-          font-weight: 500;
-          opacity: 0.9;
+          color: var(--text-secondary);
         }
 
         .quote-image-thumb {
-          width: 36px;
-          height: 36px;
+          display: inline-block;
+          width: 28px;
+          height: 28px;
+          margin-left: 6px;
           object-fit: cover;
           border-radius: 4px;
           cursor: pointer;
-          flex-shrink: 0;
-          margin-left: 8px;
+          vertical-align: middle;
         }
       }
 

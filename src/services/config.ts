@@ -28,7 +28,6 @@ export const CONFIG_KEYS = {
   QUOTE_STYLE: 'quoteStyle',
   SKIP_INTEGRITY_CHECK: 'skipIntegrityCheck',
   EXPORT_DEFAULT_DATE_RANGE: 'exportDefaultDateRange',
-  EXPORT_DEFAULT_AVATARS: 'exportDefaultAvatars',
   AUTO_UPDATE_DATABASE: 'autoUpdateDatabase',
   // 自动同步高级参数
   AUTO_UPDATE_CHECK_INTERVAL: 'autoUpdateCheckInterval',     // 检查间隔（秒）
@@ -429,18 +428,6 @@ export async function getExportDefaultDateRange(): Promise<number> {
 export async function setExportDefaultDateRange(days: number): Promise<void> {
   await config.set(CONFIG_KEYS.EXPORT_DEFAULT_DATE_RANGE, days)
 }
-
-// 获取导出默认是否包含头像
-export async function getExportDefaultAvatars(): Promise<boolean> {
-  const value = await config.get(CONFIG_KEYS.EXPORT_DEFAULT_AVATARS)
-  return value !== undefined ? (value as boolean) : true
-}
-
-// 设置导出默认是否包含头像
-export async function setExportDefaultAvatars(exportAvatars: boolean): Promise<void> {
-  await config.set(CONFIG_KEYS.EXPORT_DEFAULT_AVATARS, exportAvatars)
-}
-
 
 // --- 安全认证配置 ---
 

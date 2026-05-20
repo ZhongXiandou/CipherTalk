@@ -62,7 +62,6 @@ export function useSettingsConfig() {
         quoteStyle: await configService.getQuoteStyle(),
         exportPath: await configService.getExportPath() || '',
         exportDefaultDateRange: await configService.getExportDefaultDateRange(),
-        exportDefaultAvatars: await configService.getExportDefaultAvatars(),
         closeToTray: await configService.getCloseToTray()
       }
 
@@ -109,7 +108,6 @@ export function useSettingsConfig() {
       await configService.setAutoUpdateDebounceTime(config.autoUpdateDebounceTime)
       await configService.setQuoteStyle(config.quoteStyle)
       await configService.setExportDefaultDateRange(config.exportDefaultDateRange)
-      await configService.setExportDefaultAvatars(config.exportDefaultAvatars)
       await configService.setAiProvider(config.aiProvider)
       await configService.setAiApiKey(config.aiApiKey)
       await configService.setAiModel(config.aiModel)

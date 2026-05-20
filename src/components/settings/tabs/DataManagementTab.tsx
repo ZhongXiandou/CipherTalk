@@ -1,10 +1,10 @@
 ﻿import { useEffect, useState } from 'react'
-import { Check, Database, FolderOpen, ImageIcon, Key, Layers, RefreshCw, Smile, Trash2, User } from 'lucide-react'
+import { Database, FolderOpen, ImageIcon, Key, Layers, RefreshCw, Smile, Trash2 } from 'lucide-react'
 import { dialog } from '../../../services/ipc'
 import * as configService from '../../../services/config'
 import { formatFileSize } from '../utils'
 import { useSettingsStore } from '../settingsStore'
-import { ConfirmDialog, PathInput, SettingsField, SettingsSection } from '../ui'
+import { ConfirmDialog, PathInput, SelectableCard, SettingsField, SettingsSection } from '../ui'
 
 interface DataManagementTabProps {
   showMessage: (text: string, success: boolean) => void
@@ -15,11 +15,9 @@ interface DataManagementTabProps {
 function DataManagementTab({ showMessage, reloadConfig, onClearCurrentAccountConfig }: DataManagementTabProps) {
   const exportPath = useSettingsStore(s => s.config.exportPath)
   const exportDefaultDateRange = useSettingsStore(s => s.config.exportDefaultDateRange)
-  const exportDefaultAvatars = useSettingsStore(s => s.config.exportDefaultAvatars)
   const setField = useSettingsStore(s => s.setField)
   const setExportPath = (value: string) => setField('exportPath', value)
   const setExportDefaultDateRange = (value: number) => setField('exportDefaultDateRange', value)
-  const setExportDefaultAvatars = (value: boolean) => setField('exportDefaultAvatars', value)
   const [defaultExportPath, setDefaultExportPath] = useState('')
   const [showClearDialog, setShowClearDialog] = useState<{
     type: 'images' | 'emojis' | 'databases' | 'all' | 'currentAccount' | 'allAccounts'
@@ -225,52 +223,25 @@ function DataManagementTab({ showMessage, reloadConfig, onClearCurrentAccountCon
               { value: 180, label: '最近180天', desc: '过去半年' },
               { value: 365, label: '最近1年', desc: '过去一年' }
             ].map(option => (
-              <label
+              <SelectableCard
                 key={option.value}
-                className={`date-range-card ${exportDefaultDateRange === option.value ? 'active' : ''}`}
+                type="radio"
+                className="date-range-card"
+                checkClassName="date-range-check"
+                name="exportDefaultDateRange"
+                value={option.value}
+                checked={exportDefaultDateRange === option.value}
+                onChange={(e) => setExportDefaultDateRange(Number(e.target.value))}
               >
-                <input
-                  type="radio"
-                  name="exportDefaultDateRange"
-                  value={option.value}
-                  checked={exportDefaultDateRange === option.value}
-                  onChange={(e) => setExportDefaultDateRange(Number(e.target.value))}
-                />
                 <div className="date-range-content">
                   <span className="date-range-label">{option.label}</span>
                   <span className="date-range-desc">{option.desc}</span>
                 </div>
-                {exportDefaultDateRange === option.value && (
-                  <div className="date-range-check"><Check size={14} /></div>
-                )}
-              </label>
+              </SelectableCard>
             ))}
           </div>
         </SettingsField>
 
-        <SettingsField label="默认导出选项">
-          <div className="export-default-options">
-            <label className={`export-option-card ${exportDefaultAvatars ? 'active' : ''}`}>
-              <input
-                type="checkbox"
-                checked={exportDefaultAvatars}
-                onChange={(e) => setExportDefaultAvatars(e.target.checked)}
-              />
-              <div className="option-content">
-                <div className="option-icon">
-                  <User size={20} />
-                </div>
-                <div className="option-info">
-                  <span className="option-label">默认导出头像</span>
-                  <span className="option-desc">勾选后导出时默认包含头像</span>
-                </div>
-              </div>
-              {exportDefaultAvatars && (
-                <div className="option-check"><Check size={14} /></div>
-              )}
-            </label>
-          </div>
-        </SettingsField>
       </SettingsSection>
 
       <div className="divider" style={{ margin: '2rem 0', borderBottom: '1px solid var(--border-color)', opacity: 0.1 }} />

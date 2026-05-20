@@ -3,7 +3,7 @@ import { AlertCircle, Check, CheckCircle, ChevronDown, Download, Layers, Minus, 
 import * as configService from '../../../services/config'
 import { formatFileSize } from '../utils'
 import { useSettingsStore } from '../settingsStore'
-import { ProgressBar, SegmentedControl } from '../ui'
+import { ProgressBar, SegmentedControl, SelectableCard } from '../ui'
 
 const sttLanguageOptions = [
   { value: 'zh', label: '中文', enLabel: 'Chinese' },
@@ -432,18 +432,17 @@ function SttTab({ active, showMessage }: SttTabProps) {
           <h4 className="subsection-title" style={{ marginTop: '1rem', marginBottom: '0.5rem', fontSize: '0.95rem', fontWeight: 500 }}>模型版本</h4>
           <div className="model-type-grid">
             {sttModelTypeOptions.map(opt => (
-              <label
+              <SelectableCard
                 key={opt.value}
-                className={`model-card ${sttModelType === opt.value ? 'active' : ''} ${isDownloadingSttModel ? 'disabled' : ''}`}
+                type="radio"
+                className="model-card"
+                checkClassName="model-check"
+                name="sttModelType"
+                value={opt.value}
+                checked={sttModelType === opt.value}
+                onChange={() => handleSttModelTypeChange(opt.value as 'int8' | 'float32')}
+                disabled={isDownloadingSttModel}
               >
-                <input
-                  type="radio"
-                  name="sttModelType"
-                  value={opt.value}
-                  checked={sttModelType === opt.value}
-                  onChange={() => handleSttModelTypeChange(opt.value as 'int8' | 'float32')}
-                  disabled={isDownloadingSttModel}
-                />
                 <div className="model-icon">
                   {opt.value === 'int8' ? <Zap size={24} /> : <Layers size={24} />}
                 </div>
@@ -454,8 +453,7 @@ function SttTab({ active, showMessage }: SttTabProps) {
                   </div>
                   <span className="model-desc">{opt.desc}</span>
                 </div>
-                {sttModelType === opt.value && <div className="model-check"><Check size={14} /></div>}
-              </label>
+              </SelectableCard>
             ))}
           </div>
 
@@ -756,18 +754,17 @@ function SttTab({ active, showMessage }: SttTabProps) {
               { value: 'large-v3-turbo', label: 'Large-v3-Turbo', size: '1.62 GB', desc: '极高精度 + 快速' },
               { value: 'large-v3', label: 'Large-v3 模型', size: '3.1 GB', desc: '极高精度，专业级识别' }
             ].map(opt => (
-              <label
+              <SelectableCard
                 key={opt.value}
-                className={`model-card ${whisperModelType === opt.value ? 'active' : ''} ${isDownloadingWhisperModel ? 'disabled' : ''}`}
+                type="radio"
+                className="model-card"
+                checkClassName="model-check"
+                name="whisperModelType"
+                value={opt.value}
+                checked={whisperModelType === opt.value}
+                onChange={() => handleWhisperModelTypeChange(opt.value as any)}
+                disabled={isDownloadingWhisperModel}
               >
-                <input
-                  type="radio"
-                  name="whisperModelType"
-                  value={opt.value}
-                  checked={whisperModelType === opt.value}
-                  onChange={() => handleWhisperModelTypeChange(opt.value as any)}
-                  disabled={isDownloadingWhisperModel}
-                />
                 <div className="model-icon">
                   <Zap size={24} />
                 </div>
@@ -778,8 +775,7 @@ function SttTab({ active, showMessage }: SttTabProps) {
                   </div>
                   <span className="model-desc">{opt.desc}</span>
                 </div>
-                {whisperModelType === opt.value && <div className="model-check"><Check size={14} /></div>}
-              </label>
+              </SelectableCard>
             ))}
           </div>
 

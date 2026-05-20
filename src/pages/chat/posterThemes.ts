@@ -115,9 +115,46 @@ export function sanitizePosterCss(input: string): string {
 }
 
 /**
+ * 仅允许影响「外观」的属性。任何会改动排版/尺寸的属性（width、font-size、
+ * padding、margin、display、position、flex... ）都会被剔除，使主题无法破坏布局。
+ * 自带主题只用到 background / color / border-*-color，均在白名单内，不受影响。
+ */
+const POSTER_ALLOWED_PROPS = [
+  'background',
+  'color',
+  'border',
+  'box-shadow',
+  'text-shadow',
+  'opacity',
+  'outline',
+  'filter',
+  'backdrop-filter'
+]
+
+function isAllowedPosterProp(prop: string): boolean {
+  const p = prop.trim().toLowerCase()
+  if (!p) return false
+  return POSTER_ALLOWED_PROPS.some((allowed) => p === allowed || p.startsWith(`${allowed}-`))
+}
+
+/** 丢弃声明块里所有非外观属性，只保留白名单内的配色类属性 */
+function filterPosterDeclarations(body: string): string {
+  return body
+    .split(';')
+    .map((decl) => decl.trim())
+    .filter(Boolean)
+    .filter((decl) => {
+      const idx = decl.indexOf(':')
+      return idx > 0 && isAllowedPosterProp(decl.slice(0, idx))
+    })
+    .join('; ')
+}
+
+/**
  * 把任意主题 CSS 裁剪到海报作用域内：
  * - 丢弃 @media / @keyframes 等带嵌套块的规则
  * - 每个选择器前缀 .poster-theme-scope，全局选择器（body/*）因此失效
+ * - 每条规则只保留白名单内的外观属性，剔除一切排版/尺寸属性
  */
 export function scopePosterCss(rawCss: string): string {
   const css = sanitizePosterCss(rawCss)
@@ -127,8 +164,10 @@ export function scopePosterCss(rawCss: string): string {
   let match: RegExpExecArray | null
   while ((match = ruleRe.exec(css))) {
     const selector = match[1].trim()
-    const body = match[2].trim()
-    if (!selector || !body || selector.startsWith('@')) continue
+    const rawBody = match[2].trim()
+    if (!selector || !rawBody || selector.startsWith('@')) continue
+    const body = filterPosterDeclarations(rawBody)
+    if (!body) continue
     const scoped = selector
       .split(',')
       .map(part => part.trim())

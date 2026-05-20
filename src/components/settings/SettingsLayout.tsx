@@ -170,7 +170,6 @@ function SettingsLayout() {
   const [quoteStyle, setQuoteStyle] = useState<'default' | 'wechat'>('default')
   const [skipIntegrityCheck, setSkipIntegrityCheck] = useState(false)
   const [exportDefaultDateRange, setExportDefaultDateRange] = useState<number>(0)
-  const [exportDefaultAvatars, setExportDefaultAvatars] = useState<boolean>(true)
   const [autoUpdateDatabase, setAutoUpdateDatabase] = useState(true)
   // 自动同步高级参数
   const [autoUpdateCheckInterval, setAutoUpdateCheckInterval] = useState(60) // 检查间隔（秒）
@@ -371,9 +370,6 @@ function SettingsLayout() {
       const savedExportDefaultDateRange = await configService.getExportDefaultDateRange()
       setExportDefaultDateRange(savedExportDefaultDateRange)
 
-      const savedExportDefaultAvatars = await configService.getExportDefaultAvatars()
-      setExportDefaultAvatars(savedExportDefaultAvatars)
-
       // 加载 AI 配置
       const savedAiProvider = await configService.getAiProvider()
       const savedAiApiKey = await configService.getAiApiKey()
@@ -429,7 +425,6 @@ function SettingsLayout() {
         autoUpdateDebounceTime: savedDebounceTime,
         quoteStyle: savedQuoteStyle,
         exportDefaultDateRange: savedExportDefaultDateRange,
-        exportDefaultAvatars: savedExportDefaultAvatars,
         aiProvider: savedAiProvider,
         aiApiKey: savedAiApiKey,
         aiModel: savedAiModel,
@@ -1275,7 +1270,6 @@ function SettingsLayout() {
 
       // 保存导出默认设置
       await configService.setExportDefaultDateRange(storeConfig.exportDefaultDateRange)
-      await configService.setExportDefaultAvatars(storeConfig.exportDefaultAvatars)
 
       // 保存 AI 配置
       await configService.setAiProvider(storeConfig.aiProvider)

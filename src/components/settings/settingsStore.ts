@@ -48,7 +48,6 @@ export interface SettingsConfig {
   quoteStyle: 'default' | 'wechat'
   exportPath: string
   exportDefaultDateRange: number
-  exportDefaultAvatars: boolean
   closeToTray: boolean
 }
 
@@ -92,7 +91,6 @@ export const DEFAULT_SETTINGS_CONFIG: SettingsConfig = {
   quoteStyle: 'default',
   exportPath: '',
   exportDefaultDateRange: 0,
-  exportDefaultAvatars: true,
   closeToTray: true
 }
 
