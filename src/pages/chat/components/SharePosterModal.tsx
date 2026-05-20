@@ -80,6 +80,37 @@ function findRuleRange(css: string, candidates: string[]): [number, number] | nu
   return null
 }
 
+function isSingleLinePosterBubble(el: HTMLElement): boolean {
+  const style = window.getComputedStyle(el)
+  const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5 || 20
+  const verticalPadding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0)
+  return el.getBoundingClientRect().height <= verticalPadding + lineHeight * 1.25
+}
+
+function lockPosterCloneLayout(source: HTMLElement, clone: HTMLElement): void {
+  const sourceBubbles = Array.from(source.querySelectorAll<HTMLElement>('.poster-bubble'))
+  const cloneBubbles = Array.from(clone.querySelectorAll<HTMLElement>('.poster-bubble'))
+
+  sourceBubbles.forEach((sourceBubble, index) => {
+    const cloneBubble = cloneBubbles[index]
+    if (!cloneBubble) return
+
+    const rect = sourceBubble.getBoundingClientRect()
+    const singleLine = isSingleLinePosterBubble(sourceBubble)
+    const width = Math.ceil(singleLine ? Math.max(rect.width, sourceBubble.scrollWidth) + 8 : rect.width)
+    const height = Math.ceil(rect.height)
+
+    cloneBubble.style.boxSizing = 'border-box'
+    cloneBubble.style.width = `${width}px`
+    cloneBubble.style.height = 'auto'
+    cloneBubble.style.minHeight = `${height}px`
+    cloneBubble.style.overflow = 'visible'
+    if (singleLine && !sourceBubble.textContent?.includes('\n')) {
+      cloneBubble.style.whiteSpace = 'pre'
+    }
+  })
+}
+
 function getPosterExportOptions(node: HTMLElement) {
   const rect = node.getBoundingClientRect()
   const width = Math.ceil(rect.width)
@@ -95,7 +126,8 @@ function getPosterExportOptions(node: HTMLElement) {
       maxWidth: `${width}px`,
       height: `${height}px`,
       margin: '0'
-    }
+    },
+    onclone: (clone: HTMLElement) => lockPosterCloneLayout(node, clone)
   }
 }
 
