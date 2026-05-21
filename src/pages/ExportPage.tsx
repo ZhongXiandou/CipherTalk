@@ -438,7 +438,7 @@ function ExportPage() {
         exportVoices: options.exportVoices
       }
 
-      if (options.format === 'chatlab' || options.format === 'chatlab-jsonl' || options.format === 'json' || options.format === 'excel' || options.format === 'html') {
+      if (options.format === 'chatlab' || options.format === 'chatlab-jsonl' || options.format === 'json' || options.format === 'excel' || options.format === 'html' || options.format === 'sql') {
         const result = await window.electronAPI.export.exportSessions(
           sessionList,
           exportFolder,

@@ -2051,6 +2051,286 @@ class ExportService {
   }
 
   /**
+   * 导出会话为 PostgreSQL SQL 脚本
+   */
+  async exportSessionToSql(
+    sessionId: string,
+    outputPath: string,
+    options: ExportOptions
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!this.dbDir) {
+        return { success: false, error: '数据库未连接' }
+      }
+
+      const sessionInfo = await this.getContactInfo(sessionId)
+      const myWxid = this.configService.get('myWxid') || ''
+      const cleanedMyWxid = this.cleanAccountDirName(myWxid)
+      const isGroup = sessionId.includes('@chatroom')
+
+      // 查找消息数据库和表
+      const dbTablePairs = await this.findSessionTables(sessionId)
+      if (dbTablePairs.length === 0) {
+        return { success: false, error: '未找到该会话的消息' }
+      }
+
+      // 收集所有消息
+      const allMessages: any[] = []
+      let firstMessageTime: number | null = null
+      let lastMessageTime: number | null = null
+
+      for (const { tableName, dbPath } of dbTablePairs) {
+        try {
+          const hasName2Id = await dbAdapter.get<any>(
+            'message',
+            dbPath,
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='Name2Id'"
+          )
+
+          let sql: string
+          if (hasName2Id) {
+            sql = `SELECT m.*, n.user_name AS sender_username
+                   FROM ${tableName} m
+                   LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+                   ORDER BY m.create_time ASC`
+          } else {
+            sql = `SELECT * FROM ${tableName} ORDER BY create_time ASC`
+          }
+
+          const rows = await dbAdapter.all<any>('message', dbPath, sql)
+
+          for (const row of rows) {
+            const createTime = row.create_time || 0
+
+            if (options.dateRange) {
+              if (createTime < options.dateRange.start || createTime > options.dateRange.end) {
+                continue
+              }
+            }
+
+            const content = this.decodeMessageContent(row.message_content, row.compress_content)
+            const localType = row.local_type || row.type || 1
+            const senderUsername = row.sender_username || ''
+            const isSend = row.is_send === 1 || senderUsername === cleanedMyWxid
+
+            // 确定实际发送者
+            let actualSender: string
+            if (localType === 10000 || localType === 266287972401) {
+              const revokeInfo = this.extractRevokerInfo(content)
+              if (revokeInfo.isRevoke) {
+                if (revokeInfo.isSelfRevoke) {
+                  actualSender = cleanedMyWxid
+                } else if (revokeInfo.revokerWxid) {
+                  actualSender = revokeInfo.revokerWxid
+                } else {
+                  actualSender = sessionId
+                }
+              } else {
+                actualSender = sessionId
+              }
+            } else {
+              actualSender = isSend ? cleanedMyWxid : (senderUsername || sessionId)
+            }
+
+            const senderInfo = await this.getContactInfo(actualSender)
+            const groupNickname = isGroup ? this.extractGroupNickname(content, actualSender) : undefined
+
+            // 提取引用消息ID
+            let replyToMessageId: string | undefined
+            if (localType === 49 && content.includes('<type>57</type>')) {
+              const svridMatch = /<svrid>(\d+)<\/svrid>/i.exec(content)
+              if (svridMatch) {
+                replyToMessageId = svridMatch[1]
+              }
+            }
+
+            // 解析消息内容
+            const parsedContent = this.parseMessageContent(content, localType, sessionId, createTime, options.mediaPathMap)
+            const contentText = parsedContent !== null ? parsedContent : ''
+
+            allMessages.push({
+              localId: row.local_id || allMessages.length + 1,
+              createTime,
+              formattedTime: this.formatTimestamp(createTime),
+              msgType: this.getMessageLocalTypeName(localType),
+              localType,
+              content: contentText,
+              isSend: isSend ? 1 : 0,
+              senderUsername: actualSender,
+              senderDisplayName: senderInfo.displayName,
+              groupNickname,
+              replyToMessageId
+            })
+
+            if (firstMessageTime === null || createTime < firstMessageTime) {
+              firstMessageTime = createTime
+            }
+            if (lastMessageTime === null || createTime > lastMessageTime) {
+              lastMessageTime = createTime
+            }
+          }
+        } catch (e) {
+          console.error('导出消息失败:', e)
+        }
+      }
+
+      // 按时间排序
+      allMessages.sort((a, b) => a.createTime - b.createTime)
+
+      // 生成 SQL
+      const now = Math.floor(Date.now() / 1000)
+      const timestamp = new Date().toISOString().replace('T', ' ').replace(/\..+/, '')
+      const displayName = sessionInfo.displayName || sessionId
+      const sessionType = isGroup ? 'group' : 'private'
+
+      const lines: string[] = []
+
+      // 文件头注释
+      lines.push('-- ============================================================')
+      lines.push('-- 密语 CipherTalk - 聊天记录导出')
+      lines.push(`-- 生成时间: ${timestamp}`)
+      lines.push(`-- 会话: ${displayName}`)
+      lines.push(`-- 类型: ${isGroup ? '群聊' : '私聊'}`)
+      lines.push(`-- 消息数: ${allMessages.length}`)
+      lines.push('-- PostgreSQL 兼容 SQL 脚本')
+      lines.push('-- ============================================================')
+      lines.push('')
+
+      // 建表
+      lines.push('-- 清空旧数据（如有）')
+      lines.push(`DELETE FROM messages WHERE session_wxid = ${this.escapeSql(displayName)};`)
+      lines.push(`DELETE FROM sessions WHERE wxid = ${this.escapeSql(displayName)};`)
+      lines.push('')
+
+      lines.push('-- 创建会话表')
+      lines.push('CREATE TABLE IF NOT EXISTS sessions (')
+      lines.push('  wxid TEXT PRIMARY KEY,')
+      lines.push('  display_name TEXT NOT NULL,')
+      lines.push('  session_type TEXT NOT NULL,')
+      lines.push('  owner_id TEXT,')
+      lines.push('  message_count INTEGER DEFAULT 0,')
+      lines.push('  first_message_time BIGINT,')
+      lines.push('  last_message_time BIGINT,')
+      lines.push('  exported_at BIGINT')
+      lines.push(');')
+      lines.push('')
+
+      lines.push('-- 创建消息表')
+      lines.push('CREATE TABLE IF NOT EXISTS messages (')
+      lines.push('  id SERIAL PRIMARY KEY,')
+      lines.push('  session_wxid TEXT NOT NULL REFERENCES sessions(wxid),')
+      lines.push('  local_id INTEGER,')
+      lines.push('  create_time BIGINT NOT NULL,')
+      lines.push('  formatted_time TEXT,')
+      lines.push('  msg_type TEXT,')
+      lines.push('  content TEXT,')
+      lines.push('  is_send SMALLINT DEFAULT 0,')
+      lines.push('  sender_username TEXT,')
+      lines.push('  sender_display_name TEXT,')
+      lines.push('  group_nickname TEXT,')
+      lines.push('  reply_to_message_id TEXT')
+      lines.push(');')
+      lines.push('')
+
+      // 索引
+      lines.push('-- 创建索引')
+      lines.push('CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_wxid);')
+      lines.push('CREATE INDEX IF NOT EXISTS idx_messages_create_time ON messages(create_time);')
+      lines.push('CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_username);')
+      lines.push('')
+
+      // 插入会话
+      lines.push('-- 插入会话信息')
+      const sessCols = ['wxid', 'display_name', 'session_type', 'owner_id', 'message_count', 'first_message_time', 'last_message_time', 'exported_at']
+      const sessVals = [
+        this.escapeSql(displayName),
+        this.escapeSql(displayName),
+        this.escapeSql(sessionType),
+        this.escapeSql(cleanedMyWxid),
+        String(allMessages.length),
+        firstMessageTime !== null ? String(firstMessageTime) : 'NULL',
+        lastMessageTime !== null ? String(lastMessageTime) : 'NULL',
+        String(now)
+      ]
+      lines.push(`INSERT INTO sessions (${sessCols.join(', ')}) VALUES (${sessVals.join(', ')});`)
+      lines.push('')
+
+      if (allMessages.length > 0) {
+        lines.push('-- 插入消息')
+        lines.push(`-- 共 ${allMessages.length} 条消息，分批插入`)
+        lines.push('')
+
+        const msgCols = ['session_wxid', 'local_id', 'create_time', 'formatted_time', 'msg_type', 'content', 'is_send', 'sender_username', 'sender_display_name', 'group_nickname', 'reply_to_message_id']
+        const BATCH_SIZE = 500
+
+        for (let i = 0; i < allMessages.length; i += BATCH_SIZE) {
+          const batch = allMessages.slice(i, i + BATCH_SIZE)
+          const valueRows = batch.map(msg => {
+            const vals = [
+              this.escapeSql(displayName),
+              String(msg.localId),
+              String(msg.createTime),
+              this.escapeSql(msg.formattedTime),
+              this.escapeSql(msg.msgType),
+              this.escapeSql(msg.content),
+              String(msg.isSend),
+              this.escapeSql(msg.senderUsername),
+              this.escapeSql(msg.senderDisplayName),
+              msg.groupNickname ? this.escapeSql(msg.groupNickname) : 'NULL',
+              msg.replyToMessageId ? this.escapeSql(msg.replyToMessageId) : 'NULL'
+            ]
+            return `(${vals.join(', ')})`
+          })
+
+          lines.push(`INSERT INTO messages (${msgCols.join(', ')}) VALUES`)
+          lines.push(valueRows.join(',\n') + ';')
+          lines.push('')
+        }
+      }
+
+      // 末尾注释
+      lines.push('-- 导出完成')
+      lines.push(`-- 会话: ${displayName} | ${allMessages.length} 条消息`)
+
+      fs.writeFileSync(outputPath, lines.join('\n'), 'utf-8')
+
+      return { success: true }
+    } catch (e) {
+      console.error('ExportService: SQL 导出失败:', e)
+      return { success: false, error: String(e) }
+    }
+  }
+
+  /**
+   * SQL 字符串转义（单引号加倍）
+   */
+  private escapeSql(value: string | number | undefined | null): string {
+    if (value === undefined || value === null) return 'NULL'
+    const str = String(value).replace(/'/g, "''")
+    return `'${str}'`
+  }
+
+  /**
+   * 获取聊天记录消息的中文类型名
+   */
+  private getMessageLocalTypeName(localType: number): string {
+    const typeNames: Record<number, string> = {
+      1: '文本消息',
+      3: '图片消息',
+      34: '语音消息',
+      43: '视频消息',
+      47: '表情消息',
+      49: '引用/文件/链接消息',
+      10000: '系统消息',
+      436207665: '红包消息',
+      419430449: '转账消息',
+      268445553: '拍一拍消息',
+      266287972401: '消息撤回'
+    }
+    return typeNames[localType] || `其他消息(${localType})`
+  }
+
+  /**
    * 批量导出多个会话
    */
   async exportSessions(
@@ -2093,6 +2373,7 @@ class ExportService {
         if (options.format === 'chatlab-jsonl') ext = '.jsonl'
         else if (options.format === 'excel') ext = '.xlsx'
         else if (options.format === 'html') ext = '.html'
+        else if (options.format === 'sql') ext = '.sql'
 
         // 当导出媒体时，创建会话子文件夹，把文件和媒体都放进去
         const hasMedia = options.exportImages || options.exportVideos || options.exportEmojis || options.exportVoices
@@ -2135,6 +2416,8 @@ class ExportService {
           result = await this.exportSessionToExcel(sessionId, outputPath, exportOpts)
         } else if (options.format === 'html') {
           result = await this.exportSessionToHtml(sessionId, outputPath, exportOpts)
+        } else if (options.format === 'sql') {
+          result = await this.exportSessionToSql(sessionId, outputPath, exportOpts)
         } else {
           result = { success: false, error: `不支持的格式: ${options.format}` }
         }
