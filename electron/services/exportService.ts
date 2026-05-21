@@ -4,7 +4,7 @@ import * as https from 'https'
 import * as http from 'http'
 import { ConfigService } from './config'
 import { voiceTranscribeService } from './voiceTranscribeService'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import { HtmlExportGenerator } from './htmlExportGenerator'
 import { imageDecryptService } from './imageDecryptService'
 import { videoService } from './videoService'
@@ -1790,47 +1790,43 @@ class ExportService {
         excelData.push(row)
       }
 
-      // 创建工作簿
-      const wb = XLSX.utils.book_new()
-      const ws = XLSX.utils.json_to_sheet(excelData)
-
-      // 设置列宽（根据是否导出头像和聊天记录动态调整）
-      const colWidths: any[] = [
-        { wch: 6 },   // 序号
-        { wch: 20 },  // 时间
-        { wch: 12 },  // 日期
-        { wch: 10 },  // 时刻
-        { wch: 6 },   // 星期
-        { wch: 15 },  // 发送者
-        { wch: 25 },  // 微信ID
-        { wch: 12 },  // 消息类型
-        { wch: 50 },  // 消息内容
-        { wch: 8 },   // 原始类型代码
-        { wch: 12 }   // 时间戳
-      ]
-
-      if (options.exportAvatars) {
-        colWidths.push({ wch: 50 })  // 头像链接
-      }
-
-      // 检查是否有聊天记录消息
-      const hasChatRecords = allMessages.some(msg => msg.chatRecordList && msg.chatRecordList.length > 0)
-      if (hasChatRecords) {
-        colWidths.push({ wch: 80 })  // 聊天记录详情
-      }
-
-      ws['!cols'] = colWidths
-
       // 添加工作表（工作表名称最多31个字符，且不能包含特殊字符）
       const sheetName = sessionInfo.displayName
         .substring(0, 31)
         .replace(/[:\\\/\?\*\[\]]/g, '_')
-      XLSX.utils.book_append_sheet(wb, ws, sheetName)
 
-      // 写入文件（使用 buffer 方式，避免 xlsx 直接写文件的问题）
+      // 检查是否有聊天记录消息
+      const hasChatRecords = allMessages.some(msg => msg.chatRecordList && msg.chatRecordList.length > 0)
+
+      // 创建工作簿，并设置列宽（根据是否导出头像和聊天记录动态调整）
+      const workbook = new ExcelJS.Workbook()
+      const worksheet = workbook.addWorksheet(sheetName)
+      worksheet.columns = [
+        { header: '序号', key: '序号', width: 6 },
+        { header: '时间', key: '时间', width: 20 },
+        { header: '日期', key: '日期', width: 12 },
+        { header: '时刻', key: '时刻', width: 10 },
+        { header: '星期', key: '星期', width: 6 },
+        { header: '发送者', key: '发送者', width: 15 },
+        { header: '微信ID', key: '微信ID', width: 25 },
+        { header: '消息类型', key: '消息类型', width: 12 },
+        { header: '消息内容', key: '消息内容', width: 50 },
+        { header: '原始类型代码', key: '原始类型代码', width: 8 },
+        { header: '时间戳', key: '时间戳', width: 12 },
+        ...(options.exportAvatars ? [{ header: '头像链接', key: '头像链接', width: 50 }] : []),
+        ...(hasChatRecords ? [{ header: '聊天记录详情', key: '聊天记录详情', width: 80 }] : [])
+      ]
+      worksheet.addRows(excelData)
+      worksheet.getRow(1).font = { bold: true }
+      worksheet.getColumn('消息内容').alignment = { wrapText: true, vertical: 'top' }
+      if (hasChatRecords) {
+        worksheet.getColumn('聊天记录详情').alignment = { wrapText: true, vertical: 'top' }
+      }
+
+      // 写入文件（使用 buffer 方式，避免直接写文件时被文件句柄占用影响）
       try {
-        const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' })
-        fs.writeFileSync(outputPath, wbout)
+        const workbookBuffer = await workbook.xlsx.writeBuffer()
+        fs.writeFileSync(outputPath, Buffer.from(workbookBuffer))
       } catch (writeError) {
         console.error('写入文件失败:', writeError)
         return { success: false, error: `文件写入失败: ${String(writeError)}` }
@@ -2198,8 +2194,8 @@ class ExportService {
 
       // 建表
       lines.push('-- 清空旧数据（如有）')
-      lines.push(`DELETE FROM messages WHERE session_wxid = ${this.escapeSql(displayName)};`)
-      lines.push(`DELETE FROM sessions WHERE wxid = ${this.escapeSql(displayName)};`)
+      lines.push(`DELETE FROM messages WHERE session_wxid = ${this.escapeSql(sessionId)};`)
+      lines.push(`DELETE FROM sessions WHERE wxid = ${this.escapeSql(sessionId)};`)
       lines.push('')
 
       lines.push('-- 创建会话表')
@@ -2243,7 +2239,7 @@ class ExportService {
       lines.push('-- 插入会话信息')
       const sessCols = ['wxid', 'display_name', 'session_type', 'owner_id', 'message_count', 'first_message_time', 'last_message_time', 'exported_at']
       const sessVals = [
-        this.escapeSql(displayName),
+        this.escapeSql(sessionId),
         this.escapeSql(displayName),
         this.escapeSql(sessionType),
         this.escapeSql(cleanedMyWxid),
@@ -2267,7 +2263,7 @@ class ExportService {
           const batch = allMessages.slice(i, i + BATCH_SIZE)
           const valueRows = batch.map(msg => {
             const vals = [
-              this.escapeSql(displayName),
+              this.escapeSql(sessionId),
               String(msg.localId),
               String(msg.createTime),
               this.escapeSql(msg.formattedTime),

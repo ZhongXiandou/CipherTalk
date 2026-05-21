@@ -60,6 +60,7 @@
     "electron-store": "^10.0.0",
     "electron-updater": "^6.3.9",
     "es-toolkit": "^1.46.1",
+    "exceljs": "^4.4.0",
     "ffmpeg-static": "^5.3.0",
     "fzstd": "^0.1.1",
     "https-proxy-agent": "^7.0.6",
@@ -79,7 +80,6 @@
     "silk-wasm": "^3.7.1",
     "sqlite-vec": "^0.1.9",
     "wechat-emojis": "^1.0.2",
-    "xlsx": "^0.18.5",
     "zod": "^4.1.12",
     "zustand": "^5.0.2"
   },
