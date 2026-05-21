@@ -418,6 +418,15 @@
     &--image {
       border-radius: 14px;
       overflow: hidden;
+
+      &.is-clickable {
+        cursor: pointer;
+        outline: none;
+      }
+
+      &.is-clickable:focus-visible {
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 36%, transparent);
+      }
     }
 
     &--image img {

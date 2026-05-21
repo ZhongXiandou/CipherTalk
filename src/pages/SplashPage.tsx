@@ -39,7 +39,7 @@ function SplashPage() {
       <div className="splash-content">
         <img
           className="splash-logo-img"
-          src="./Startup-Screen-Logo.png"
+          src="./About.png"
           alt="密语 CipherTalk"
         />
 

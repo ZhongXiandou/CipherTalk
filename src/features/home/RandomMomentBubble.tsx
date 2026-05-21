@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { AlertCircle, Loader2, Mic } from 'lucide-react'
 import type { Message } from '../../types/models'
+import { ImagePreview } from '../../components/ImagePreview'
 import MessageContent from '../../components/MessageContent'
 import { globalVoiceManager } from '../../pages/chat/components/messageBubble/mediaState'
 import { MOMENT_EMOJI_TYPE, MOMENT_IMAGE_TYPE, MOMENT_TEXT_TYPE, MOMENT_VOICE_TYPE } from './randomMoment'
@@ -11,18 +12,27 @@ type Props = { sessionId: string; message: Message }
 export function RandomMomentBubble({ sessionId, message }: Props) {
   const lt = message.localType
   const [imgSrc, setImgSrc] = useState('')
+  const [imagePreviewPath, setImagePreviewPath] = useState('')
+  const [imageLiveVideoPath, setImageLiveVideoPath] = useState<string | undefined>()
+  const [imagePreviewOpen, setImagePreviewOpen] = useState(false)
+  const [imageOriginRect, setImageOriginRect] = useState<{ left: number; top: number; width: number; height: number } | undefined>()
   const [voiceSrc, setVoiceSrc] = useState('')
   const [voiceLoading, setVoiceLoading] = useState(false)
   const [voicePlaying, setVoicePlaying] = useState(false)
   const [voiceError, setVoiceError] = useState('')
   const [emojiSrc, setEmojiSrc] = useState('')
   const [hint, setHint] = useState('')
+  const imageTriggerRef = useRef<HTMLDivElement>(null)
   const voiceRef = useRef<HTMLAudioElement>(null)
   const voicePlayPendingRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
     setImgSrc('')
+    setImagePreviewPath('')
+    setImageLiveVideoPath(undefined)
+    setImagePreviewOpen(false)
+    setImageOriginRect(undefined)
     setVoiceSrc('')
     setVoiceLoading(false)
     setVoicePlaying(false)
@@ -32,11 +42,46 @@ export function RandomMomentBubble({ sessionId, message }: Props) {
     setHint('')
 
     if (lt === MOMENT_IMAGE_TYPE) {
-      window.electronAPI.chat.getImageData(sessionId, String(message.localId), message.createTime).then((r) => {
-        if (cancelled) return
-        if (r.success && r.data) setImgSrc(`data:image/jpeg;base64,${r.data}`)
-        else setHint(r.error || '图片暂无法显示')
-      })
+      const payload = {
+        sessionId,
+        imageMd5: message.imageMd5 || undefined,
+        imageDatName: message.imageDatName || undefined,
+        createTime: message.createTime
+      }
+
+      const applyLocalImage = (localPath: string, liveVideoPath?: string) => {
+        setImgSrc(localPath)
+        setImagePreviewPath(localPath)
+        setImageLiveVideoPath(liveVideoPath)
+      }
+
+      const loadImage = async () => {
+        try {
+          const cached = await window.electronAPI.image.resolveCache(payload)
+          if (cancelled) return
+          if (cached.success && cached.localPath) {
+            applyLocalImage(cached.localPath, (cached as any).liveVideoPath)
+            return
+          }
+        } catch {
+          // 继续尝试解密
+        }
+
+        try {
+          const decrypted = await window.electronAPI.image.decrypt({ ...payload, force: false })
+          if (cancelled) return
+          if (decrypted.success && decrypted.localPath) {
+            applyLocalImage(decrypted.localPath, (decrypted as any).liveVideoPath)
+            return
+          }
+        } catch {
+          // 继续走 base64 兜底
+        }
+
+        if (!cancelled) setHint('图片暂无法显示')
+      }
+
+      void loadImage()
     } else if (lt === MOMENT_EMOJI_TYPE) {
       const cdn = message.emojiCdnUrl?.trim()
       if (cdn) {
@@ -76,6 +121,8 @@ export function RandomMomentBubble({ sessionId, message }: Props) {
     message.localType,
     message.createTime,
     lt,
+    message.imageMd5,
+    message.imageDatName,
     message.emojiCdnUrl,
     message.emojiMd5,
     message.productId,
@@ -154,6 +201,22 @@ export function RandomMomentBubble({ sessionId, message }: Props) {
     }
   }, [handlePlayVoice])
 
+  const handleOpenImage = useCallback(() => {
+    if (!imagePreviewPath) return
+    const rect = imageTriggerRef.current?.getBoundingClientRect()
+    setImageOriginRect(rect
+      ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+      : undefined)
+    setImagePreviewOpen(true)
+  }, [imagePreviewPath])
+
+  const handleImageKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      handleOpenImage()
+    }
+  }, [handleOpenImage])
+
   if (lt === MOMENT_TEXT_TYPE) {
     const text = (message.parsedContent || '').trim()
     return text ? (
@@ -165,13 +228,34 @@ export function RandomMomentBubble({ sessionId, message }: Props) {
 
   if (lt === MOMENT_IMAGE_TYPE) {
     return (
-      <div className="random-moment-media random-moment-media--image">
-        {imgSrc ? (
-          <img src={imgSrc} alt="" />
-        ) : (
-          <span className="random-moment-media-hint">{hint || '加载图片…'}</span>
+      <>
+        <div
+          ref={imageTriggerRef}
+          className={`random-moment-media random-moment-media--image ${imagePreviewPath ? 'is-clickable' : ''}`}
+          role={imagePreviewPath ? 'button' : undefined}
+          tabIndex={imagePreviewPath ? 0 : undefined}
+          title={imagePreviewPath ? '放大图片' : undefined}
+          onClick={imagePreviewPath ? handleOpenImage : undefined}
+          onKeyDown={imagePreviewPath ? handleImageKeyDown : undefined}
+        >
+          {imgSrc ? (
+            <img src={imgSrc} alt="" />
+          ) : (
+            <span className="random-moment-media-hint">{hint || '加载图片…'}</span>
+          )}
+        </div>
+        {imagePreviewOpen && imagePreviewPath && (
+          <ImagePreview
+            src={imagePreviewPath}
+            liveVideoPath={imageLiveVideoPath}
+            originRect={imageOriginRect}
+            onClose={() => {
+              setImagePreviewOpen(false)
+              setImageOriginRect(undefined)
+            }}
+          />
         )}
-      </div>
+      </>
     )
   }
 

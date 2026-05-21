@@ -531,14 +531,9 @@
 
     &:hover {
       background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.25) 0%, rgba(var(--primary-rgb), 0.1) 100%);
-      transform: translateY(-4px);
       box-shadow:
         0 12px 24px rgba(var(--primary-rgb), 0.2),
         inset 0 4px 12px -2px rgba(255, 255, 255, 0.5);
-    }
-
-    &:active {
-      transform: translateY(0);
     }
   }
 }
@@ -586,7 +581,7 @@
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 0;
   padding-bottom: 32px;
 
   .load-more-sentinel {
@@ -617,16 +612,14 @@
 }
 
 .post-item {
-  background: var(--bg-card);
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 12px;
-  border: 1px solid var(--border-color);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
-
-  &:hover {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
-  }
+  background: transparent;
+  border-radius: 0;
+  padding: 20px 0;
+  margin-bottom: 0;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  box-shadow: none;
+  overflow: visible;
 }
 
 .post-header {
@@ -783,12 +776,12 @@
   .media-item {
     position: relative;
     cursor: pointer;
-    border-radius: 8px;
+    border-radius: 20px;
     overflow: hidden;
     background: transparent;
     isolation: isolate;
     contain: paint;
-    transition: transform 0.18s ease;
+    transform: none;
 
     // Aspect ratio preservation
     aspect-ratio: 1;
@@ -804,6 +797,8 @@
       box-shadow: none;
       border-radius: inherit;
       transition: transform 0.18s ease;
+      transform-origin: center;
+      will-change: transform;
     }
 
     &:hover,
@@ -811,7 +806,7 @@
     &:focus-visible,
     &:active {
       z-index: 2;
-      border: none !important;
+      transform: none;
       outline: none !important;
       box-shadow: none !important;
     }
@@ -827,6 +822,7 @@
       border: none !important;
       outline: none !important;
       box-shadow: none !important;
+      transform: scale(1.035);
     }
 
     // Frosted glass play icon for video
@@ -1000,17 +996,18 @@
   align-items: stretch;
   gap: 0;
   background: transparent;
-  border-radius: 12px;
+  border-radius: 20px;
   padding: 0;
   margin-bottom: 12px;
   cursor: pointer;
   border: none;
   box-shadow: none;
   overflow: hidden;
-  transition: transform 0.18s ease;
 
   &:hover {
-    transform: translateY(-1px);
+    .share-card-thumb img {
+      transform: scale(1.04);
+    }
   }
 
   &.is-music {
@@ -1038,6 +1035,9 @@
       width: 100%;
       height: 100%;
       object-fit: cover;
+      transition: transform 0.2s ease;
+      transform-origin: center;
+      will-change: transform;
     }
 
     .share-placeholder {
@@ -1157,7 +1157,7 @@
 // 视频号卡片
 .post-finder-card {
   background: var(--bg-tertiary);
-  border-radius: 8px;
+  border-radius: 20px;
   overflow: hidden;
   margin-bottom: 12px;
   max-width: 280px;
@@ -1165,7 +1165,9 @@
   transition: background 0.2s;
 
   &:hover {
-    background: var(--hover-bg);
+    .finder-cover img {
+      transform: scale(1.04);
+    }
   }
 
   .finder-cover {
@@ -1179,6 +1181,9 @@
       width: 100%;
       height: 100%;
       object-fit: cover;
+      transition: transform 0.2s ease;
+      transform-origin: center;
+      will-change: transform;
     }
 
     .share-placeholder {
@@ -1257,13 +1262,16 @@
 }
 
 .post-interactions {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
   background: var(--bg-secondary);
-  border-radius: 4px;
+  border-radius: 20px;
   padding: 8px 10px;
   font-size: 13px;
   color: var(--text-secondary);
   margin-top: 8px;
-  position: relative;
 
   // Triangle pointer
   &::before {
@@ -1405,14 +1413,9 @@
 
     &:hover {
       background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.25) 0%, rgba(var(--primary-rgb), 0.1) 100%);
-      transform: translateY(-1px);
       box-shadow:
         0 6px 20px rgba(var(--primary-rgb), 0.2),
         inset 0 4px 12px -2px rgba(255, 255, 255, 0.5);
-    }
-
-    &:active {
-      transform: translateY(0);
     }
   }
 
@@ -1649,7 +1652,6 @@ html[data-window-platform="darwin"] .moments-window .title-actions {
 
   &:hover:not(:disabled) {
     opacity: 0.9;
-    transform: translateY(-1px);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   }
 
@@ -1771,7 +1773,6 @@ html[data-window-platform="darwin"] .moments-window .title-actions {
             .picker-trigger {
               width: 100%;
               height: 38px;
-              background: var(--bg-primary);
               border: 1px solid var(--border-color);
 
               &:hover {
@@ -1920,11 +1921,6 @@ html[data-window-platform="darwin"] .moments-window .title-actions {
           box-shadow:
             0 6px 20px rgba(var(--primary-rgb), 0.3),
             inset 0 4px 12px rgba(255, 255, 255, 0.4);
-          transform: translateY(-1px);
-        }
-
-        &:active {
-          transform: translateY(0);
         }
       }
     }

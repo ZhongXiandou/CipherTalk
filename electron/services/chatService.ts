@@ -5162,6 +5162,70 @@ class ChatService extends EventEmitter {
   }
 
   /**
+   * 从指定消息库/表读取消息。
+   * randomMomentService 会先在具体表中抽样；这里必须用同一张表还原，避免 local_id 跨库/跨表重复导致消息和会话错配。
+   */
+  public async getMessageByLocalIdFromTable(
+    sessionId: string,
+    localId: number,
+    tableName: string,
+    dbPath: string
+  ): Promise<{ success: boolean; message?: Message; error?: string }> {
+    try {
+      const hasName2IdTable = await this.checkTableExists(dbPath, 'Name2Id')
+      const myWxid = this.configService.get('myWxid')
+      const cleanedMyWxid = myWxid ? this.cleanAccountDirName(myWxid) : ''
+      const myRowId = await this.resolveMyRowId(dbPath, myWxid, cleanedMyWxid, hasName2IdTable)
+      const qTable = quoteIdent(tableName)
+
+      let row: any
+      if (hasName2IdTable && myRowId !== null) {
+        row = await dbAdapter.get<any>(
+          'message',
+          dbPath,
+          `SELECT m.*,
+                  CASE WHEN m.real_sender_id = ? THEN 1 ELSE 0 END AS computed_is_send,
+                  n.user_name AS sender_username
+           FROM ${qTable} m
+           LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+           WHERE m.local_id = ?`,
+          [myRowId, localId]
+        )
+      } else if (hasName2IdTable) {
+        row = await dbAdapter.get<any>(
+          'message',
+          dbPath,
+          `SELECT m.*, n.user_name AS sender_username
+           FROM ${qTable} m
+           LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+           WHERE m.local_id = ?`,
+          [localId]
+        )
+      } else {
+        row = await dbAdapter.get<any>(
+          'message',
+          dbPath,
+          `SELECT * FROM ${qTable} WHERE local_id = ?`,
+          [localId]
+        )
+      }
+
+      if (!row) {
+        return { success: false, error: 'Message not found' }
+      }
+
+      const message = this.rowToMessage(row)
+      if (!this.isMessageVisibleForSession(sessionId, message)) {
+        return { success: false, error: 'Message does not belong to session' }
+      }
+
+      return { success: true, message }
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+  }
+
+  /**
    * 获取图片数据（base64）。
    * 与 WeFlow 一致，作为聊天页图片渲染的 localId 兜底通道。
    */

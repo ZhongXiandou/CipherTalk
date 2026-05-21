@@ -1395,8 +1395,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
 .feed-hd .info{font-size:13px;color:var(--t3)}
 
 /* 帖子卡片 - 头像+内容双列 */
-.post{background:var(--card);border-radius:20px;border:1px solid var(--border);padding:24px;margin-bottom:24px;display:flex;gap:20px;box-shadow:0 2px 12px rgba(0,0,0,.03);transition:transform .2s,box-shadow .2s;backdrop-filter:blur(10px)}
-.post:hover{transform:translateY(-2px);box-shadow:0 12px 24px rgba(0,0,0,.08)}
+.post{background:var(--card);border-radius:20px;border:1px solid var(--border);padding:24px;margin-bottom:24px;display:flex;gap:20px;box-shadow:0 2px 12px rgba(0,0,0,.03);backdrop-filter:blur(10px);overflow:hidden}
+.post:hover{box-shadow:0 2px 12px rgba(0,0,0,.03)}
 .avatar{width:52px;height:52px;border-radius:14px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600;flex-shrink:0;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,.1)}
 .avatar img{width:100%;height:100%;object-fit:cover}
 .body{flex:1;min-width:0}

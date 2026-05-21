@@ -388,7 +388,6 @@
     height: auto;
     overflow: hidden;
     margin-bottom: 18px;
-    filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.12));
 
     img {
       width: 100%;
@@ -2312,7 +2311,6 @@
   .stt-instructions,
   .stt-online-settings,
   .log-file-item,
-  .about-card,
   .activation-status-card,
   .device-info-card {
     border-radius: var(--settings-card-radius);

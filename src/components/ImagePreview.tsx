@@ -1,24 +1,89 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react'
+import React, { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react'
 import { X } from 'lucide-react'
 import { LivePhotoIcon } from './LivePhotoIcon'
 import { createPortal } from 'react-dom'
 import './ImagePreview.scss'
 
+export interface ImagePreviewOriginRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
 interface ImagePreviewProps {
   src: string
   isVideo?: boolean
   liveVideoPath?: string
+  originRect?: ImagePreviewOriginRect
   onClose: () => void
 }
 
-export const ImagePreview: React.FC<ImagePreviewProps> = ({ src, isVideo, liveVideoPath, onClose }) => {
+type EntryPhase = 'measuring' | 'from' | 'to' | 'settled'
+
+export const ImagePreview: React.FC<ImagePreviewProps> = ({ src, isVideo, liveVideoPath, originRect, onClose }) => {
   const [scale, setScale] = useState(1)
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
   const [showLive, setShowLive] = useState(false)
+  const [entryPhase, setEntryPhase] = useState<EntryPhase>(originRect ? 'measuring' : 'settled')
+  const [entryTransform, setEntryTransform] = useState({ x: 0, y: 0, scaleX: 1, scaleY: 1 })
+  const [mediaReady, setMediaReady] = useState(!originRect || Boolean(isVideo))
   const dragStart = useRef({ x: 0, y: 0 })
   const positionStart = useRef({ x: 0, y: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    setScale(1)
+    setPosition({ x: 0, y: 0 })
+    setShowLive(false)
+    setMediaReady(!originRect || Boolean(isVideo))
+    setEntryPhase(originRect ? 'measuring' : 'settled')
+  }, [isVideo, originRect, src])
+
+  useLayoutEffect(() => {
+    if (!originRect || !mediaReady) return
+
+    const content = contentRef.current
+    if (!content) return
+
+    const finalRect = content.getBoundingClientRect()
+    if (!finalRect.width || !finalRect.height || !originRect.width || !originRect.height) {
+      setEntryPhase('settled')
+      return
+    }
+
+    const originCenterX = originRect.left + originRect.width / 2
+    const originCenterY = originRect.top + originRect.height / 2
+    const finalCenterX = finalRect.left + finalRect.width / 2
+    const finalCenterY = finalRect.top + finalRect.height / 2
+
+    setEntryTransform({
+      x: originCenterX - finalCenterX,
+      y: originCenterY - finalCenterY,
+      scaleX: originRect.width / finalRect.width,
+      scaleY: originRect.height / finalRect.height
+    })
+    setEntryPhase('from')
+
+    let frameB = 0
+    let timeoutId = 0
+    const frameA = requestAnimationFrame(() => {
+      frameB = requestAnimationFrame(() => {
+        setEntryPhase('to')
+        timeoutId = window.setTimeout(() => {
+          setEntryPhase('settled')
+        }, 360)
+      })
+    })
+
+    return () => {
+      cancelAnimationFrame(frameA)
+      cancelAnimationFrame(frameB)
+      window.clearTimeout(timeoutId)
+    }
+  }, [mediaReady, originRect])
 
   // 滚轮缩放
   const handleWheel = useCallback((e: React.WheelEvent) => {
@@ -75,20 +140,45 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({ src, isVideo, liveVi
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [onClose])
 
+  const isEnteringFromOrigin = originRect && entryPhase !== 'settled'
+  const overlayClassName = [
+    'image-preview-overlay',
+    entryPhase === 'from' || entryPhase === 'measuring' ? '' : 'is-entered'
+  ].filter(Boolean).join(' ')
+  const contentClassName = [
+    'preview-content',
+    entryPhase === 'measuring' ? 'is-measuring' : '',
+    isEnteringFromOrigin ? 'is-origin-transitioning' : ''
+  ].filter(Boolean).join(' ')
+  const baseTranslate = entryPhase === 'from'
+    ? {
+        x: entryTransform.x + position.x,
+        y: entryTransform.y + position.y,
+        scaleX: entryTransform.scaleX,
+        scaleY: entryTransform.scaleY
+      }
+    : {
+        x: position.x,
+        y: position.y,
+        scaleX: 1,
+        scaleY: 1
+      }
+
   return createPortal(
     <div
       ref={containerRef}
-      className="image-preview-overlay"
+      className={overlayClassName}
       onClick={handleOverlayClick}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
     >
       <div
-        className="preview-content"
+        ref={contentRef}
+        className={contentClassName}
         style={{
           position: 'relative',
-          transform: `translate(${position.x}px, ${position.y}px)`,
+          transform: `translate(${baseTranslate.x}px, ${baseTranslate.y}px) scale(${baseTranslate.scaleX}, ${baseTranslate.scaleY})`,
           width: 'fit-content',
           height: 'fit-content'
         }}
@@ -106,6 +196,7 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({ src, isVideo, liveVi
               maxHeight: '90vh',
               maxWidth: '90vw'
             }}
+            onLoadedMetadata={() => setMediaReady(true)}
           />
         ) : (
           <img
@@ -121,6 +212,7 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({ src, isVideo, liveVi
             onWheel={handleWheel}
             onMouseDown={handleMouseDown}
             onDoubleClick={handleDoubleClick}
+            onLoad={() => setMediaReady(true)}
             draggable={false}
           />
         )}

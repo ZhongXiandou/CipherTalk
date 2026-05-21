@@ -6,7 +6,7 @@
  *
  * 时间点查询走 createTime 范围索引，远快于 ORDER BY RANDOM() 全表扫描。
  * 文本消息至少 5 字符（过滤"嗯"/"好的"类），图/语音/表情不限。
- * 兜底：原有穷举扫描，无质量限制，保证一定能返回结果。
+ * 兜底：原有穷举扫描，仍排除低价值自动提示，保证一定能返回有效回忆。
  */
 import { dbAdapter } from './dbAdapter'
 import { quoteIdent } from './statsSqlHelpers'
@@ -77,16 +77,45 @@ function shuffleInPlace<T>(arr: T[]): void {
   }
 }
 
-function isIncomingMoment(msg: Message | undefined): boolean {
+function isIncomingMoment(msg: Message | null | undefined): boolean {
   if (!msg) return false
   if (msg.isSend === 1) return false
   return (MOMENT_LOCAL_TYPES as readonly number[]).includes(msg.localType)
 }
 
-function isQualityMessage(msg: Message | undefined): boolean {
-  if (!isIncomingMoment(msg)) return false
+function normalizeNoticeText(text: string): string {
+  return text.replace(/\s+/g, '').replace(/[，,。.!！?？:：；;]/g, '')
+}
+
+function isFriendVerificationNotice(msg: Message | null | undefined): boolean {
+  if (!msg || msg.localType !== 1) return false
+  const text = normalizeNoticeText(msg.parsedContent || msg.rawContent || '')
+  if (!text) return false
+
+  return (
+    (text.includes('通过了你的朋友验证请求') && text.includes('现在我们可以开始聊天了')) ||
+    (text.includes('你已添加了') && text.includes('现在可以开始聊天了'))
+  )
+}
+
+function isMomentCandidate(msg: Message | null | undefined): boolean {
+  return isIncomingMoment(msg) && !isFriendVerificationNotice(msg)
+}
+
+function isQualityMessage(msg: Message | null | undefined): boolean {
+  if (!isMomentCandidate(msg)) return false
   if (msg!.localType === 1) return (msg!.parsedContent || '').trim().length >= MIN_TEXT_CHARS
   return true
+}
+
+async function getMessageFromSampledTable(
+  sessionId: string,
+  localId: number,
+  tableName: string,
+  dbPath: string
+): Promise<Message | null> {
+  const got = await chatService.getMessageByLocalIdFromTable(sessionId, localId, tableName, dbPath)
+  return got.success && got.message ? got.message : null
 }
 
 // ─── 三级随机：单会话一次抽取 ─────────────────────────────────────────────────
@@ -129,8 +158,8 @@ async function pickOneFromSession(sessionId: string): Promise<Message | null> {
           for (const r of rows) {
             const localId = Number(r.local_id)
             if (!Number.isFinite(localId)) continue
-            const got = await chatService.getMessageByLocalId(sessionId, localId)
-            if (got.success && got.message && isQualityMessage(got.message)) return got.message
+            const msg = await getMessageFromSampledTable(sessionId, localId, tableName, dbPath)
+            if (isQualityMessage(msg)) return msg
           }
         }
       } else {
@@ -143,8 +172,8 @@ async function pickOneFromSession(sessionId: string): Promise<Message | null> {
         if (row?.local_id == null) continue
         const localId = Number(row.local_id)
         if (!Number.isFinite(localId)) continue
-        const got = await chatService.getMessageByLocalId(sessionId, localId)
-        if (got.success && got.message && isQualityMessage(got.message)) return got.message
+        const msg = await getMessageFromSampledTable(sessionId, localId, tableName, dbPath)
+        if (isQualityMessage(msg)) return msg
       }
     } catch { /* 跳过该表，尝试下一张 */ }
   }
@@ -183,8 +212,8 @@ async function scanTableByRowid(sessionId: string, tableName: string, dbPath: st
     for (const r of batch) {
       const localId = Number(r.local_id)
       if (!Number.isFinite(localId)) continue
-      const got = await chatService.getMessageByLocalId(sessionId, localId)
-      if (got.success && got.message && isIncomingMoment(got.message)) return got.message
+      const msg = await getMessageFromSampledTable(sessionId, localId, tableName, dbPath)
+      if (isMomentCandidate(msg)) return msg
     }
     if (scanned >= MAX_ROWS_SCAN_PER_TABLE) break
   }
@@ -220,8 +249,8 @@ async function scanTableByOffset(sessionId: string, tableName: string, dbPath: s
     for (const r of batch) {
       const localId = Number(r.local_id)
       if (!Number.isFinite(localId)) continue
-      const got = await chatService.getMessageByLocalId(sessionId, localId)
-      if (got.success && got.message && isIncomingMoment(got.message)) return got.message
+      const msg = await getMessageFromSampledTable(sessionId, localId, tableName, dbPath)
+      if (isMomentCandidate(msg)) return msg
     }
     if (scanned >= MAX_ROWS_SCAN_PER_TABLE) break
   }

@@ -794,7 +794,7 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
       const win = new BrowserWindow({
         width: 800,
         height: 600,
-        minWidth: 400,
+        minWidth: 560,
         minHeight: 300,
         ...getWindowIconOptions(ctx),
         webPreferences: {

@@ -183,7 +183,7 @@ export function registerWindowHandlers(ctx: MainProcessContext): void {
         targetHeight = Math.floor(targetHeight * ratio)
       }
 
-      const finalWidth = Math.max(targetWidth, 400)
+      const finalWidth = Math.max(targetWidth, 560)
       const finalHeight = Math.max(targetHeight, 300)
 
       win.setSize(finalWidth, finalHeight)
