@@ -39,34 +39,16 @@ function AboutTab({
               <p className="update-hint">
                 {isDownloading ? `正在下载 v${updateInfo.version}` : updateInfo.forceUpdate ? '检测到强制更新' : `新版本 v${updateInfo.version} 可用`}
               </p>
-              <p className="update-hint">
-                更新来源：{updateInfo.updateSource === 'github' ? 'GitHub Release' : '未知'} / 策略来源：
-                {updateInfo.policySource === 'github' ? 'GitHub' : updateInfo.policySource === 'custom' ? '自定义源' : '无'}
-              </p>
-              {updateInfo.forceUpdate && updateInfo.minimumSupportedVersion && (
-                <p className="update-hint">最低安全版本：v{updateInfo.minimumSupportedVersion}</p>
-              )}
-              {updateInfo.diagnostics && (
-                <div className="update-hint" style={{ marginTop: '8px' }}>
-                  更新诊断：{updateInfo.diagnostics.phase}
-                  {updateInfo.diagnostics.fallbackToFull ? ' / 已从差分回退到全量' : ''}
-                  {updateInfo.diagnostics.lastEvent ? <><br />最近事件：{updateInfo.diagnostics.lastEvent}</> : null}
-                  {updateInfo.diagnostics.lastError ? <><br />最近错误：{updateInfo.diagnostics.lastError}</> : null}
-                  <br />
-                  详细诊断请查看日志文件中的 AppUpdate 记录。
-                </div>
-              )}
               {isDownloading ? (
                 <ProgressBar
                   value={downloadProgress}
                   label={`${downloadProgress.toFixed(0)}%`}
                   meta={(
                     <>
-                    <span>
-                      {formatFileSize(downloadProgressDetail?.transferred ?? updateInfo.diagnostics?.downloadedBytes ?? 0)} / {formatFileSize(downloadProgressDetail?.total ?? updateInfo.diagnostics?.totalBytes ?? 0)}
-                    </span>
-                    <span>速度 {formatSpeed(downloadProgressDetail?.bytesPerSecond ?? 0)}</span>
-                    {updateInfo.diagnostics?.fallbackToFull ? <span>已回退全量下载</span> : null}
+                      <span>
+                        {formatFileSize(downloadProgressDetail?.transferred ?? updateInfo.diagnostics?.downloadedBytes ?? 0)} / {formatFileSize(downloadProgressDetail?.total ?? updateInfo.diagnostics?.totalBytes ?? 0)}
+                      </span>
+                      <span>速度 {formatSpeed(downloadProgressDetail?.bytesPerSecond ?? 0)}</span>
                     </>
                   )}
                 />
