@@ -57,7 +57,6 @@ export const SYSTEM_USERNAME_PREFIXES = [
 
 export const SYSTEM_USERNAME_CONTAINS = [
   '@kefu.openim',
-  '@openim',
   '@app',
 ]
 

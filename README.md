@@ -7,21 +7,40 @@
 **一款现代化的微信聊天记录查看与分析工具**
 
 [![License](https://img.shields.io/badge/license-CC--BY--NC--SA--4.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-6.0.7-green.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-6.0.8-green.svg)](package.json)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6.svg?logo=windows)]()
 [![Electron](https://img.shields.io/badge/Electron-39-47848F.svg?logo=electron)]()
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg?logo=react)]()
 [![Telegram](https://img.shields.io/badge/Telegram-Join%20Group-26A5E4.svg?logo=telegram)](https://t.me/CipherTalk)
 
-[在线说明文档](https://ilovebinglu.notion.site/ciphertalk)
+[![使用教程](https://img.shields.io/badge/使用教程-阅读文档-000000?style=for-the-badge&logo=notion&logoColor=white)](https://ilovebinglu.notion.site/ciphertalk)
 
-[功能特性](#-功能特性) • [快速开始](#-快速开始) • [技术栈](#️-技术栈) • [贡献指南](#-贡献指南) • [许可证](#-许可证)
-[![Verified on MseeP](https://mseep.ai/badge.svg)](https://mseep.ai/app/d00c9dc5-12ec-4594-895c-342550430b11)
+[功能特性](#-功能特性) • [快速开始](#-快速开始) • [技术栈](#️-技术栈) • [贡献指南](#-贡献指南) • [许可证](#-许可证) • 
+[Verified on MseeP](https://mseep.ai/app/d00c9dc5-12ec-4594-895c-342550430b11)
 
 [MseeP.ai Security Assessment Badge](https://mseep.ai/app/ilovebinglu-ciphertalk)
 
 [![oosmetrics 分析加速排名前 5](https://api.oosmetrics.com/api/v1/badge/achievement/c3d78809-e411-40e7-ba11-cc1d5ba76259.svg)](https://oosmetrics.com/repo/ILoveBingLu/CipherTalk)
+
+---
+
 </div>
+
+## 💖 赞助支持
+
+如果这个项目对你有帮助，欢迎通过爱发电支持我们的开发工作！
+
+<div align="center">
+
+<a href="https://afdian.com/a/ILoveBingLu">
+  <img src="aifadian.jpg" alt="爱发电" width="300" />
+</a>
+
+你的支持是我们持续更新的动力 ❤️
+
+</div>
+
+---
 
 ## 开发者愿景
 
@@ -46,29 +65,6 @@
 我也希望这款软件能帮助更多普通人重新掌握自己的 **数字人生**。聊天记录不该只是被困在某台设备里的碎片，它也可以是记忆的档案、关系的注脚、成长的年轮。
 
 无论是回望过去、整理生活、备份重要信息，还是在关键时刻还原事实、保护自己，这些数据都应该真正属于用户，而不是在设备更换、账号异常或时间流逝中悄然消失。
-
-<div align="center">
-
-## YouTube 使用教程
-
-[![观看使用教程](https://img.youtube.com/vi/ZpuO14UOJkc/0.jpg)](https://www.youtube.com/watch?v=ZpuO14UOJkc)
-</div>
-
----
-
-## 💖 赞助支持
-
-如果这个项目对你有帮助，欢迎通过爱发电支持我们的开发工作！
-
-<div align="center">
-
-<a href="https://afdian.com/a/ILoveBingLu">
-  <img src="aifadian.jpg" alt="爱发电" width="300" />
-</a>
-
-你的支持是我们持续更新的动力 ❤️
-
-</div>
 
 ---
 

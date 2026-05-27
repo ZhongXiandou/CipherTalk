@@ -53,6 +53,7 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
 
   const [senderAvatarUrl, setSenderAvatarUrl] = useState<string | undefined>(undefined)
   const [senderName, setSenderName] = useState<string | undefined>(undefined)
+  const [senderCorp, setSenderCorp] = useState<string | undefined>(undefined)
   const [transferPayerName, setTransferPayerName] = useState<string | undefined>(undefined)
   const [transferReceiverName, setTransferReceiverName] = useState<string | undefined>(undefined)
   const [emojiError, setEmojiError] = useState(false)
@@ -679,10 +680,11 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
   useEffect(() => {
     if (isGroupChat && !isSent && message.senderUsername) {
       setIsLoadingSender(true)
-      window.electronAPI.chat.getContactAvatar(message.senderUsername).then((result: { avatarUrl?: string; displayName?: string } | null) => {
+      window.electronAPI.chat.getContactAvatar(message.senderUsername).then((result: { avatarUrl?: string; displayName?: string; weComCorp?: string } | null) => {
         if (result) {
           setSenderAvatarUrl(result.avatarUrl)
           setSenderName(result.displayName)
+          setSenderCorp(result.weComCorp)
         }
         setIsLoadingSender(false)
       }).catch(() => {
@@ -2047,7 +2049,14 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
               {isLoadingSender ? (
                 <span className="sender-skeleton" />
               ) : (
-                senderName || '群成员'
+                <>
+                  {senderName || '群成员'}
+                  {message.senderUsername && message.senderUsername.includes('@openim') && !message.senderUsername.includes('@kefu.openim') && (
+                    senderCorp
+                      ? <span className="wecom-corp" title="企业微信">@{senderCorp}</span>
+                      : <span className="wecom-badge" title="企业微信">企</span>
+                  )}
+                </>
               )}
             </div>
           )}

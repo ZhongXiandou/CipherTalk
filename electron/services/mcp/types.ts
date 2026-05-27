@@ -239,6 +239,9 @@ export interface McpSessionItem extends McpSessionRef {
   unreadCount: number
   lastTimestamp: number
   lastTimestampMs: number
+  isPinned?: boolean
+  isCollapsed?: boolean
+  isFoldGroup?: boolean
 }
 
 export interface McpSessionsPayload {
