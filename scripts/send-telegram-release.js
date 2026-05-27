@@ -56,13 +56,41 @@ function guessFileNameFromUrl(url, contentType) {
   }
 }
 
-function markdownToPlainSummary(markdown) {
-  return String(markdown || '')
-    .replace(/^#+\s*/gm, '')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/[*_`>-]/g, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
+// 从 release-body.md 的一级标题 (## CipherTalk vX.X.X · 副标题) 中拿出副标题
+function extractSubtitle(markdown) {
+  const m = String(markdown || '').match(/^##\s+CipherTalk\s+v\S+\s*[·•:\|\-]\s*(.+)$/m)
+  return m ? m[1].trim() : ''
+}
+
+// 解析 ### 变更明细 下的 #### 新增 / #### 修复 / #### 调整 段，转为干净的 items
+function extractChangeSections(markdown) {
+  const lines = String(markdown || '').split('\n')
+  const sections = { added: [], fixed: [], changed: [] }
+  let current = null
+  for (const line of lines) {
+    const h4 = line.match(/^####\s+(.+?)\s*$/)
+    if (h4) {
+      const title = h4[1].trim()
+      if (title === '新增') current = 'added'
+      else if (title === '修复') current = 'fixed'
+      else if (title === '调整' || title === '其他') current = 'changed'
+      else current = null
+      continue
+    }
+    if (/^#{1,3}\s/.test(line)) { current = null; continue }
+    if (!current) continue
+    const item = line.match(/^-\s+(.+)$/)
+    if (!item) continue
+    let text = item[1].trim()
+    // 跳过占位说明
+    if (/本次没有/.test(text) || /本版本无/.test(text)) continue
+    // 去掉尾部 (短sha) 或（短sha）
+    text = text.replace(/\s*[（(]\s*[a-f0-9]{6,}\s*[）)]\s*$/i, '')
+    // 去掉 conventional commit 前缀 (feat:/fix:/chore:/...) 让正文更直白
+    text = text.replace(/^(feat|fix|chore|docs|refactor|style|perf|test|build|ci|release)(\([^)]*\))?\s*:\s*/i, '')
+    if (text) sections[current].push(text)
+  }
+  return sections
 }
 
 function getContext() {
@@ -79,8 +107,11 @@ function buildButtons(version) {
   return {
     inline_keyboard: [
       [
-        { text: '🌐 官网', url: 'https://miyu.aiqji.com' },
-        { text: '💻 GitHub 仓库', url: 'https://github.com/ILoveBingLu/CipherTalk' }
+        { text: '下载', url: `https://github.com/ILoveBingLu/CipherTalk/releases/tag/v${encodeURIComponent(version)}` },
+        { text: '官网', url: 'https://miyu.aiqji.com' }
+      ],
+      [
+        { text: '使用教程', url: 'https://ilovebinglu.notion.site/ciphertalk' }
       ]
     ]
   }
@@ -88,55 +119,51 @@ function buildButtons(version) {
 
 function buildSuccessMessage(context, releaseBody) {
   const version = context?.version || process.env.RELEASE_VERSION || 'unknown'
-  const blockedVersions = context?.forceUpdate?.blockedVersions || []
-  const minimumSupportedVersion = context?.forceUpdate?.minimumSupportedVersion || ''
-  const hasForceUpdate = Boolean(minimumSupportedVersion || blockedVersions.length > 0)
-  const summary = markdownToPlainSummary(releaseBody)
-    .split('\n')
-    .filter(Boolean)
-    .slice(0, 8)
-    .join('\n')
+  const subtitle = extractSubtitle(releaseBody)
+  const sections = extractChangeSections(releaseBody)
+  const commitCount = Array.isArray(context?.commits) ? context.commits.length : 0
+  const date = context?.generatedAt
+    ? new Date(context.generatedAt).toISOString().slice(0, 10)
+    : ''
 
-  const thanks = []
-  const primaryLogins = new Set(['ILoveBingLu'])
-  const primaryNames = new Set(['ILoveBingLu', 'BingLu', 'ILoveBinglu'])
-  for (const pr of context?.pullRequests || []) {
-    if (pr?.authorLogin && !primaryLogins.has(pr.authorLogin)) {
-      thanks.push(`🙏 感谢 @${pr.authorLogin} 提交 PR #${pr.number}`)
-    }
-  }
-  for (const commit of context?.commits || []) {
-    const hasPrRef = /#(\d+)/.test(commit.subject || '')
-    const authorName = String(commit.authorName || '').trim()
-    if (!hasPrRef && authorName && !primaryNames.has(authorName)) {
-      thanks.push(`🙏 感谢 ${authorName} 提交改动《${commit.subject}》`)
-    }
-  }
-
+  // 标题区：产品名 + 用 <code> 包装的版本号（"代码感"）+ 副标题
   const lines = [
-    `🚀 <b>CipherTalk v${escapeHtml(version)} 已发布</b>`,
-    '',
-    '📝 <b>本次更新摘要</b>',
-    escapeHtml(summary || '本次版本已完成发布，可点击下方按钮查看完整说明。'),
+    `<b>CipherTalk</b>  <code>v${escapeHtml(version)}</code>`
   ]
+  if (subtitle) lines.push(`<i>${escapeHtml(subtitle)}</i>`)
 
-  if (hasForceUpdate) {
-    lines.push('', '⚠️ <b>强制更新提醒</b>')
-    if (minimumSupportedVersion) {
-      lines.push(`- 最低安全版本：<code>${escapeHtml(minimumSupportedVersion)}</code>`)
-    }
-    if (blockedVersions.length) {
-      lines.push(`- 封禁版本：<code>${escapeHtml(blockedVersions.join(', '))}</code>`)
-    }
+  // 详细变更：用 <blockquote expandable> 折叠
+  // 让 blockquote 自身的左竖线作为分组视觉，分类用粗体标签 + › 列表 bullet
+  const block = []
+  const appendSection = (label, items) => {
+    if (!items.length) return
+    if (block.length) block.push('')
+    block.push(`<b>${label}</b>`)
+    for (const it of items) block.push(`  › ${escapeHtml(it)}`)
+  }
+  appendSection('新增', sections.added)
+  appendSection('修复', sections.fixed)
+  appendSection('调整', sections.changed)
+
+  if (block.length) {
+    lines.push('', `<blockquote expandable><b>更新内容</b>\n\n${block.join('\n')}</blockquote>`)
   }
 
-  lines.push('', '🔗 <b>相关链接</b>', `- GitHub Release：<a href="https://github.com/ILoveBingLu/CipherTalk/releases/tag/v${encodeURIComponent(version)}">查看发布说明</a>`)
+  // 底部元信息：提交数 · 发布日期
+  const meta = []
+  if (commitCount) meta.push(`${commitCount} commits`)
+  if (date) meta.push(date)
+  if (meta.length) lines.push('', `<i>${meta.join('  ·  ')}</i>`)
 
-  if (thanks.length) {
-    lines.push('', '🌟 <b>感谢贡献者</b>', ...thanks.map((line) => escapeHtml(line)))
+  // sendPhoto 的 caption 上限 1024 字符，超出时把可展开块截断并补全闭合标签
+  let text = lines.join('\n')
+  if (text.length > 1000) {
+    text = text.slice(0, 980).replace(/\s+$/, '') + '…'
+    const opens = (text.match(/<blockquote[^>]*>/g) || []).length
+    const closes = (text.match(/<\/blockquote>/g) || []).length
+    if (opens > closes) text += '</blockquote>'
   }
-
-  return lines.join('\n')
+  return text
 }
 
 function buildFailureMessage() {
@@ -145,12 +172,12 @@ function buildFailureMessage() {
     : ''
   const version = process.env.RELEASE_VERSION || process.env.GITHUB_REF_NAME || 'unknown'
   const lines = [
-    `❌ <b>CipherTalk ${escapeHtml(version)} 发布失败</b>`,
+    `<b>CipherTalk ${escapeHtml(version)} · 发布失败</b>`,
     '',
-    '请尽快检查 GitHub Actions 日志。'
+    '请查看 Actions 运行日志定位原因。'
   ]
   if (workflowUrl) {
-    lines.push('', `🔗 <a href="${workflowUrl}">查看失败日志</a>`)
+    lines.push('', `<a href="${workflowUrl}">打开运行日志</a>`)
   }
   return lines.join('\n')
 }

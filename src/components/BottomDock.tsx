@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Home, MessageSquare, BarChart3, Users, FileText, Database, Settings,
   Download, Aperture, Network, Bot, FileAudio, Boxes,
@@ -38,7 +38,10 @@ const makeIcon = (Icon: LucideIcon, gradient: string): ReactNode => (
 
 function BottomDock() {
   const navigate = useNavigate()
-  const autoHide = useThemeStore(s => s.dockAutoHide)
+  const location = useLocation()
+  const autoHideSetting = useThemeStore(s => s.dockAutoHide)
+  // 首页强制显示 Dock：避免用户进入软件后找不到导航
+  const autoHide = autoHideSetting && location.pathname !== '/home'
   const [visible, setVisible] = useState(true)
   const hideTimerRef = useRef<number | undefined>(undefined)
 

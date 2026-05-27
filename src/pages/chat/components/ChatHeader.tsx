@@ -81,7 +81,14 @@ export function ChatHeader({
     <div className="message-header">
       <SessionAvatar session={currentSession} size={40} />
       <div className="header-info">
-        <h3>{currentSession.displayName || currentSession.username}</h3>
+        <h3>
+          {currentSession.displayName || currentSession.username}
+          {currentSession.isWeCom && (
+            currentSession.weComCorp
+              ? <span className="wecom-corp" title="企业微信">@{currentSession.weComCorp}</span>
+              : <span className="wecom-badge" title="企业微信">企</span>
+          )}
+        </h3>
         {isGroupChat(currentSession.username) && (
           <div className="header-subtitle">群聊</div>
         )}

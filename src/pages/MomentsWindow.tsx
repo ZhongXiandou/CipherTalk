@@ -888,7 +888,7 @@ function MomentsWindow() {
           .filter((s: any) => {
             if (!s.username) return false;
             const u = s.username.toLowerCase();
-            if (u.includes('@chatroom') || u.endsWith('@chatroom') || u.endsWith('@openim')) return false;
+            if (u.includes('@chatroom') || u.endsWith('@chatroom')) return false;
             if (u.startsWith('gh_')) return false;
             if (systemAccounts.includes(u) || u.includes('helper') || u.includes('sessionholder')) return false;
             return true;

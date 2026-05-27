@@ -760,7 +760,10 @@ class HttpApiService {
           sortTimestamp: item.sortTimestamp || 0,
           lastTimestamp: item.lastTimestamp || 0,
           lastMsgType: item.lastMsgType || 0,
-          sessionType
+          sessionType,
+          isPinned: item.isPinned || false,
+          isCollapsed: item.isCollapsed || false,
+          isFoldGroup: item.isFoldGroup || false
         }
       })
 

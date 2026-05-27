@@ -581,7 +581,7 @@ export interface ElectronAPI {
       error?: string
     }>
     getContact: (username: string) => Promise<Contact | null>
-    getContactAvatar: (username: string) => Promise<{ avatarUrl?: string; displayName?: string } | null>
+    getContactAvatar: (username: string) => Promise<{ avatarUrl?: string; displayName?: string; weComCorp?: string } | null>
     resolveTransferDisplayNames: (chatroomId: string, payerUsername: string, receiverUsername: string) => Promise<{ payerName: string; receiverName: string }>
     getMyAvatarUrl: () => Promise<{ success: boolean; avatarUrl?: string; error?: string }>
     getMyUserInfo: () => Promise<{

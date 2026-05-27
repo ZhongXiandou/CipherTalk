@@ -25,6 +25,11 @@ export interface ChatSession {
   lastMsgType: number
   displayName?: string
   avatarUrl?: string
+  isWeCom?: boolean
+  weComCorp?: string
+  isPinned?: boolean      // 置顶: contact.flag 第 11 位 (0x800)
+  isCollapsed?: boolean   // 折叠的群聊: contact.flag 第 28 位 (0x10000000)
+  isFoldGroup?: boolean   // 折叠的聊天聚合虚拟会话 (@placeholder_foldgroup)
 }
 
 export interface ContactInfo {
@@ -34,6 +39,8 @@ export interface ContactInfo {
   nickname?: string
   avatarUrl?: string
   type: 'friend' | 'group' | 'official' | 'former_friend' | 'other'
+  isWeCom?: boolean
+  weComCorp?: string
   lastContactTime?: number
 }
 
@@ -205,7 +212,10 @@ class ChatService extends EventEmitter {
   // 缓存：数据库是否有 Name2Id 表 - 表结构不会变
   private hasName2IdCache: Map<string, boolean> = new Map()
   // 缓存：联系人表结构信息 - 表结构不会变
-  private contactColumnsCache: { hasBigHeadUrl: boolean; hasSmallHeadUrl: boolean; selectCols: string[] } | null = null
+  private contactColumnsCache: { hasBigHeadUrl: boolean; hasSmallHeadUrl: boolean; hasExtraBuffer: boolean; selectCols: string[] } | null = null
+  // 缓存：企业微信企业 ID -> 企业名
+  private weComCorpNameCache: Map<string, string | undefined> = new Map()
+  private hasOpenImWordingTable: boolean | null = null
   // 缓存：头像 base64 数据
   private avatarBase64Cache: Map<string, string> = new Map()
   // 标记：head_image.db 是否损坏
@@ -409,6 +419,8 @@ class ChatService extends EventEmitter {
     this.myRowIdCache.clear()
     this.hasName2IdCache.clear()
     this.contactColumnsCache = null
+    this.weComCorpNameCache.clear()
+    this.hasOpenImWordingTable = null
     this.avatarBase64Cache.clear()
     this.preloadCache.sessions = null
     this.preloadCache.contacts = null
@@ -426,6 +438,8 @@ class ChatService extends EventEmitter {
     this.knownMessageDbFiles.clear()
     this.avatarBase64Cache.clear()
     this.contactColumnsCache = null
+    this.weComCorpNameCache.clear()
+    this.hasOpenImWordingTable = null
   }
 
   /**
@@ -496,6 +510,7 @@ class ChatService extends EventEmitter {
         const sortTs = row.sort_timestamp || row.sortTimestamp || 0
         const lastTs = row.last_timestamp || row.lastTimestamp || sortTs
 
+        const isFoldGroup = username === '@placeholder_foldgroup'
         sessions.push({
           username,
           type: row.type || 0,
@@ -504,7 +519,9 @@ class ChatService extends EventEmitter {
           sortTimestamp: sortTs,
           lastTimestamp: lastTs,
           lastMsgType: row.last_msg_type || row.lastMsgType || 0,
-          displayName: username
+          displayName: isFoldGroup ? '折叠的聊天' : username,
+          isWeCom: !isFoldGroup && username.includes('@openim'),
+          isFoldGroup: isFoldGroup || undefined
         })
       }
 
@@ -543,15 +560,18 @@ class ChatService extends EventEmitter {
 
         const hasBigHeadUrl = columnNames.includes('big_head_url')
         const hasSmallHeadUrl = columnNames.includes('small_head_url')
+        const hasExtraBuffer = columnNames.includes('extra_buffer')
 
         const selectCols = ['username', 'remark', 'nick_name', 'alias']
         if (hasBigHeadUrl) selectCols.push('big_head_url')
         if (hasSmallHeadUrl) selectCols.push('small_head_url')
+        if (hasExtraBuffer) selectCols.push('extra_buffer')
+        if (columnNames.includes('flag')) selectCols.push('flag')
 
-        this.contactColumnsCache = { hasBigHeadUrl, hasSmallHeadUrl, selectCols }
+        this.contactColumnsCache = { hasBigHeadUrl, hasSmallHeadUrl, hasExtraBuffer, selectCols }
       }
 
-      const { hasBigHeadUrl, hasSmallHeadUrl, selectCols } = this.contactColumnsCache
+      const { hasBigHeadUrl, hasSmallHeadUrl, hasExtraBuffer, selectCols } = this.contactColumnsCache
 
       const usernames = Array.from(new Set(sessions.map(s => s.username).filter(Boolean)))
       if (usernames.length === 0) return
@@ -581,6 +601,16 @@ class ChatService extends EventEmitter {
         } else if (hasSmallHeadUrl && contact.small_head_url) {
           session.avatarUrl = contact.small_head_url
         }
+        if (session.isWeCom && hasExtraBuffer && contact.extra_buffer) {
+          session.weComCorp = await this.resolveWeComCorpName(
+            contact.extra_buffer,
+            [contact.remark, contact.nick_name, contact.alias, session.username]
+          )
+        }
+        // contact.flag 位标记：第 11 位 (0x800) = 置顶；第 28 位 (0x10000000) = 折叠的群聊
+        const flag = Number(contact.flag) || 0
+        if (flag & 0x800) session.isPinned = true
+        if (flag & 0x10000000) session.isCollapsed = true
       }
     } catch (e) {
       console.error('ChatService: 获取联系人信息失败:', e)
@@ -646,12 +676,14 @@ class ChatService extends EventEmitter {
       const hasSmallHeadUrl = columnNames.includes('small_head_url')
       const hasLocalType = columnNames.includes('local_type')
       const hasType = columnNames.includes('type')
+      const hasExtraBuffer = columnNames.includes('extra_buffer')
 
       const selectCols = ['username', 'remark', 'nick_name', 'alias', 'quan_pin', 'flag']
       if (hasBigHeadUrl) selectCols.push('big_head_url')
       if (hasSmallHeadUrl) selectCols.push('small_head_url')
       if (hasLocalType) selectCols.push('local_type')
       if (hasType) selectCols.push('type')
+      if (hasExtraBuffer) selectCols.push('extra_buffer')
 
       const rows = await dbAdapter.all<any>(
         'contact',
@@ -676,6 +708,11 @@ class ChatService extends EventEmitter {
           avatarUrl = row.small_head_url
         }
 
+        const isWeCom = username.includes('@openim') && !username.includes('@kefu.openim')
+        const weComCorp = (isWeCom && hasExtraBuffer && row.extra_buffer)
+          ? await this.resolveWeComCorpName(row.extra_buffer, [row.remark, row.nick_name, row.alias, username])
+          : undefined
+
         contacts.push({
           username,
           displayName,
@@ -683,6 +720,8 @@ class ChatService extends EventEmitter {
           nickname: row.nick_name || undefined,
           avatarUrl,
           type,
+          isWeCom: isWeCom || undefined,
+          weComCorp,
           lastContactTime: lastContactTimeMap.get(username) || 0
         } as ContactInfo & { lastContactTime: number })
       }
@@ -736,6 +775,8 @@ class ChatService extends EventEmitter {
     this.myRowIdCache.clear()
     this.hasName2IdCache.clear()
     this.contactColumnsCache = null
+    this.weComCorpNameCache.clear()
+    this.hasOpenImWordingTable = null
     clearMessageDbScannerCache()
     // 尝试推送增量消息（fire-and-forget，避免把同步方法改成 async）
     void this.checkNewMessagesForCurrentSession()
@@ -3366,8 +3407,7 @@ class ChatService extends EventEmitter {
     if (!username) return false
     if (username.startsWith('gh_')) return false
 
-    // 过滤折叠对话占位符
-    if (username === '@placeholder_foldgroup') return false
+    // @placeholder_foldgroup 是微信"折叠的聊天"聚合虚拟会话，保留并由前端渲染
 
     const excludeList = [
       'weixin', 'qqmail', 'fmessage', 'medianote', 'floatbottle',
@@ -3380,7 +3420,8 @@ class ChatService extends EventEmitter {
       if (username.startsWith(prefix) || username === prefix) return false
     }
 
-    if (username.includes('@kefu.openim') || username.includes('@openim')) return false
+    // 仅过滤微信客服（@kefu.openim），保留企业微信用户（@openim）以便在聊天列表显示并加标识
+    if (username.includes('@kefu.openim')) return false
     if (username.includes('service_')) return false
 
     return true
@@ -3411,7 +3452,7 @@ class ChatService extends EventEmitter {
   /**
    * 获取联系人头像和显示名称（用于群聊消息）
    */
-  async getContactAvatar(username: string): Promise<{ avatarUrl?: string; displayName?: string } | null> {
+  async getContactAvatar(username: string): Promise<{ avatarUrl?: string; displayName?: string; weComCorp?: string } | null> {
     if (!username) return null
 
     try {
@@ -3422,15 +3463,18 @@ class ChatService extends EventEmitter {
 
         const hasBigHeadUrl = columnNames.includes('big_head_url')
         const hasSmallHeadUrl = columnNames.includes('small_head_url')
+        const hasExtraBuffer = columnNames.includes('extra_buffer')
 
         const selectCols = ['username', 'remark', 'nick_name', 'alias']
         if (hasBigHeadUrl) selectCols.push('big_head_url')
         if (hasSmallHeadUrl) selectCols.push('small_head_url')
+        if (hasExtraBuffer) selectCols.push('extra_buffer')
+        if (columnNames.includes('flag')) selectCols.push('flag')
 
-        this.contactColumnsCache = { hasBigHeadUrl, hasSmallHeadUrl, selectCols }
+        this.contactColumnsCache = { hasBigHeadUrl, hasSmallHeadUrl, hasExtraBuffer, selectCols }
       }
 
-      const { hasBigHeadUrl, hasSmallHeadUrl, selectCols } = this.contactColumnsCache
+      const { hasBigHeadUrl, hasSmallHeadUrl, hasExtraBuffer, selectCols } = this.contactColumnsCache
 
       const row = await dbAdapter.get<any>(
         'contact',
@@ -3456,7 +3500,15 @@ class ChatService extends EventEmitter {
         avatarUrl = await this.getAvatarFromHeadImageDb(username)
       }
 
-      return { avatarUrl, displayName }
+      let weComCorp: string | undefined
+      if (username.includes('@openim') && !username.includes('@kefu.openim') && hasExtraBuffer && row.extra_buffer) {
+        weComCorp = await this.resolveWeComCorpName(
+          row.extra_buffer,
+          [row.remark, row.nick_name, row.alias, username]
+        )
+      }
+
+      return { avatarUrl, displayName, weComCorp }
     } catch {
       return null
     }
@@ -4843,12 +4895,15 @@ class ChatService extends EventEmitter {
 
           const hasBigHeadUrl = columnNames.includes('big_head_url')
           const hasSmallHeadUrl = columnNames.includes('small_head_url')
+          const hasExtraBuffer = columnNames.includes('extra_buffer')
 
           const selectCols = ['username', 'remark', 'nick_name', 'alias']
           if (hasBigHeadUrl) selectCols.push('big_head_url')
           if (hasSmallHeadUrl) selectCols.push('small_head_url')
+          if (hasExtraBuffer) selectCols.push('extra_buffer')
+          if (columnNames.includes('flag')) selectCols.push('flag')
 
-          this.contactColumnsCache = { hasBigHeadUrl, hasSmallHeadUrl, selectCols }
+          this.contactColumnsCache = { hasBigHeadUrl, hasSmallHeadUrl, hasExtraBuffer, selectCols }
         }
 
         const { hasBigHeadUrl, hasSmallHeadUrl, selectCols } = this.contactColumnsCache
@@ -4961,6 +5016,226 @@ class ChatService extends EventEmitter {
     } catch (e) {
       console.error('ChatService: 获取会话详情失败:', e)
       return { success: false, error: String(e) }
+    }
+  }
+
+  private decodeExtraBuffer(extraBuffer: any): Buffer | null {
+    if (!extraBuffer) return null
+    if (Buffer.isBuffer(extraBuffer)) return extraBuffer
+    if (extraBuffer instanceof Uint8Array) return Buffer.from(extraBuffer)
+    if (Array.isArray(extraBuffer)) return Buffer.from(extraBuffer)
+    if (typeof extraBuffer === 'object' && extraBuffer.type === 'bytes' && typeof extraBuffer.value === 'string') {
+      return Buffer.from(extraBuffer.value, 'base64')
+    }
+    if (typeof extraBuffer === 'object' && Array.isArray(extraBuffer.data)) {
+      return Buffer.from(extraBuffer.data)
+    }
+    if (typeof extraBuffer !== 'string') return null
+
+    const trimmed = extraBuffer.trim()
+    if (!trimmed) return null
+    if (/^[0-9a-fA-F]+$/.test(trimmed) && trimmed.length % 2 === 0) {
+      return Buffer.from(trimmed, 'hex')
+    }
+    return Buffer.from(trimmed, 'base64')
+  }
+
+  private readProtoVarint(data: Buffer, start: number): { value: number; next: number } | null {
+    let value = 0
+    let shift = 0
+    for (let offset = start; offset < data.length && shift <= 28; offset++) {
+      const byte = data[offset]
+      value += (byte & 0x7f) * (2 ** shift)
+      if ((byte & 0x80) === 0) {
+        return { value, next: offset + 1 }
+      }
+      shift += 7
+    }
+    return null
+  }
+
+  /**
+   * extra_buffer 的前两个 protobuf 字段分别是 openim app_id 与企业 wording_id。
+   * 企业展示名本身存于 openim_wording 表，不在 contact 记录里。
+   */
+  private extractWeComWordingRef(extraBuffer: any): { appId?: string; wordingId: string } | null {
+    const data = this.decodeExtraBuffer(extraBuffer)
+    if (!data || data.length === 0) return null
+
+    let appId: string | undefined
+    let wordingId: string | undefined
+    let offset = 0
+
+    while (offset < data.length) {
+      const tag = this.readProtoVarint(data, offset)
+      if (!tag) break
+      offset = tag.next
+
+      const fieldNumber = tag.value >>> 3
+      const wireType = tag.value & 0x07
+      if (wireType === 0) {
+        const value = this.readProtoVarint(data, offset)
+        if (!value) break
+        offset = value.next
+        continue
+      }
+      if (wireType === 1) {
+        offset += 8
+        continue
+      }
+      if (wireType === 5) {
+        offset += 4
+        continue
+      }
+      if (wireType !== 2) break
+
+      const length = this.readProtoVarint(data, offset)
+      if (!length || length.value < 0 || length.next + length.value > data.length) break
+      offset = length.next + length.value
+
+      const text = data.slice(length.next, offset).toString('utf-8')
+      if (text.includes('�')) continue
+      if (fieldNumber === 1 && /^\d+$/.test(text)) {
+        appId = text
+      } else if (fieldNumber === 2 && /@im\.wxwork$/i.test(text)) {
+        wordingId = text
+      }
+    }
+
+    if (!wordingId) {
+      const match = data.toString('utf-8').match(/[A-Za-z0-9]+RI\d+@im\.wxwork/i)
+      wordingId = match?.[0]
+    }
+    return wordingId ? { appId, wordingId } : null
+  }
+
+  private async resolveWeComCorpName(extraBuffer: any, knownStrings: Array<string | undefined>): Promise<string | undefined> {
+    const ref = this.extractWeComWordingRef(extraBuffer)
+    if (ref) {
+      const cacheKey = `${ref.appId || ''}\n${ref.wordingId}`
+      if (this.weComCorpNameCache.has(cacheKey)) {
+        return this.weComCorpNameCache.get(cacheKey) || this.extractWeComCorpName(extraBuffer, knownStrings)
+      }
+
+      try {
+        if (this.hasOpenImWordingTable === null) {
+          const table = await dbAdapter.get<{ name: string }>(
+            'contact',
+            '',
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='openim_wording'"
+          )
+          this.hasOpenImWordingTable = Boolean(table)
+        }
+
+        if (this.hasOpenImWordingTable) {
+          const sql = ref.appId
+            ? `SELECT wording FROM openim_wording
+               WHERE app_id = ? AND wording_id = ? AND wording <> ''
+               ORDER BY CASE WHEN lang_id = 1 THEN 0 ELSE 1 END, update_time DESC
+               LIMIT 1`
+            : `SELECT wording FROM openim_wording
+               WHERE wording_id = ? AND wording <> ''
+               ORDER BY CASE WHEN lang_id = 1 THEN 0 ELSE 1 END, update_time DESC
+               LIMIT 1`
+          const params = ref.appId ? [ref.appId, ref.wordingId] : [ref.wordingId]
+          const row = await dbAdapter.get<{ wording?: string }>('contact', '', sql, params)
+          const wording = typeof row?.wording === 'string' ? row.wording.trim() : ''
+          if (wording) {
+            this.weComCorpNameCache.set(cacheKey, wording)
+            return wording
+          }
+        }
+        this.weComCorpNameCache.set(cacheKey, undefined)
+      } catch {
+        // 旧数据库可能没有 openim_wording；继续尝试旧的 extra_buffer 提取。
+      }
+    }
+
+    return this.extractWeComCorpName(extraBuffer, knownStrings)
+  }
+
+  /**
+   * 从 contact.extra_buffer 中直接提取企业名称，作为旧版本数据库的回退逻辑。
+   *
+   * extra_buffer 是 protobuf-like 格式：连续的 [tag][length][value] 段。
+   * WeCom 联系人通常包含若干 UTF-8 字符串字段（昵称、手机号、企业名、职位等），
+   * 这里把所有可解码字符串收集出来，按启发式过滤后取最像企业名的那一项。
+   */
+  private extractWeComCorpName(extraBuffer: any, knownStrings: Array<string | undefined>): string | undefined {
+    try {
+      const data = this.decodeExtraBuffer(extraBuffer)
+      if (!data || data.length < 4) return undefined
+
+      const candidates: string[] = []
+      let offset = 0
+      while (offset < data.length - 1) {
+        const tag = data[offset]
+        offset++
+        let length = data[offset]
+        offset++
+
+        // 长度可能是变长编码（最高位为续位指示）
+        if (length > 127 && offset < data.length) {
+          const ext = data[offset]
+          length = (length & 0x7f) | (ext << 7)
+          if (length > data.length) {
+            length = data[offset - 1] & 0x7f
+          } else {
+            offset++
+          }
+        }
+
+        if (length <= 0 || offset + length > data.length) {
+          continue
+        }
+
+        const slice = data.slice(offset, offset + length)
+        offset += length
+
+        // 尝试 UTF-8 解码，结果合法（无 \0、可显示字符）才采纳
+        const str = slice.toString('utf-8')
+        if (!str || str.length < 2 || str.length > 50) continue
+        if (/^@/.test(str)) continue
+        if (/[\x00-\x1F\x7F�]/.test(str)) continue
+        candidates.push(str)
+        // 标记位置避免快速回退导致无限循环
+        if (tag === 0) break
+      }
+
+      if (candidates.length === 0) return undefined
+
+      const known = new Set(
+        knownStrings.filter((s): s is string => typeof s === 'string' && s.length > 0)
+      )
+
+      const looksLikePhone = (s: string) => /^\+?\d[\d\s\-]{6,}$/.test(s)
+      const looksLikeUrl = (s: string) => /^https?:\/\//i.test(s) || /\.(com|cn|net|org)\b/i.test(s)
+      const looksLikeEmail = (s: string) => /@.+\./.test(s)
+      const looksLikeWxid = (s: string) => /^wxid_/.test(s) || /@openim$/i.test(s)
+      const looksLikeName = (s: string) => {
+        // 含中文/英文/数字（公司名特征），允许中文、字母、数字、（）、&、·、空格、-
+        return /[一-龥A-Za-z]/.test(s) && !/^[\d.\-+\s]+$/.test(s)
+      }
+
+      // 优先取较长的候选（企业名通常 ≥ 3 字符）；同时排除已知名称、手机号、URL、wxid
+      const ranked = candidates
+        .filter(s => !known.has(s))
+        .filter(s => !looksLikePhone(s))
+        .filter(s => !looksLikeUrl(s))
+        .filter(s => !looksLikeEmail(s))
+        .filter(s => !looksLikeWxid(s))
+        .filter(looksLikeName)
+        // 公司名长度通常 3-30，优先 3+；同等条件下长度大的排前
+        .sort((a, b) => {
+          const aGood = a.length >= 3 ? 1 : 0
+          const bGood = b.length >= 3 ? 1 : 0
+          if (aGood !== bGood) return bGood - aGood
+          return b.length - a.length
+        })
+
+      return ranked[0]
+    } catch {
+      return undefined
     }
   }
 

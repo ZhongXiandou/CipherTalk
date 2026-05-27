@@ -547,7 +547,10 @@ function toSessionItem(session: ChatSession): McpSessionItem {
     lastMessagePreview: session.summary || '',
     unreadCount: Number(session.unreadCount || 0),
     lastTimestamp: Number(session.lastTimestamp || 0),
-    lastTimestampMs: toTimestampMs(Number(session.lastTimestamp || 0))
+    lastTimestampMs: toTimestampMs(Number(session.lastTimestamp || 0)),
+    isPinned: session.isPinned || undefined,
+    isCollapsed: session.isCollapsed || undefined,
+    isFoldGroup: session.isFoldGroup || undefined
   }
 }
 
