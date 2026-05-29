@@ -1,5 +1,5 @@
 import { dbAdapter } from '../dbAdapter'
-import { shouldKeepSession } from './accountUtils'
+import { isOfficialAccountUsername, isOfficialFolderUsername, shouldKeepSession } from './accountUtils'
 import { processSummary } from './contentParsers'
 import { resolveWeComCorpName } from './weComResolver'
 import type { ChatSession } from './types'
@@ -62,6 +62,8 @@ export async function getSessions(state: ChatServiceState, offset?: number, limi
       const lastTs = row.last_timestamp || row.lastTimestamp || sortTs
 
       const isFoldGroup = username === '@placeholder_foldgroup'
+      const isOfficialFolder = isOfficialFolderUsername(username)
+      const isOfficialAccount = isOfficialAccountUsername(username)
       sessions.push({
         username,
         type: row.type || 0,
@@ -70,9 +72,11 @@ export async function getSessions(state: ChatServiceState, offset?: number, limi
         sortTimestamp: sortTs,
         lastTimestamp: lastTs,
         lastMsgType: row.last_msg_type || row.lastMsgType || 0,
-        displayName: isFoldGroup ? '折叠的聊天' : username,
-        isWeCom: !isFoldGroup && username.includes('@openim'),
-        isFoldGroup: isFoldGroup || undefined
+        displayName: isFoldGroup ? '折叠的聊天' : isOfficialFolder ? '公众号' : username,
+        isWeCom: !isFoldGroup && !isOfficialFolder && !isOfficialAccount && username.includes('@openim'),
+        isFoldGroup: isFoldGroup || undefined,
+        isOfficialFolder: isOfficialFolder || undefined,
+        isOfficialAccount: isOfficialAccount || undefined
       })
     }
 
@@ -146,7 +150,9 @@ async function enrichSessionsWithContacts(state: ChatServiceState, sessions: Cha
     for (const session of sessions) {
       const contact = contactMap.get(session.username)
       if (!contact) continue
-      session.displayName = contact.remark || contact.nick_name || contact.alias || session.username
+      if (!session.isFoldGroup && !session.isOfficialFolder) {
+        session.displayName = contact.remark || contact.nick_name || contact.alias || session.displayName || session.username
+      }
       if (hasBigHeadUrl && contact.big_head_url) {
         session.avatarUrl = contact.big_head_url
       } else if (hasSmallHeadUrl && contact.small_head_url) {

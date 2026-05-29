@@ -13,6 +13,8 @@ export interface ChatSession {
   isPinned?: boolean      // 置顶: contact.flag 第 11 位 (0x800)
   isCollapsed?: boolean   // 折叠的群聊: contact.flag 第 28 位 (0x10000000)
   isFoldGroup?: boolean   // 折叠的聊天聚合虚拟会话 (@placeholder_foldgroup)
+  isOfficialFolder?: boolean  // 公众号聚合虚拟会话 (brandsessionholder)
+  isOfficialAccount?: boolean // 单个公众号 (gh_ 开头)
 }
 
 export interface ContactInfo {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, ChevronDown, ChevronUp, ListOrdered, MessageSquare, MessageSquareDashed, Pin, RefreshCw, Search, X } from 'lucide-react'
+import { AlertCircle, ChevronDown, ChevronUp, ListOrdered, MessageSquare, MessageSquareDashed, Newspaper, Pin, RefreshCw, Search, X } from 'lucide-react'
 import { List } from 'react-window'
 import type { RowComponentProps } from 'react-window'
 import MessageContent from '../../../components/MessageContent'
@@ -10,16 +10,90 @@ type SidebarItem =
       kind: 'session'
       session: ChatSession
       isCollapsedChild?: boolean
+      isOfficialChild?: boolean
       foldGroupExpanded?: boolean
       foldGroupUnreadTotal?: number
+      foldGroupSummary?: string
+      officialGroupExpanded?: boolean
+      officialGroupUnreadTotal?: number
     }
   | { kind: 'pinned-fold-bar'; folded: boolean }
+
+function isOfficialFolderSession(session: ChatSession): boolean {
+  return Boolean(session.isOfficialFolder)
+    || session.username.toLowerCase() === 'brandsessionholder'
+    || session.username.toLowerCase() === '@brandsessionholder'
+}
+
+function isOfficialAccountSession(session: ChatSession): boolean {
+  return Boolean(session.isOfficialAccount) || session.username.startsWith('gh_')
+}
+
+function formatOfficialFolderSummary(officials: ChatSession[], unreadTotal: number): string {
+  const latest = [...officials].sort((a, b) => (b.sortTimestamp || 0) - (a.sortTimestamp || 0))[0]
+  if (!latest) return '暂无消息'
+  const preview = (latest.summary || '暂无消息').split('\n')[0]
+  const name = latest.displayName || latest.username
+  if (unreadTotal > 0) {
+    const countLabel = unreadTotal > 99 ? '99+' : String(unreadTotal)
+    return `[${countLabel}条] ${name}: ${preview}`
+  }
+  return `${name}: ${preview}`
+}
+
+function formatFoldGroupSummary(members: ChatSession[], foldSession?: ChatSession): string {
+  const latest = [...members].sort((a, b) => (b.sortTimestamp || 0) - (a.sortTimestamp || 0))[0]
+  if (latest) {
+    const name = latest.displayName || latest.username
+    const preview = (latest.summary || '暂无消息').split('\n')[0]
+    return `${name}: ${preview}`
+  }
+
+  const raw = (foldSession?.summary || '').split('\n')[0] || '暂无消息'
+  if (/[:：]/.test(raw)) return raw
+  return raw
+}
+
+function getFoldGroupMembers(sessions: ChatSession[]): ChatSession[] {
+  const explicit = sessions.filter(s => s.isCollapsed && !s.isFoldGroup)
+  if (explicit.length > 0) return explicit
+
+  const sorted = [...sessions].sort((a, b) => (b.sortTimestamp || 0) - (a.sortTimestamp || 0))
+  const foldIndex = sorted.findIndex(s => s.isFoldGroup)
+  if (foldIndex < 0) return []
+
+  const members: ChatSession[] = []
+  for (let i = foldIndex + 1; i < sorted.length; i++) {
+    const session = sorted[i]
+    if (session.isPinned || session.isFoldGroup || isOfficialFolderSession(session) || isOfficialAccountSession(session)) break
+    if (!session.username.includes('@chatroom')) break
+    members.push(session)
+  }
+  return members
+}
+
+function buildSyntheticOfficialFolder(officials: ChatSession[]): ChatSession {
+  const latest = [...officials].sort((a, b) => (b.sortTimestamp || 0) - (a.sortTimestamp || 0))[0]
+  const unreadTotal = officials.reduce((sum, s) => sum + (s.unreadCount || 0), 0)
+  return {
+    username: 'brandsessionholder',
+    type: 0,
+    unreadCount: unreadTotal,
+    summary: formatOfficialFolderSummary(officials, unreadTotal),
+    sortTimestamp: latest?.sortTimestamp || 0,
+    lastTimestamp: latest?.lastTimestamp || latest?.sortTimestamp || 0,
+    lastMsgType: latest?.lastMsgType || 0,
+    displayName: '公众号',
+    isOfficialFolder: true
+  }
+}
 
 export interface SessionRowData {
   items: SidebarItem[]
   currentSessionId: string | null
   onSelect: (s: ChatSession) => void
   onToggleCollapsedGroup: () => void
+  onToggleOfficialGroup: () => void
   onTogglePinnedFolded: () => void
   formatTime: (t: number) => string
 }
@@ -155,7 +229,7 @@ export function SessionAvatar({ session, size = 48 }: { session: ChatSession; si
 
 // 会话列表行组件（使用 memo 优化性能）
 export const SessionRow = (props: RowComponentProps<SessionRowData>) => {
-  const { index, style, items, currentSessionId, onSelect, onToggleCollapsedGroup, onTogglePinnedFolded, formatTime } = props
+  const { index, style, items, currentSessionId, onSelect, onToggleCollapsedGroup, onToggleOfficialGroup, onTogglePinnedFolded, formatTime } = props
   const item = items[index]
 
   // 「折叠置顶聊天」分隔条
@@ -176,9 +250,43 @@ export const SessionRow = (props: RowComponentProps<SessionRowData>) => {
 
   const session = item.session
 
+  // 公众号 聚合虚拟会话项（来自 brandsessionholder）
+  if (isOfficialFolderSession(session)) {
+    const unreadTotal = item.officialGroupUnreadTotal ?? 0
+    const hasUnread = unreadTotal > 0
+    const summary = (session.summary || '').split('\n')[0] || '暂无消息'
+    return (
+      <div
+        style={style}
+        className={`session-item official-folder ${item.officialGroupExpanded ? 'expanded' : ''}`}
+        onClick={onToggleOfficialGroup}
+      >
+        <div className="system-folder-avatar" style={{ width: 48, height: 48 }}>
+          <div className="session-avatar official-folder-avatar" style={{ width: 48, height: 48 }}>
+            <Newspaper size={26} />
+          </div>
+          {hasUnread && <span className="fold-group-unread-dot" aria-label="有新消息" />}
+        </div>
+        <div className="session-info">
+          <div className="session-top">
+            <div className="session-name-wrap">
+              <span className="session-name">{session.displayName || '公众号'}</span>
+            </div>
+            <span className="session-time">{formatTime(session.lastTimestamp || session.sortTimestamp)}</span>
+          </div>
+          <div className="session-bottom">
+            <span className="session-summary">
+              <MessageContent content={summary} disableLinks={true} />
+            </span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // 折叠的聊天 虚拟会话项（来自 @placeholder_foldgroup）
   if (session.isFoldGroup) {
-    const summary = (session.summary || '').split('\n')[0] || '暂无消息'
+    const summary = item.foldGroupSummary || (session.summary || '').split('\n')[0] || '暂无消息'
     const foldedUnread = item.foldGroupUnreadTotal ?? 0
     const hasUnread = foldedUnread > 0
     return (
@@ -187,8 +295,10 @@ export const SessionRow = (props: RowComponentProps<SessionRowData>) => {
         className={`session-item fold-group ${item.foldGroupExpanded ? 'expanded' : ''}`}
         onClick={onToggleCollapsedGroup}
       >
-        <div className="session-avatar fold-group-avatar" style={{ width: 48, height: 48 }}>
-          <MessageSquareDashed size={26} />
+        <div className="system-folder-avatar" style={{ width: 48, height: 48 }}>
+          <div className="session-avatar fold-group-avatar" style={{ width: 48, height: 48 }}>
+            <MessageSquareDashed size={26} />
+          </div>
           {hasUnread && <span className="fold-group-unread-dot" aria-label="有新消息" />}
         </div>
         <div className="session-info">
@@ -211,7 +321,7 @@ export const SessionRow = (props: RowComponentProps<SessionRowData>) => {
   return (
     <div
       style={style}
-      className={`session-item ${currentSessionId === session.username ? 'active' : ''}${session.isPinned ? ' pinned' : ''}${item.isCollapsedChild ? ' collapsed-child' : ''}`}
+      className={`session-item ${currentSessionId === session.username ? 'active' : ''}${session.isPinned ? ' pinned' : ''}${item.isCollapsedChild ? ' collapsed-child' : ''}${item.isOfficialChild ? ' official-child' : ''}`}
       onClick={() => onSelect(session)}
     >
       <SessionAvatar session={session} size={48} />
@@ -289,6 +399,7 @@ export function SessionSidebar({
   formatTime
 }: SessionSidebarProps) {
   const [collapsedGroupExpanded, setCollapsedGroupExpanded] = useState(false)
+  const [officialGroupExpanded, setOfficialGroupExpanded] = useState(false)
   const [pinnedFolded, setPinnedFolded] = useState<boolean>(() => {
     try { return localStorage.getItem('ct-pinned-folded') === '1' } catch { return false }
   })
@@ -301,17 +412,53 @@ export function SessionSidebar({
   }
   const isSearching = searchKeyword.trim().length > 0
 
-  // 把 sessions 分组（用于决定底部栏是否显示，以及折叠群子项渲染）
-  const { pinned, normal, collapsed } = useMemo(() => {
+  // 把 sessions 分组（用于决定底部栏是否显示，以及折叠群/公众号子项渲染）
+  const { pinned, normal, collapsed, foldMembers, officials, officialFolder } = useMemo(() => {
     const pinned: ChatSession[] = []
     const normal: ChatSession[] = []
     const collapsed: ChatSession[] = []
+    const foldMembers = getFoldGroupMembers(filteredSessions)
+    const foldMemberUsernames = new Set(foldMembers.map(s => s.username))
+    const officials: ChatSession[] = []
+    let officialFolder: ChatSession | null = null
+
     for (const s of filteredSessions) {
+      if (isOfficialAccountSession(s) && !isOfficialFolderSession(s)) {
+        officials.push(s)
+        continue
+      }
+      if (isOfficialFolderSession(s)) {
+        officialFolder = { ...s, displayName: '公众号', isOfficialFolder: true }
+        continue
+      }
       if (s.isCollapsed) collapsed.push(s)
+      else if (foldMemberUsernames.has(s.username)) continue
       else if (s.isPinned) pinned.push(s)
       else normal.push(s)
     }
-    return { pinned, normal, collapsed }
+
+    if (!officialFolder && officials.length > 0) {
+      officialFolder = buildSyntheticOfficialFolder(officials)
+    } else if (officialFolder && officials.length > 0) {
+      const unreadTotal = officials.reduce((sum, item) => sum + (item.unreadCount || 0), 0)
+      officialFolder = {
+        ...officialFolder,
+        displayName: '公众号',
+        isOfficialFolder: true,
+        summary: formatOfficialFolderSummary(officials, unreadTotal)
+      }
+    }
+
+    if (officialFolder) {
+      if (officialFolder.isPinned) {
+        pinned.push(officialFolder)
+      } else {
+        normal.push(officialFolder)
+        normal.sort((a, b) => (b.sortTimestamp || 0) - (a.sortTimestamp || 0))
+      }
+    }
+
+    return { pinned, normal, collapsed, foldMembers, officials, officialFolder }
   }, [filteredSessions])
 
   // 构造虚拟列表行项
@@ -324,27 +471,57 @@ export function SessionSidebar({
     }
 
     const collapsedSorted = [...collapsed].sort((a, b) => (b.sortTimestamp || 0) - (a.sortTimestamp || 0))
-    const unreadTotal = collapsedSorted.reduce((sum, s) => sum + (s.unreadCount || 0), 0)
+    const foldMembersSorted = [...foldMembers].sort((a, b) => (b.sortTimestamp || 0) - (a.sortTimestamp || 0))
+    const foldUnreadTotal = foldMembersSorted.reduce((sum, s) => sum + (s.unreadCount || 0), 0)
+    const officialsSorted = [...officials].sort((a, b) => (b.sortTimestamp || 0) - (a.sortTimestamp || 0))
+    const officialUnreadTotal = officialsSorted.reduce((sum, s) => sum + (s.unreadCount || 0), 0)
+
+    const pushOfficialFolderItem = () => {
+      if (!officialFolder) return
+      list.push({
+        kind: 'session',
+        session: officialFolder,
+        officialGroupExpanded,
+        officialGroupUnreadTotal: officialUnreadTotal
+      })
+      if (officialGroupExpanded) {
+        for (const c of officialsSorted) {
+          list.push({ kind: 'session', session: c, isOfficialChild: true })
+        }
+      }
+    }
 
     const list: SidebarItem[] = []
     if (pinned.length > 0) {
       if (!pinnedFolded) {
-        for (const s of pinned) list.push({ kind: 'session', session: s })
+        for (const s of pinned) {
+          if (isOfficialFolderSession(s)) {
+            pushOfficialFolderItem()
+          } else {
+            list.push({ kind: 'session', session: s })
+          }
+        }
         list.push({ kind: 'pinned-fold-bar', folded: false })
       } else {
         list.push({ kind: 'pinned-fold-bar', folded: true })
       }
     }
     for (const s of normal) {
+      if (isOfficialFolderSession(s)) {
+        pushOfficialFolderItem()
+        continue
+      }
       if (s.isFoldGroup) {
         list.push({
           kind: 'session',
           session: s,
           foldGroupExpanded: collapsedGroupExpanded,
-          foldGroupUnreadTotal: unreadTotal
+          foldGroupUnreadTotal: foldUnreadTotal,
+          foldGroupSummary: formatFoldGroupSummary(foldMembersSorted, s)
         })
         if (collapsedGroupExpanded) {
-          for (const c of collapsedSorted) {
+          const expandList = collapsedSorted.length > 0 ? collapsedSorted : foldMembersSorted
+          for (const c of expandList) {
             list.push({ kind: 'session', session: c, isCollapsedChild: true })
           }
         }
@@ -353,7 +530,7 @@ export function SessionSidebar({
       }
     }
     return list
-  }, [filteredSessions, collapsedGroupExpanded, isSearching, pinned, normal, collapsed, pinnedFolded])
+  }, [filteredSessions, collapsedGroupExpanded, officialGroupExpanded, isSearching, pinned, normal, collapsed, foldMembers, officials, officialFolder, pinnedFolded])
 
   const listContainerRef = useRef<HTMLDivElement>(null)
   const [stickyBarVisible, setStickyBarVisible] = useState(false)
@@ -487,6 +664,7 @@ export function SessionSidebar({
               currentSessionId,
               onSelect: onSelectSession,
               onToggleCollapsedGroup: () => setCollapsedGroupExpanded(v => !v),
+              onToggleOfficialGroup: () => setOfficialGroupExpanded(v => !v),
               onTogglePinnedFolded: togglePinnedFolded,
               formatTime
             }}

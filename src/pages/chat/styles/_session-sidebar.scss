@@ -211,18 +211,10 @@
   }
 }
 
-// 折叠的聊天 虚拟项的图标头像
-.session-avatar.fold-group-avatar {
-  background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: visible;
-
-  svg {
-    color: #fff;
-  }
+// 系统文件夹头像容器（折叠聊天 / 公众号）
+.system-folder-avatar {
+  position: relative;
+  flex-shrink: 0;
 
   .fold-group-unread-dot {
     position: absolute;
@@ -235,6 +227,49 @@
     border: 2px solid var(--bg-primary);
     box-sizing: content-box;
     pointer-events: none;
+    z-index: 2;
+  }
+}
+
+// 公众号 聚合虚拟项的图标头像（无微信头像时的兜底）
+.session-avatar.official-folder-avatar {
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+
+  svg {
+    color: #fff;
+  }
+}
+
+// 折叠的聊天 虚拟项的图标头像（无微信头像时的兜底）
+.session-avatar.fold-group-avatar {
+  background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+
+  svg {
+    color: #fff;
+  }
+}
+
+// 公众号展开后子项左侧加缩进
+.session-item.official-child {
+  padding-left: 28px;
+  background: var(--bg-primary);
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+
+  &.active {
+    background: var(--primary-light);
   }
 }
 

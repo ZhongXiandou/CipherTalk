@@ -78,15 +78,25 @@ export function findAccountDir(baseDir: string, wxid: string): string | null {
   return null
 }
 
+export function isOfficialFolderUsername(username: string): boolean {
+  const lower = username.toLowerCase()
+  return lower === 'brandsessionholder' || lower === '@brandsessionholder'
+}
+
+export function isOfficialAccountUsername(username: string): boolean {
+  return username.startsWith('gh_')
+}
+
 export function shouldKeepSession(username: string): boolean {
   if (!username) return false
-  if (username.startsWith('gh_')) return false
+  if (isOfficialFolderUsername(username)) return true
+  if (isOfficialAccountUsername(username)) return true
 
   // @placeholder_foldgroup 是微信"折叠的聊天"聚合虚拟会话，保留并由前端渲染
 
   const excludeList = [
     'weixin', 'qqmail', 'fmessage', 'medianote', 'floatbottle',
-    'newsapp', 'brandsessionholder', 'brandservicesessionholder',
+    'newsapp', 'brandservicesessionholder',
     'notifymessage', 'opencustomerservicemsg', 'notification_messages',
     'userexperience_alarm'
   ]
