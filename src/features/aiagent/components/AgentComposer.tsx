@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { KeyboardEvent, ReactNode } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import type { ForwardedRef, KeyboardEvent, ReactNode } from 'react'
 import {
   AtSign,
   Database,
@@ -15,11 +15,16 @@ import {
 import { MCP } from '@lobehub/icons'
 import type { McpServerStatus } from '../../../hooks/useMcpSkillsData'
 import type { AgentSkill, AttachedResource, McpServer, Scope, SlashCommand } from '../types'
+import '../styles/aiagent.scss'
 
 export interface AgentComposerProps {
   scope: Scope
   onSend: (text: string, attached: AttachedResource[], readLimit: number, skillIds: string[]) => void
   disabled?: boolean
+  busy?: boolean
+  onBusyAction?: () => void
+  inputValue?: string
+  onInputValueChange?: (value: string) => void
   suggestions: string[]
   slashCommands: SlashCommand[]
   mcpServers: McpServer[]
@@ -27,6 +32,8 @@ export interface AgentComposerProps {
   onToggleServer: (name: string, status: McpServerStatus) => void
   skills: AgentSkill[]
   allowSessionAttachments?: boolean
+  placeholder?: string
+  showHint?: boolean
   features?: {
     mention?: boolean
     slash?: boolean
@@ -81,14 +88,16 @@ async function saveTemperature(v: number): Promise<void> {
   }
 }
 
-export function AgentComposer({
+function AgentComposerInner({
   scope,
-  onSend, disabled, suggestions, slashCommands,
+  onSend, disabled, busy = false, onBusyAction, inputValue, onInputValueChange, suggestions, slashCommands,
   mcpServers, busyServers, onToggleServer, skills,
   allowSessionAttachments = false,
+  placeholder,
+  showHint = true,
   features,
-}: AgentComposerProps) {
-  const [value, setValue] = useState('')
+}: AgentComposerProps, forwardedRef: ForwardedRef<HTMLTextAreaElement>) {
+  const [innerValue, setInnerValue] = useState('')
   const [showSlash, setShowSlash] = useState(false)
   const [showMention, setShowMention] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
@@ -105,6 +114,9 @@ export function AgentComposer({
   const mentionSearchRef = useRef<HTMLInputElement>(null)
   const mentionLoadingRef = useRef(false)
   const mentionLoadedRef = useRef(false)
+  useImperativeHandle(forwardedRef, () => textareaRef.current as HTMLTextAreaElement, [])
+  const value = inputValue !== undefined ? inputValue : innerValue
+  const setValue = onInputValueChange ?? setInnerValue
   const composerFeatures = {
     mention: features?.mention ?? (scope.kind === 'global' || allowSessionAttachments),
     slash: features?.slash ?? true,
@@ -192,7 +204,7 @@ export function AgentComposer({
 
   const submit = () => {
     const text = value.trim()
-    if (!text || disabled) return
+    if (!text || disabled || busy) return
     onSend(text, canAttachSessions ? attached : [], readLimit, [...enabledSkills])
     setValue('')
     setAttached([])
@@ -226,18 +238,21 @@ export function AgentComposer({
 
   const connectedCount = mcpServers.filter(s => s.status === 'connected').length
   const skillEnabledCount = enabledSkills.size
-  const placeholder = canAttachSessions
-    ? (scope.kind === 'global'
-        ? '给 Agent 安排一个任务... 按 @ 引用，按 / 输入命令'
-        : '询问当前会话... 按 @ 添加会话范围，按 / 输入命令')
-    : '询问当前会话... 按 / 输入命令'
+  const resolvedPlaceholder = placeholder ?? (
+    canAttachSessions
+      ? (scope.kind === 'global'
+          ? '给 Agent 安排一个任务... 按 @ 引用，按 / 输入命令'
+          : '询问当前会话... 按 @ 添加会话范围，按 / 输入命令')
+      : '询问当前会话... 按 / 输入命令'
+  )
+  const hasToolbar = composerFeatures.mention || composerFeatures.slash || composerFeatures.mcp || composerFeatures.skills || composerFeatures.context || composerFeatures.voice
 
   return (
     <footer className="agent-composer-wrap">
       {composerFeatures.suggestions && suggestions.length ? (
         <div className="agent-suggestions">
           {suggestions.map(suggestion => (
-            <button key={suggestion} type="button" onClick={() => onSend(suggestion, [], readLimit, [])} disabled={disabled}>
+            <button key={suggestion} type="button" onClick={() => onSend(suggestion, [], readLimit, [])} disabled={disabled || busy}>
               <Sparkles size={12} />
               {suggestion}
             </button>
@@ -271,9 +286,9 @@ export function AgentComposer({
           ref={textareaRef}
           rows={1}
           value={value}
-          disabled={disabled}
+          disabled={disabled || busy}
           className="agent-composer__textarea"
-          placeholder={placeholder}
+          placeholder={resolvedPlaceholder}
           onChange={event => {
             const text = event.target.value
             setValue(text)
@@ -292,6 +307,7 @@ export function AgentComposer({
           onKeyDown={handleKeyDown}
         />
 
+        {hasToolbar ? (
         <div className="agent-composer__bar">
           <div className="agent-composer__left">
             {/* 引用对象 */}
@@ -546,30 +562,45 @@ export function AgentComposer({
 
           <div className="agent-composer__right">
             {composerFeatures.voice ? (
-              <button className="agent-round-button" type="button" title="语音输入" disabled={disabled}>
+              <button className="agent-round-button" type="button" title="语音输入" disabled={disabled || busy}>
                 <Mic size={14} />
               </button>
             ) : null}
             <button
-              className={`agent-send-button${value.trim() ? ' is-ready' : ''}`}
+              className={`agent-send-button${busy ? '' : value.trim() ? ' is-ready' : ''}`}
               type="button"
-              onClick={submit}
-              disabled={!value.trim() || disabled}
-              title="发送"
+              onClick={busy ? onBusyAction : submit}
+              disabled={!busy && (!value.trim() || disabled)}
+              title={busy ? '取消回答' : '发送'}
             >
-              <Send size={15} />
+              {busy ? <X size={15} /> : <Send size={15} />}
             </button>
           </div>
         </div>
+        ) : (
+          <div className="agent-composer__right agent-composer__right--solo">
+            <button
+              className={`agent-send-button${busy ? '' : value.trim() ? ' is-ready' : ''}`}
+              type="button"
+              onClick={busy ? onBusyAction : submit}
+              disabled={!busy && (!value.trim() || disabled)}
+              title={busy ? '取消回答' : '发送'}
+            >
+              {busy ? <X size={15} /> : <Send size={15} />}
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="agent-composer-hint">
-        <span><kbd>Enter</kbd> 发送</span>
-        <span><kbd>Shift</kbd> + <kbd>Enter</kbd> 换行</span>
-        {canAttachSessions ? <span><kbd>@</kbd> 引用</span> : null}
-        {composerFeatures.slash ? <span><kbd>/</kbd> 命令</span> : null}
-        <span>AI生成，请注意甄别！</span>
-      </div>
+      {showHint ? (
+        <div className="agent-composer-hint">
+          <span><kbd>Enter</kbd> 发送</span>
+          <span><kbd>Shift</kbd> + <kbd>Enter</kbd> 换行</span>
+          {canAttachSessions ? <span><kbd>@</kbd> 引用</span> : null}
+          {composerFeatures.slash ? <span><kbd>/</kbd> 命令</span> : null}
+          <span>AI生成，请注意甄别！</span>
+        </div>
+      ) : null}
     </footer>
   )
 }
@@ -631,3 +662,5 @@ function SessionAvatar({ name, avatarUrl }: { name: string; avatarUrl?: string }
     </span>
   )
 }
+
+export const AgentComposer = forwardRef<HTMLTextAreaElement, AgentComposerProps>(AgentComposerInner)

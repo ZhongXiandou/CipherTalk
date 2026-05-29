@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react'
 import {
   AlertTriangle,
   ArrowLeft,
-  ArrowUp,
   Atom,
   Bot,
   CalendarDays,
@@ -51,6 +50,7 @@ import {
 import type { Message } from '../types/models'
 import { usePlatformInfo } from '../hooks/usePlatformInfo'
 import AIProviderLogo from '../components/ai/AIProviderLogo'
+import { AiAgentPanel } from '../features/aiagent/AiAgentPanel'
 import MessageContent from '../components/MessageContent'
 import './AISummaryWindow.scss'
 
@@ -2577,8 +2577,6 @@ function AISummaryWindow() {
 
   const runAskQuestion = async (question: string) => {
     if (!sessionId || !question || isAsking) return
-
-    setQaInput('')
     setQaError('')
     setIsAsking(true)
 
@@ -2701,12 +2699,10 @@ function AISummaryWindow() {
     }
   }
 
-  const handleAskQuestion = async () => {
-    const question = qaInput.trim()
+  const handleAskQuestion = async (question: string) => {
     if (!sessionId || !question || isAsking) return
-
     setQaError('')
-    await runAskQuestion(question)
+    await runAskQuestion(question.trim())
   }
 
   const handleCancelAsk = async () => {
@@ -2972,85 +2968,19 @@ function AISummaryWindow() {
 
       {workspaceMode === 'summary'
         ? renderSummaryHistorySidebar()
-        : renderQAConversationSidebar()}
+        : null}
     </>
   )
 
   const renderAskPanel = () => (
-    <div className="qa-panel">
-      <div className="qa-thread" ref={qaContentRef}>
-        {isLoadingQAConversation ? (
-          <div className="qa-empty">
-            <Loader2 size={24} className="spinner" />
-            <p>正在加载问答会话...</p>
-          </div>
-        ) : qaMessages.length === 0 ? (
-          <div className="qa-empty">
-            <MessageCircle size={28} />
-            <p>{activeQAConversationId ? '这个问答会话还没有消息' : '新建会话，或直接问一个关于当前聊天的问题'}</p>
-          </div>
-        ) : (
-          qaMessages.map((message) => (
-            <article key={message.id} className={`qa-message ${message.role}`}>
-              <div className="qa-avatar">
-                {renderQAAvatar(message)}
-              </div>
-              <div className="qa-message-body">
-                {message.role === 'assistant' ? (
-                  renderQATimeline(message)
-                ) : shouldRenderQABubble(message) && (
-                  <div className="qa-bubble">
-                    <p>{message.content}</p>
-                  </div>
-                )}
-              </div>
-            </article>
-          ))
-        )}
-      </div>
-
-      {qaError && <div className="qa-error-banner">{qaError}</div>}
-
-      <div className="qa-composer">
-        <textarea
-          ref={qaInputRef}
-          value={qaInput}
-          placeholder="给 AI 发送消息..."
-          rows={1}
-          onChange={(event) => setQaInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault()
-              if (qaInput.trim() && !isAsking) {
-                handleAskQuestion()
-              }
-            }
-          }}
-        />
-        <button
-          className="qa-send-btn"
-          type="button"
-          onClick={isAsking ? handleCancelAsk : handleAskQuestion}
-          disabled={!isAsking && !qaInput.trim()}
-          aria-label={isAsking ? '取消回答' : '发送消息'}
-          data-tooltip={isAsking ? '取消回答' : '发送消息'}
-        >
-          {isAsking ? <X size={16} strokeWidth={2.5} /> : <ArrowUp size={18} strokeWidth={2.6} />}
-        </button>
-      </div>
-
-      {renderEvidenceContextPanel()}
+    <div className="qa-panel qa-panel--agent">
+      <AiAgentPanel
+        scope={sessionId ? { kind: 'session', sessionId, sessionName } : { kind: 'global' }}
+        layout="full"
+        composerFeatures={{ mention: false }}
+      />
     </div>
   )
-
-  useEffect(() => {
-    if (qaInputRef.current) {
-      qaInputRef.current.style.height = 'auto'
-      if (qaInput) {
-        qaInputRef.current.style.height = `${Math.min(qaInputRef.current.scrollHeight, 200)}px`
-      }
-    }
-  }, [qaInput])
 
   const availableResultTabs = getAvailableResultTabs(result)
   const resolvedActiveResultTab = availableResultTabs.some((tab) => tab.id === activeResultTab)
