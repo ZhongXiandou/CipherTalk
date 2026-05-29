@@ -737,6 +737,105 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeAllListeners('ai:embeddingModelDownloadProgress')
     }
   },
+  aiagent: {
+    send: (opts: {
+      requestId: string
+      scope: { kind: 'session'; sessionId: string; sessionName?: string } | { kind: 'global' }
+      conversationId?: number
+      history: Array<{ role: 'user' | 'assistant'; content: string }>
+      message: string
+      provider: {
+        provider: string
+        apiKey: string
+        model: string
+        enableThinking?: boolean
+        temperature?: number
+      }
+      commandHint?: string
+      forceThinking?: boolean
+      readLimit?: number
+      skillIds?: string[]
+      scopedSessions?: Array<{ id: string; name: string }>
+    }) => ipcRenderer.invoke('aiagent:send', opts),
+
+    cancel: (requestId: string) => ipcRenderer.invoke('aiagent:cancel', requestId),
+
+    listConversations: (scope: { kind: 'session'; sessionId: string; sessionName?: string } | { kind: 'global' }) =>
+      ipcRenderer.invoke('aiagent:listConversations', scope),
+
+    loadConversation: (id: number) => ipcRenderer.invoke('aiagent:loadConversation', id),
+
+    newConversation: (scope: { kind: 'session'; sessionId: string; sessionName?: string } | { kind: 'global' }, title?: string) =>
+      ipcRenderer.invoke('aiagent:newConversation', scope, title),
+
+    deleteConversation: (id: number) => ipcRenderer.invoke('aiagent:deleteConversation', id),
+
+    updateTitle: (id: number, title: string) => ipcRenderer.invoke('aiagent:updateTitle', id, title),
+
+    getLastConversationId: (scope: { kind: 'session'; sessionId: string; sessionName?: string } | { kind: 'global' }) =>
+      ipcRenderer.invoke('aiagent:getLastConversationId', scope),
+
+    appendLocalMessages: (opts: {
+      conversationId?: number
+      scope: { kind: 'session'; sessionId: string; sessionName?: string } | { kind: 'global' }
+      messages: Array<{
+        role: 'user' | 'assistant'
+        content?: string
+        blocks?: unknown[]
+      }>
+    }) => ipcRenderer.invoke('aiagent:appendLocalMessages', opts),
+
+    generateTitle: (opts: {
+      conversationId: number
+      userMessage: string
+      assistantResponse: string
+      provider: {
+        provider: string
+        apiKey: string
+        model: string
+        enableThinking?: boolean
+        temperature?: number
+      }
+    }) => ipcRenderer.invoke('aiagent:generateTitle', opts),
+
+    onStreamEvent: (cb: (data: { requestId: string; event: AIStreamEvent }) => void) => {
+      const handler = (_: unknown, data: any) => cb(data)
+      ipcRenderer.on('aiagent:streamEvent', handler)
+      return () => ipcRenderer.off('aiagent:streamEvent', handler)
+    },
+
+    onProgress: (cb: (event: SessionQAProgressEvent) => void) => {
+      const handler = (_: unknown, event: any) => cb(event)
+      ipcRenderer.on('aiagent:progress', handler)
+      return () => ipcRenderer.off('aiagent:progress', handler)
+    },
+
+    onDone: (cb: (data: { requestId: string; conversationId?: number }) => void) => {
+      const handler = (_: unknown, data: any) => cb(data)
+      ipcRenderer.on('aiagent:done', handler)
+      return () => ipcRenderer.off('aiagent:done', handler)
+    },
+
+    onError: (cb: (data: { requestId: string; message: string }) => void) => {
+      const handler = (_: unknown, data: any) => cb(data)
+      ipcRenderer.on('aiagent:error', handler)
+      return () => ipcRenderer.off('aiagent:error', handler)
+    },
+
+    onConversationUpdated: (cb: (data: unknown) => void) => {
+      const handler = (_: unknown, data: any) => cb(data)
+      ipcRenderer.on('aiagent:conversationUpdated', handler)
+      return () => ipcRenderer.off('aiagent:conversationUpdated', handler)
+    },
+
+    removeListeners: () => {
+      ipcRenderer.removeAllListeners('aiagent:streamEvent')
+      ipcRenderer.removeAllListeners('aiagent:progress')
+      ipcRenderer.removeAllListeners('aiagent:done')
+      ipcRenderer.removeAllListeners('aiagent:error')
+      ipcRenderer.removeAllListeners('aiagent:conversationUpdated')
+    }
+  },
   agent: {
     sendMessage: (opts: {
       requestId?: string
