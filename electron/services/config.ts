@@ -54,6 +54,11 @@ interface ConfigSchema {
   releaseAnnouncementBody: string
   releaseAnnouncementNotes: string
   releaseAnnouncementSeenVersion: string
+  homeBackgroundSource: 'preset' | 'custom'
+  homeBackgroundCustomType: 'image' | 'video' | ''
+  homeBackgroundCustomPath: string
+  homeBackgroundCustomUrl: string
+  homeBackgroundBlur: number
 
   // 协议相关
   agreementVersion: number
@@ -137,6 +142,11 @@ const defaults: ConfigSchema = {
   releaseAnnouncementBody: '',
   releaseAnnouncementNotes: '',
   releaseAnnouncementSeenVersion: '',
+  homeBackgroundSource: 'preset',
+  homeBackgroundCustomType: '',
+  homeBackgroundCustomPath: '',
+  homeBackgroundCustomUrl: '',
+  homeBackgroundBlur: 0,
   sttLanguages: ['zh'],
   sttModelType: 'int8',
   sttMode: 'cpu',  // 默认使用 CPU 模式

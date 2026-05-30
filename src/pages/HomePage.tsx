@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { User, Smile, MessageSquareQuote, RefreshCw } from 'lucide-react'
-import { BackgroundPathsBackdrop } from '@/components/ui/background-paths'
 import { useAppStore } from '../stores/appStore'
+import { useThemeStore } from '../stores/themeStore'
 import WhatsNewModal from '../components/WhatsNewModal'
 import { RandomMomentBubble } from '../features/home/RandomMomentBubble'
 import {
@@ -15,9 +15,11 @@ import './HomePage.scss'
 
 function HomePage() {
   const { isDbConnected } = useAppStore()
+  const homeBackground = useThemeStore(s => s.homeBackground)
 
   const [showWhatsNew, setShowWhatsNew] = useState(false)
   const [currentVersion, setCurrentVersion] = useState('')
+  const [failedBackgroundKey, setFailedBackgroundKey] = useState('')
 
   const [randomSnippet, setRandomSnippet] = useState<RandomMomentSnippet | null>(null)
   const [randomSnippetLoading, setRandomSnippetLoading] = useState(false)
@@ -102,10 +104,51 @@ function HomePage() {
   const momentLt = randomSnippet?.message.localType
   const isTextBubble = momentLt === MOMENT_TEXT_TYPE
   const isImageOrEmojiBare = momentLt === MOMENT_IMAGE_TYPE || momentLt === MOMENT_EMOJI_TYPE
+  const customBackgroundKey = `${homeBackground.customType}:${homeBackground.customUrl}`
+  const canUseCustomBackground = homeBackground.source === 'custom'
+    && Boolean(homeBackground.customUrl)
+    && (homeBackground.customType === 'image' || homeBackground.customType === 'video')
+    && failedBackgroundKey !== customBackgroundKey
+  const backgroundStyle = {
+    '--home-background-blur': `${homeBackground.blur}px`
+  } as CSSProperties
+
+  useEffect(() => {
+    setFailedBackgroundKey('')
+  }, [customBackgroundKey, homeBackground.source])
+
+  const handleBackgroundError = () => {
+    if (canUseCustomBackground) {
+      setFailedBackgroundKey(customBackgroundKey)
+    }
+  }
 
   return (
     <div className="home-page">
-      <BackgroundPathsBackdrop className="home-background-paths" />
+      {canUseCustomBackground && homeBackground.customType === 'image' ? (
+        <img
+          className="home-background-media"
+          src={homeBackground.customUrl}
+          alt=""
+          style={backgroundStyle}
+          onError={handleBackgroundError}
+          aria-hidden="true"
+        />
+      ) : (
+        <video
+          className="home-background-media"
+          src={canUseCustomBackground ? homeBackground.customUrl : '/beijing.mp4'}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="metadata"
+          style={backgroundStyle}
+          onError={handleBackgroundError}
+          aria-hidden="true"
+        />
+      )}
+      <div className="home-background-tint" aria-hidden="true" />
       <button className="whats-new-btn" onClick={() => setShowWhatsNew(true)}>
         <Smile size={18} />
       </button>

@@ -20,7 +20,7 @@ import {
   Palette, Database, ImageIcon, Download, HardDrive, Info, RefreshCw, Shield, CheckCircle, AlertCircle, Mic,
   Zap, Layers, User, Sparkles, Lock, ShieldCheck, Minus, Plus, Smile, ChevronDown
 } from 'lucide-react'
-import '../../pages/SettingsPage.scss'
+import '../../pages/SettingsPage.css'
 
 const AISummarySettings = lazy(() => import('../ai/AISummarySettings'))
 const DataManagementTab = lazy(() => import('./tabs/DataManagementTab'))

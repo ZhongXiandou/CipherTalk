@@ -1,4 +1,5 @@
 .home-page {
+  --home-background-blur: 0px;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -11,21 +12,37 @@
   background: var(--bg-primary);
 }
 
-.home-background-paths {
+.home-background-media {
+  position: absolute;
+  inset: 0;
   z-index: 0;
-  opacity: 0.38;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.04);
+  filter: blur(var(--home-background-blur));
+  will-change: filter;
+  pointer-events: none;
+}
+
+.home-background-tint {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
   background:
-    radial-gradient(circle at 18% 22%, color-mix(in srgb, var(--primary) 16%, transparent), transparent 32%),
-    radial-gradient(circle at 82% 70%, color-mix(in srgb, var(--primary) 10%, transparent), transparent 34%),
-    var(--bg-primary);
-  mask-image: linear-gradient(115deg, rgba(0, 0, 0, 0.18), #000 22%, #000 78%, rgba(0, 0, 0, 0.2));
+    radial-gradient(circle at 18% 22%, color-mix(in srgb, var(--bg-primary) 12%, transparent), transparent 34%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-primary) 42%, transparent), color-mix(in srgb, var(--bg-primary) 66%, transparent));
+  pointer-events: none;
 
   [data-mode="dark"] & {
-    opacity: 0.28;
+    background:
+      radial-gradient(circle at 18% 22%, rgba(255, 255, 255, 0.08), transparent 34%),
+      linear-gradient(180deg, rgba(0, 0, 0, 0.34), rgba(0, 0, 0, 0.58));
   }
 }
 
-.home-page > :not(.home-background-paths):not(.whats-new-btn) {
+.home-page > .random-message-card,
+.home-page > .home-header {
   position: relative;
   z-index: 1;
 }

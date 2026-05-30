@@ -2,23 +2,56 @@ import { create } from 'zustand'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type NavLayout = 'sidebar' | 'dock'
+export type HomeBackgroundSource = 'preset' | 'custom'
+export type HomeBackgroundMediaType = 'image' | 'video' | ''
+
+export interface HomeBackgroundSettings {
+  source: HomeBackgroundSource
+  customType: HomeBackgroundMediaType
+  customPath: string
+  customUrl: string
+  blur: number
+}
 
 interface ThemeState {
   themeMode: ThemeMode
   navLayout: NavLayout
   dockAutoHide: boolean
+  homeBackground: HomeBackgroundSettings
   isLoaded: boolean
   setThemeMode: (mode: ThemeMode) => void
   setNavLayout: (layout: NavLayout) => void
   setDockAutoHide: (v: boolean) => void
+  setHomeBackgroundSource: (source: HomeBackgroundSource) => void
+  setHomeBackgroundCustom: (payload: {
+    type: Exclude<HomeBackgroundMediaType, ''>
+    path: string
+    url: string
+  }) => void
+  setHomeBackgroundBlur: (blur: number) => void
   toggleThemeMode: () => void
   loadTheme: () => Promise<void>
+}
+
+const DEFAULT_HOME_BACKGROUND: HomeBackgroundSettings = {
+  source: 'preset',
+  customType: '',
+  customPath: '',
+  customUrl: '',
+  blur: 0
+}
+
+const clampHomeBackgroundBlur = (value: unknown): number => {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 0
+  return Math.max(0, Math.min(30, Math.round(n)))
 }
 
 export const useThemeStore = create<ThemeState>()((set, get) => ({
   themeMode: 'light',
   navLayout: 'sidebar',
   dockAutoHide: true,
+  homeBackground: DEFAULT_HOME_BACKGROUND,
   isLoaded: false,
 
   setThemeMode: async (mode) => {
@@ -48,6 +81,51 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
     }
   },
 
+  setHomeBackgroundSource: async (source) => {
+    set((state) => ({
+      homeBackground: { ...state.homeBackground, source }
+    }))
+    try {
+      await window.electronAPI.config.set('homeBackgroundSource', source)
+    } catch (e) {
+      console.error('保存首页背景来源失败:', e)
+    }
+  },
+
+  setHomeBackgroundCustom: async ({ type, path, url }) => {
+    set((state) => ({
+      homeBackground: {
+        ...state.homeBackground,
+        source: 'custom',
+        customType: type,
+        customPath: path,
+        customUrl: url
+      }
+    }))
+    try {
+      await Promise.all([
+        window.electronAPI.config.set('homeBackgroundSource', 'custom'),
+        window.electronAPI.config.set('homeBackgroundCustomType', type),
+        window.electronAPI.config.set('homeBackgroundCustomPath', path),
+        window.electronAPI.config.set('homeBackgroundCustomUrl', url)
+      ])
+    } catch (e) {
+      console.error('保存首页自定义背景失败:', e)
+    }
+  },
+
+  setHomeBackgroundBlur: async (value) => {
+    const blur = clampHomeBackgroundBlur(value)
+    set((state) => ({
+      homeBackground: { ...state.homeBackground, blur }
+    }))
+    try {
+      await window.electronAPI.config.set('homeBackgroundBlur', blur)
+    } catch (e) {
+      console.error('保存首页背景模糊度失败:', e)
+    }
+  },
+
   toggleThemeMode: () => {
     const newMode = get().themeMode === 'light' ? 'dark' : 'light'
     get().setThemeMode(newMode)
@@ -58,7 +136,19 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
       const themeMode = await window.electronAPI.config.get('themeMode') as ThemeMode | undefined
       let navLayout = await window.electronAPI.config.get('navLayout') as NavLayout | undefined
       const dockAutoHide = await window.electronAPI.config.get('dockAutoHide') as boolean | undefined
+      const homeBackgroundSource = await window.electronAPI.config.get('homeBackgroundSource') as HomeBackgroundSource | undefined
+      const homeBackgroundCustomType = await window.electronAPI.config.get('homeBackgroundCustomType') as HomeBackgroundMediaType | undefined
+      const homeBackgroundCustomPath = await window.electronAPI.config.get('homeBackgroundCustomPath') as string | undefined
+      const homeBackgroundCustomUrl = await window.electronAPI.config.get('homeBackgroundCustomUrl') as string | undefined
+      const homeBackgroundBlur = await window.electronAPI.config.get('homeBackgroundBlur') as number | undefined
       const nextThemeMode: ThemeMode = themeMode === 'dark' || themeMode === 'system' ? themeMode : 'light'
+      const nextHomeBackground: HomeBackgroundSettings = {
+        source: homeBackgroundSource === 'custom' ? 'custom' : 'preset',
+        customType: homeBackgroundCustomType === 'image' || homeBackgroundCustomType === 'video' ? homeBackgroundCustomType : '',
+        customPath: typeof homeBackgroundCustomPath === 'string' ? homeBackgroundCustomPath : '',
+        customUrl: typeof homeBackgroundCustomUrl === 'string' ? homeBackgroundCustomUrl : '',
+        blur: clampHomeBackgroundBlur(homeBackgroundBlur)
+      }
 
       // 一次性迁移：统一切换到左侧边栏布局（与窗口标题栏融为一体的微信式布局）
       const migrated = await window.electronAPI.config.get('navLayoutMigratedV7') as boolean | undefined
@@ -76,6 +166,7 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
         themeMode: nextThemeMode,
         navLayout: navLayout || 'sidebar',
         dockAutoHide: dockAutoHide ?? true,
+        homeBackground: nextHomeBackground,
         isLoaded: true
       })
     } catch (e) {

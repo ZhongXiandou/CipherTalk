@@ -133,6 +133,13 @@ export interface ElectronAPI {
   file: {
     delete: (filePath: string) => Promise<{ success: boolean; error?: string }>
     copy: (sourcePath: string, destPath: string) => Promise<{ success: boolean; error?: string }>
+    importHomeBackground: (sourcePath: string) => Promise<{
+      success: boolean
+      path?: string
+      url?: string
+      mediaType?: 'image' | 'video'
+      error?: string
+    }>
     writeBase64: (filePath: string, base64Data: string) => Promise<{ success: boolean; error?: string }>
   }
   shell: {

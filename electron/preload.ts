@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   file: {
     delete: (filePath: string) => ipcRenderer.invoke('file:delete', filePath),
     copy: (sourcePath: string, destPath: string) => ipcRenderer.invoke('file:copy', sourcePath, destPath),
+    importHomeBackground: (sourcePath: string) => ipcRenderer.invoke('file:importHomeBackground', sourcePath),
     writeBase64: (filePath: string, base64Data: string) => ipcRenderer.invoke('file:writeBase64', filePath, base64Data)
   },
 
