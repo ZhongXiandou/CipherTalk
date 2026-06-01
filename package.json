@@ -51,6 +51,7 @@
     "@heroui/styles": "^3.1.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@radix-ui/react-slot": "^1.2.4",
+    "@tanstack/react-virtual": "^3.13.26",
     "ai": "^6.0.193",
     "better-sqlite3": "^12.5.0",
     "class-variance-authority": "^0.7.1",
