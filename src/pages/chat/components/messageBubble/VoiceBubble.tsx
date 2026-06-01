@@ -102,6 +102,20 @@ function VoiceBubble({ message, session, isSent, onContextMenu }: VoiceBubblePro
     setSttError(null)
 
     try {
+      // 防重复：先查转写结果缓存，命中则直接复用，避免重复检查模型状态与初始化引擎
+      if (!force) {
+        try {
+          const cached = await window.electronAPI.stt.getCachedTranscript(session.username, message.createTime)
+          if (cached.success && cached.transcript) {
+            setSttTranscript(cached.transcript)
+            setSttLoading(false)
+            return
+          }
+        } catch {
+          // 缓存查询失败则继续正常转写流程
+        }
+      }
+
       const sttMode = await window.electronAPI.config.get('sttMode') || 'cpu'
       console.log('[STT] 当前模式:', sttMode)
 
