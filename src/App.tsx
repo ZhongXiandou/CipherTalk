@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom'
-import Box from '@mui/material/Box'
+
 import TitleBar from './components/TitleBar'
 import Sidebar from './components/Sidebar'
 import BottomDock from './components/BottomDock'
@@ -685,31 +685,10 @@ function App() {
         </div>
       )}
 
-      <Box
-        sx={{
-          flex: 1,
-          display: 'flex',
-          minHeight: 0,
-          overflow: 'hidden',
-        }}
-      >
-        <Box
-          component="main"
-          sx={{
-            flex: 1,
-            minWidth: 0,
-            overflow: (disableContentOverflow || isFullPage) ? 'hidden' : 'auto',
-            px: isFullPage ? 0 : 3,
-            pt: isFullPage ? 0 : 3,
-            pb: 0,
-            // 侧栏布局：内容做成内嵌圆角面板，与外壳（侧栏同色）形成夹角圆角
-            ...(navLayout === 'sidebar' ? {
-              bgcolor: 'var(--bg-primary)',
-              borderRadius: '12px',
-              mr: '12px',
-              mb: '12px',
-            } : {}),
-          }}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        <main
+          className={`flex-1 min-w-0 ${(disableContentOverflow || isFullPage) ? 'overflow-hidden' : 'overflow-auto'} ${navLayout === 'sidebar' ? 'bg-[var(--bg-primary)] rounded-xl mr-3 mb-3' : ''}`}
+          style={{ paddingLeft: isFullPage ? 0 : 24, paddingRight: isFullPage ? 0 : 24, paddingTop: isFullPage ? 0 : 24 }}
         >
           <RouteGuard>
             <Routes>
@@ -726,8 +705,8 @@ function App() {
               <Route path="/chat-history/:sessionId/:messageId" element={<ChatHistoryPage />} />
             </Routes>
           </RouteGuard>
-        </Box>
-      </Box>
+        </main>
+      </div>
       </div>
       {navLayout === 'dock' && <BottomDock />}
       <DecryptProgressOverlay />
