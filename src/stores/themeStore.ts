@@ -4,9 +4,15 @@ export type ThemeMode = 'light' | 'dark' | 'system'
 export type NavLayout = 'sidebar' | 'dock'
 export type HomeBackgroundSource = 'preset' | 'custom'
 export type HomeBackgroundMediaType = 'image' | 'video' | ''
+export const HOME_BACKGROUND_PRESETS = [
+  { id: 'beijing', label: '默认背景', description: '原始预设视频', src: '/beijing.mp4' },
+  { id: 'beijing2', label: '备用背景', description: '新增预设视频', src: '/beijing2.mp4' }
+] as const
+export type HomeBackgroundPreset = typeof HOME_BACKGROUND_PRESETS[number]['id']
 
 export interface HomeBackgroundSettings {
   source: HomeBackgroundSource
+  preset: HomeBackgroundPreset
   customType: HomeBackgroundMediaType
   customPath: string
   customUrl: string
@@ -23,6 +29,7 @@ interface ThemeState {
   setNavLayout: (layout: NavLayout) => void
   setDockAutoHide: (v: boolean) => void
   setHomeBackgroundSource: (source: HomeBackgroundSource) => void
+  setHomeBackgroundPreset: (preset: HomeBackgroundPreset) => void
   setHomeBackgroundCustom: (payload: {
     type: Exclude<HomeBackgroundMediaType, ''>
     path: string
@@ -35,10 +42,22 @@ interface ThemeState {
 
 const DEFAULT_HOME_BACKGROUND: HomeBackgroundSettings = {
   source: 'preset',
+  preset: 'beijing',
   customType: '',
   customPath: '',
   customUrl: '',
   blur: 0
+}
+
+export const normalizeHomeBackgroundPreset = (value: unknown): HomeBackgroundPreset => {
+  return HOME_BACKGROUND_PRESETS.some((preset) => preset.id === value)
+    ? value as HomeBackgroundPreset
+    : 'beijing'
+}
+
+export const getHomeBackgroundPresetSrc = (value: unknown): string => {
+  const preset = normalizeHomeBackgroundPreset(value)
+  return HOME_BACKGROUND_PRESETS.find((item) => item.id === preset)?.src || '/beijing.mp4'
 }
 
 const clampHomeBackgroundBlur = (value: unknown): number => {
@@ -92,6 +111,21 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
     }
   },
 
+  setHomeBackgroundPreset: async (value) => {
+    const preset = normalizeHomeBackgroundPreset(value)
+    set((state) => ({
+      homeBackground: { ...state.homeBackground, source: 'preset', preset }
+    }))
+    try {
+      await Promise.all([
+        window.electronAPI.config.set('homeBackgroundSource', 'preset'),
+        window.electronAPI.config.set('homeBackgroundPreset', preset)
+      ])
+    } catch (e) {
+      console.error('保存首页预设背景失败:', e)
+    }
+  },
+
   setHomeBackgroundCustom: async ({ type, path, url }) => {
     set((state) => ({
       homeBackground: {
@@ -140,10 +174,12 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
       const homeBackgroundCustomType = await window.electronAPI.config.get('homeBackgroundCustomType') as HomeBackgroundMediaType | undefined
       const homeBackgroundCustomPath = await window.electronAPI.config.get('homeBackgroundCustomPath') as string | undefined
       const homeBackgroundCustomUrl = await window.electronAPI.config.get('homeBackgroundCustomUrl') as string | undefined
+      const homeBackgroundPreset = await window.electronAPI.config.get('homeBackgroundPreset') as HomeBackgroundPreset | undefined
       const homeBackgroundBlur = await window.electronAPI.config.get('homeBackgroundBlur') as number | undefined
       const nextThemeMode: ThemeMode = themeMode === 'dark' || themeMode === 'system' ? themeMode : 'light'
       const nextHomeBackground: HomeBackgroundSettings = {
         source: homeBackgroundSource === 'custom' ? 'custom' : 'preset',
+        preset: normalizeHomeBackgroundPreset(homeBackgroundPreset),
         customType: homeBackgroundCustomType === 'image' || homeBackgroundCustomType === 'video' ? homeBackgroundCustomType : '',
         customPath: typeof homeBackgroundCustomPath === 'string' ? homeBackgroundCustomPath : '',
         customUrl: typeof homeBackgroundCustomUrl === 'string' ? homeBackgroundCustomUrl : '',

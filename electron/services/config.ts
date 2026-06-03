@@ -55,6 +55,7 @@ interface ConfigSchema {
   releaseAnnouncementNotes: string
   releaseAnnouncementSeenVersion: string
   homeBackgroundSource: 'preset' | 'custom'
+  homeBackgroundPreset: 'beijing' | 'beijing2'
   homeBackgroundCustomType: 'image' | 'video' | ''
   homeBackgroundCustomPath: string
   homeBackgroundCustomUrl: string
@@ -143,6 +144,7 @@ const defaults: ConfigSchema = {
   releaseAnnouncementNotes: '',
   releaseAnnouncementSeenVersion: '',
   homeBackgroundSource: 'preset',
+  homeBackgroundPreset: 'beijing',
   homeBackgroundCustomType: '',
   homeBackgroundCustomPath: '',
   homeBackgroundCustomUrl: '',

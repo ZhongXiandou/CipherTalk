@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { User, Smile, MessageSquareQuote, RefreshCw } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
-import { useThemeStore } from '../stores/themeStore'
+import { getHomeBackgroundPresetSrc, useThemeStore } from '../stores/themeStore'
 import WhatsNewModal from '../components/WhatsNewModal'
 import { RandomMomentBubble } from '../features/home/RandomMomentBubble'
 import {
@@ -105,6 +105,7 @@ function HomePage() {
   const isTextBubble = momentLt === MOMENT_TEXT_TYPE
   const isImageOrEmojiBare = momentLt === MOMENT_IMAGE_TYPE || momentLt === MOMENT_EMOJI_TYPE
   const customBackgroundKey = `${homeBackground.customType}:${homeBackground.customUrl}`
+  const presetBackgroundSrc = getHomeBackgroundPresetSrc(homeBackground.preset)
   const canUseCustomBackground = homeBackground.source === 'custom'
     && Boolean(homeBackground.customUrl)
     && (homeBackground.customType === 'image' || homeBackground.customType === 'video')
@@ -138,7 +139,7 @@ function HomePage() {
       ) : (
         <video
           className="home-background-media"
-          src={canUseCustomBackground ? homeBackground.customUrl : '/beijing.mp4'}
+          src={canUseCustomBackground ? homeBackground.customUrl : presetBackgroundSrc}
           autoPlay
           muted
           loop

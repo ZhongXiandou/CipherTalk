@@ -1,7 +1,14 @@
 import { useState, type CSSProperties } from 'react'
 import { Description, Label, Radio, RadioGroup, Slider, Tabs, type Key } from '@heroui/react'
 import { ImageIcon, Moon, Monitor, PanelBottom, PanelLeft, Sun, Upload, Video } from 'lucide-react'
-import { useThemeStore, type HomeBackgroundSource, type NavLayout } from '../../../stores/themeStore'
+import {
+  HOME_BACKGROUND_PRESETS,
+  getHomeBackgroundPresetSrc,
+  useThemeStore,
+  type HomeBackgroundPreset,
+  type HomeBackgroundSource,
+  type NavLayout
+} from '../../../stores/themeStore'
 import { useAppStore } from '../../../stores/appStore'
 import { useSettingsStore } from '../settingsStore'
 import QuoteStyleOptionCard, { type QuoteStyle } from '../QuoteStyleOptionCard'
@@ -34,6 +41,7 @@ function AppearanceTab() {
     setNavLayout,
     setDockAutoHide,
     setHomeBackgroundSource,
+    setHomeBackgroundPreset,
     setHomeBackgroundCustom,
     setHomeBackgroundBlur
   } = useThemeStore()
@@ -48,6 +56,7 @@ function AppearanceTab() {
 
   const customBackgroundReady = Boolean(homeBackground.customUrl)
     && (homeBackground.customType === 'image' || homeBackground.customType === 'video')
+  const presetBackgroundSrc = getHomeBackgroundPresetSrc(homeBackground.preset)
   const backgroundPreviewStyle = {
     '--home-background-preview-blur': `${homeBackground.blur}px`
   } as CSSProperties
@@ -146,37 +155,71 @@ function AppearanceTab() {
           </Tabs.ListContainer>
         </Tabs>
 
-        <div className="home-background-config">
-          <div className="home-background-preview" aria-label="首页背景预览">
-            {homeBackground.source === 'custom' && customBackgroundReady ? (
-              homeBackground.customType === 'image' ? (
-                <img src={homeBackground.customUrl} alt="" decoding="async" loading="lazy" style={backgroundPreviewStyle} />
-              ) : (
-                <video src={homeBackground.customUrl} autoPlay muted loop playsInline style={backgroundPreviewStyle} />
-              )
-            ) : (
-              <video src="/beijing.mp4" autoPlay muted loop playsInline style={backgroundPreviewStyle} />
-            )}
-            <span className="home-background-preview-badge">
-              {homeBackground.source === 'custom' && customBackgroundReady
-                ? homeBackground.customType === 'image' ? '图片' : '视频'
-                : '预设视频'}
-            </span>
-          </div>
+        <div className={`home-background-config home-background-config--${homeBackground.source}`}>
+          {homeBackground.source === 'preset' && (
+            <RadioGroup
+              className="home-background-preset-options"
+              name="homeBackgroundPreset"
+              orientation="horizontal"
+              value={homeBackground.preset}
+              variant="secondary"
+              onChange={(value) => setHomeBackgroundPreset(value as HomeBackgroundPreset)}
+            >
+              {HOME_BACKGROUND_PRESETS.map((preset) => (
+                <Radio className="home-background-preset-radio" key={preset.id} value={preset.id}>
+                  <Radio.Control className="home-background-preset-control">
+                    <Radio.Indicator />
+                  </Radio.Control>
+                  <Radio.Content className="home-background-preset-radio-content">
+                    <video
+                      className="home-background-preset-video"
+                      src={preset.src}
+                      autoPlay
+                      muted
+                      loop
+                      playsInline
+                      preload="metadata"
+                      style={backgroundPreviewStyle}
+                      aria-hidden="true"
+                    />
+                    <span className="home-background-preset-overlay">{preset.label}</span>
+                  </Radio.Content>
+                </Radio>
+              ))}
+            </RadioGroup>
+          )}
 
           {homeBackground.source === 'custom' && (
-            <div className="home-background-controls">
-              <button
-                type="button"
-                className="btn btn-secondary home-background-import-btn"
-                onClick={handlePickBackground}
-                disabled={backgroundImporting}
-              >
-                <Upload size={16} aria-hidden />
-                {backgroundImporting ? '导入中...' : customBackgroundReady ? '更换背景' : '选择背景'}
-              </button>
-              {backgroundError && <div className="home-background-error">{backgroundError}</div>}
-            </div>
+            <>
+              <div className="home-background-preview" aria-label="首页背景预览">
+                {customBackgroundReady ? (
+                  homeBackground.customType === 'image' ? (
+                    <img src={homeBackground.customUrl} alt="" decoding="async" loading="lazy" style={backgroundPreviewStyle} />
+                  ) : (
+                    <video src={homeBackground.customUrl} autoPlay muted loop playsInline style={backgroundPreviewStyle} />
+                  )
+                ) : (
+                  <video src={presetBackgroundSrc} autoPlay muted loop playsInline style={backgroundPreviewStyle} />
+                )}
+                <span className="home-background-preview-badge">
+                  {customBackgroundReady
+                    ? homeBackground.customType === 'image' ? '图片' : '视频'
+                    : '预设视频'}
+                </span>
+              </div>
+              <div className="home-background-controls">
+                <button
+                  type="button"
+                  className="btn btn-secondary home-background-import-btn"
+                  onClick={handlePickBackground}
+                  disabled={backgroundImporting}
+                >
+                  <Upload size={16} aria-hidden />
+                  {backgroundImporting ? '导入中...' : customBackgroundReady ? '更换背景' : '选择背景'}
+                </button>
+                {backgroundError && <div className="home-background-error">{backgroundError}</div>}
+              </div>
+            </>
           )}
         </div>
 

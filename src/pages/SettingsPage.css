@@ -387,6 +387,10 @@
   align-items: stretch;
 }
 
+.home-background-config--preset {
+  display: block;
+}
+
 .home-background-preview {
   position: relative;
   aspect-ratio: 16/9;
@@ -428,6 +432,78 @@
 
 .home-background-import-btn {
   width: fit-content;
+}
+
+.home-background-preset-options {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.home-background-preset-radio {
+  min-width: 0;
+  position: relative;
+  cursor: pointer;
+  border-radius: 8px;
+  aspect-ratio: 16/9;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--bg-tertiary);
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.home-background-preset-radio:hover {
+  border-color: rgba(var(--primary-rgb), 0.28);
+  transform: translateY(-1px);
+}
+
+.home-background-preset-radio[data-selected=true],
+.home-background-preset-radio[data-selected="true"],
+.home-background-preset-radio[aria-checked=true],
+.home-background-preset-radio[aria-checked="true"] {
+  border-color: rgba(var(--primary-rgb), 0.52);
+  box-shadow: 0 0 0 2px rgba(var(--primary-rgb), 0.18);
+}
+
+.home-background-preset-control {
+  position: absolute;
+  inset: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.home-background-preset-radio-content {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.home-background-preset-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.04);
+  filter: blur(var(--home-background-preview-blur, 0px));
+}
+
+.home-background-preset-overlay {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.52);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  pointer-events: none;
 }
 
 .home-background-error {
@@ -474,6 +550,9 @@
   }
   .home-background-preview {
     max-width: 360px;
+  }
+  .home-background-preset-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 .quote-style-options {
@@ -1137,6 +1216,7 @@
   border-radius: var(--settings-control-radius);
 }
 .settings-page .quote-style-options .radio-label,
+.settings-page .home-background-preset-radio,
 .settings-page .window-close-options .window-close-radio,
 .settings-page .activation-status-card,
 .settings-page .device-info-card {
@@ -1153,6 +1233,7 @@
   border-radius: var(--settings-card-radius);
 }
 .settings-page .quote-style-options .radio-label:hover,
+.settings-page .home-background-preset-radio:hover,
 .settings-page .window-close-options .window-close-radio:hover {
   border-color: rgba(var(--primary-rgb), 0.28);
   background: var(--settings-card-hover);
@@ -1164,6 +1245,10 @@
 .settings-page .quote-style-options .radio-label[data-selected="true"],
 .settings-page .quote-style-options .radio-label[aria-checked=true],
 .settings-page .quote-style-options .radio-label[aria-checked="true"],
+.settings-page .home-background-preset-radio[data-selected=true],
+.settings-page .home-background-preset-radio[data-selected="true"],
+.settings-page .home-background-preset-radio[aria-checked=true],
+.settings-page .home-background-preset-radio[aria-checked="true"],
 .settings-page .window-close-options .window-close-radio[data-selected=true],
 .settings-page .window-close-options .window-close-radio[data-selected="true"],
 .settings-page .window-close-options .window-close-radio[aria-checked=true],
