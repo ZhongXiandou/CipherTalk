@@ -28,6 +28,11 @@ import {
 import type { Message, ChatLabSourceMessage, ChatRecordItem } from './types'
 import type { ChatServiceState } from './state'
 
+function hasUsableSortSeqCursor(cursorSortSeq: number): boolean {
+  const value = Number(cursorSortSeq || 0)
+  return Number.isFinite(value) && value > 0
+}
+
 /**
  * 获取消息列表（支持跨多个数据库合并，已优化）
  */
@@ -481,6 +486,7 @@ export async function getMessagesBefore(state: ChatServiceState,
     const fetchLimitPerDb = Math.max(limit + 1, 50)
     const effectiveCursorCreateTime = cursorCreateTime ?? Number.MAX_SAFE_INTEGER
     const effectiveCursorLocalId = cursorLocalId ?? Number.MAX_SAFE_INTEGER
+    const useSortSeqCursor = hasUsableSortSeqCursor(cursorSortSeq)
 
     for (const { tableName, dbPath } of dbTablePairs) {
       try {
@@ -491,66 +497,121 @@ export async function getMessagesBefore(state: ChatServiceState,
         let rows: any[]
 
         if (hasName2IdTable && myRowId !== null) {
-          sql = `SELECT m.*,
-                 CASE WHEN m.real_sender_id = ? THEN 1 ELSE 0 END AS computed_is_send,
-                 n.user_name AS sender_username
-                 FROM ${tableName} m
-                 LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
-                 WHERE (
-                   m.sort_seq < ?
-                   OR (m.sort_seq = ? AND m.create_time < ?)
-                   OR (m.sort_seq = ? AND m.create_time = ? AND m.local_id < ?)
-                 )
-                 ORDER BY m.sort_seq DESC, m.create_time DESC, m.local_id DESC
-                 LIMIT ?`
-          rows = await dbAdapter.all<any>('message', dbPath, sql, [
-            myRowId,
-            cursorSortSeq,
-            cursorSortSeq,
-            effectiveCursorCreateTime,
-            cursorSortSeq,
-            effectiveCursorCreateTime,
-            effectiveCursorLocalId,
-            fetchLimitPerDb
-          ])
+          if (useSortSeqCursor) {
+            sql = `SELECT m.*,
+                   CASE WHEN m.real_sender_id = ? THEN 1 ELSE 0 END AS computed_is_send,
+                   n.user_name AS sender_username
+                   FROM ${tableName} m
+                   LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+                   WHERE (
+                     m.sort_seq < ?
+                     OR (m.sort_seq = ? AND m.create_time < ?)
+                     OR (m.sort_seq = ? AND m.create_time = ? AND m.local_id < ?)
+                   )
+                   ORDER BY m.sort_seq DESC, m.create_time DESC, m.local_id DESC
+                   LIMIT ?`
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
+              myRowId,
+              cursorSortSeq,
+              cursorSortSeq,
+              effectiveCursorCreateTime,
+              cursorSortSeq,
+              effectiveCursorCreateTime,
+              effectiveCursorLocalId,
+              fetchLimitPerDb
+            ])
+          } else {
+            sql = `SELECT m.*,
+                   CASE WHEN m.real_sender_id = ? THEN 1 ELSE 0 END AS computed_is_send,
+                   n.user_name AS sender_username
+                   FROM ${tableName} m
+                   LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+                   WHERE (
+                     m.create_time < ?
+                     OR (m.create_time = ? AND m.local_id < ?)
+                   )
+                   ORDER BY m.create_time DESC, m.local_id DESC
+                   LIMIT ?`
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
+              myRowId,
+              effectiveCursorCreateTime,
+              effectiveCursorCreateTime,
+              effectiveCursorLocalId,
+              fetchLimitPerDb
+            ])
+          }
         } else if (hasName2IdTable) {
-          sql = `SELECT m.*, n.user_name AS sender_username
-                 FROM ${tableName} m
-                 LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
-                 WHERE (
-                   m.sort_seq < ?
-                   OR (m.sort_seq = ? AND m.create_time < ?)
-                   OR (m.sort_seq = ? AND m.create_time = ? AND m.local_id < ?)
-                 )
-                 ORDER BY m.sort_seq DESC, m.create_time DESC, m.local_id DESC
-                 LIMIT ?`
-          rows = await dbAdapter.all<any>('message', dbPath, sql, [
-            cursorSortSeq,
-            cursorSortSeq,
-            effectiveCursorCreateTime,
-            cursorSortSeq,
-            effectiveCursorCreateTime,
-            effectiveCursorLocalId,
-            fetchLimitPerDb
-          ])
+          if (useSortSeqCursor) {
+            sql = `SELECT m.*, n.user_name AS sender_username
+                   FROM ${tableName} m
+                   LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+                   WHERE (
+                     m.sort_seq < ?
+                     OR (m.sort_seq = ? AND m.create_time < ?)
+                     OR (m.sort_seq = ? AND m.create_time = ? AND m.local_id < ?)
+                   )
+                   ORDER BY m.sort_seq DESC, m.create_time DESC, m.local_id DESC
+                   LIMIT ?`
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
+              cursorSortSeq,
+              cursorSortSeq,
+              effectiveCursorCreateTime,
+              cursorSortSeq,
+              effectiveCursorCreateTime,
+              effectiveCursorLocalId,
+              fetchLimitPerDb
+            ])
+          } else {
+            sql = `SELECT m.*, n.user_name AS sender_username
+                   FROM ${tableName} m
+                   LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+                   WHERE (
+                     m.create_time < ?
+                     OR (m.create_time = ? AND m.local_id < ?)
+                   )
+                   ORDER BY m.create_time DESC, m.local_id DESC
+                   LIMIT ?`
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
+              effectiveCursorCreateTime,
+              effectiveCursorCreateTime,
+              effectiveCursorLocalId,
+              fetchLimitPerDb
+            ])
+          }
         } else {
-          sql = `SELECT * FROM ${tableName}
-                 WHERE (
-                   sort_seq < ?
-                   OR (sort_seq = ? AND create_time < ?)
-                   OR (sort_seq = ? AND create_time = ? AND local_id < ?)
-                 )
-                 ORDER BY sort_seq DESC, create_time DESC, local_id DESC
-                 LIMIT ?`
-          rows = await dbAdapter.all<any>('message', dbPath, sql, [
-            cursorSortSeq,
-            cursorSortSeq,
-            effectiveCursorCreateTime,
-            cursorSortSeq,
-            effectiveCursorCreateTime,
-            effectiveCursorLocalId,
-            fetchLimitPerDb
-          ])
+          if (useSortSeqCursor) {
+            sql = `SELECT * FROM ${tableName}
+                   WHERE (
+                     sort_seq < ?
+                     OR (sort_seq = ? AND create_time < ?)
+                     OR (sort_seq = ? AND create_time = ? AND local_id < ?)
+                   )
+                   ORDER BY sort_seq DESC, create_time DESC, local_id DESC
+                   LIMIT ?`
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
+              cursorSortSeq,
+              cursorSortSeq,
+              effectiveCursorCreateTime,
+              cursorSortSeq,
+              effectiveCursorCreateTime,
+              effectiveCursorLocalId,
+              fetchLimitPerDb
+            ])
+          } else {
+            sql = `SELECT * FROM ${tableName}
+                   WHERE (
+                     create_time < ?
+                     OR (create_time = ? AND local_id < ?)
+                   )
+                   ORDER BY create_time DESC, local_id DESC
+                   LIMIT ?`
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
+              effectiveCursorCreateTime,
+              effectiveCursorCreateTime,
+              effectiveCursorLocalId,
+              fetchLimitPerDb
+            ])
+          }
         }
 
         for (const row of rows) {
@@ -610,6 +671,7 @@ export async function getMessagesAfter(state: ChatServiceState,
     const fetchLimitPerDb = Math.max(limit + 1, 50)
     const effectiveCursorCreateTime = cursorCreateTime ?? Number.MIN_SAFE_INTEGER
     const effectiveCursorLocalId = cursorLocalId ?? Number.MIN_SAFE_INTEGER
+    const useSortSeqCursor = hasUsableSortSeqCursor(cursorSortSeq)
 
     for (const { tableName, dbPath } of dbTablePairs) {
       try {
@@ -620,66 +682,121 @@ export async function getMessagesAfter(state: ChatServiceState,
         let rows: any[]
 
         if (hasName2IdTable && myRowId !== null) {
-          sql = `SELECT m.*,
-                 CASE WHEN m.real_sender_id = ? THEN 1 ELSE 0 END AS computed_is_send,
-                 n.user_name AS sender_username
-                 FROM ${tableName} m
-                 LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
-                 WHERE (
-                   m.sort_seq > ?
-                   OR (m.sort_seq = ? AND m.create_time > ?)
-                   OR (m.sort_seq = ? AND m.create_time = ? AND m.local_id > ?)
-                 )
-                 ORDER BY m.sort_seq ASC, m.create_time ASC, m.local_id ASC
-                 LIMIT ?`
-          rows = await dbAdapter.all<any>('message', dbPath, sql, [
-            myRowId,
-            cursorSortSeq,
-            cursorSortSeq,
-            effectiveCursorCreateTime,
-            cursorSortSeq,
-            effectiveCursorCreateTime,
-            effectiveCursorLocalId,
-            fetchLimitPerDb
-          ])
+          if (useSortSeqCursor) {
+            sql = `SELECT m.*,
+                   CASE WHEN m.real_sender_id = ? THEN 1 ELSE 0 END AS computed_is_send,
+                   n.user_name AS sender_username
+                   FROM ${tableName} m
+                   LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+                   WHERE (
+                     m.sort_seq > ?
+                     OR (m.sort_seq = ? AND m.create_time > ?)
+                     OR (m.sort_seq = ? AND m.create_time = ? AND m.local_id > ?)
+                   )
+                   ORDER BY m.sort_seq ASC, m.create_time ASC, m.local_id ASC
+                   LIMIT ?`
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
+              myRowId,
+              cursorSortSeq,
+              cursorSortSeq,
+              effectiveCursorCreateTime,
+              cursorSortSeq,
+              effectiveCursorCreateTime,
+              effectiveCursorLocalId,
+              fetchLimitPerDb
+            ])
+          } else {
+            sql = `SELECT m.*,
+                   CASE WHEN m.real_sender_id = ? THEN 1 ELSE 0 END AS computed_is_send,
+                   n.user_name AS sender_username
+                   FROM ${tableName} m
+                   LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+                   WHERE (
+                     m.create_time > ?
+                     OR (m.create_time = ? AND m.local_id > ?)
+                   )
+                   ORDER BY m.create_time ASC, m.local_id ASC
+                   LIMIT ?`
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
+              myRowId,
+              effectiveCursorCreateTime,
+              effectiveCursorCreateTime,
+              effectiveCursorLocalId,
+              fetchLimitPerDb
+            ])
+          }
         } else if (hasName2IdTable) {
-          sql = `SELECT m.*, n.user_name AS sender_username
-                 FROM ${tableName} m
-                 LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
-                 WHERE (
-                   m.sort_seq > ?
-                   OR (m.sort_seq = ? AND m.create_time > ?)
-                   OR (m.sort_seq = ? AND m.create_time = ? AND m.local_id > ?)
-                 )
-                 ORDER BY m.sort_seq ASC, m.create_time ASC, m.local_id ASC
-                 LIMIT ?`
-          rows = await dbAdapter.all<any>('message', dbPath, sql, [
-            cursorSortSeq,
-            cursorSortSeq,
-            effectiveCursorCreateTime,
-            cursorSortSeq,
-            effectiveCursorCreateTime,
-            effectiveCursorLocalId,
-            fetchLimitPerDb
-          ])
+          if (useSortSeqCursor) {
+            sql = `SELECT m.*, n.user_name AS sender_username
+                   FROM ${tableName} m
+                   LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+                   WHERE (
+                     m.sort_seq > ?
+                     OR (m.sort_seq = ? AND m.create_time > ?)
+                     OR (m.sort_seq = ? AND m.create_time = ? AND m.local_id > ?)
+                   )
+                   ORDER BY m.sort_seq ASC, m.create_time ASC, m.local_id ASC
+                   LIMIT ?`
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
+              cursorSortSeq,
+              cursorSortSeq,
+              effectiveCursorCreateTime,
+              cursorSortSeq,
+              effectiveCursorCreateTime,
+              effectiveCursorLocalId,
+              fetchLimitPerDb
+            ])
+          } else {
+            sql = `SELECT m.*, n.user_name AS sender_username
+                   FROM ${tableName} m
+                   LEFT JOIN Name2Id n ON m.real_sender_id = n.rowid
+                   WHERE (
+                     m.create_time > ?
+                     OR (m.create_time = ? AND m.local_id > ?)
+                   )
+                   ORDER BY m.create_time ASC, m.local_id ASC
+                   LIMIT ?`
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
+              effectiveCursorCreateTime,
+              effectiveCursorCreateTime,
+              effectiveCursorLocalId,
+              fetchLimitPerDb
+            ])
+          }
         } else {
-          sql = `SELECT * FROM ${tableName}
-                 WHERE (
-                   sort_seq > ?
-                   OR (sort_seq = ? AND create_time > ?)
-                   OR (sort_seq = ? AND create_time = ? AND local_id > ?)
-                 )
-                 ORDER BY sort_seq ASC, create_time ASC, local_id ASC
-                 LIMIT ?`
-          rows = await dbAdapter.all<any>('message', dbPath, sql, [
-            cursorSortSeq,
-            cursorSortSeq,
-            effectiveCursorCreateTime,
-            cursorSortSeq,
-            effectiveCursorCreateTime,
-            effectiveCursorLocalId,
-            fetchLimitPerDb
-          ])
+          if (useSortSeqCursor) {
+            sql = `SELECT * FROM ${tableName}
+                   WHERE (
+                     sort_seq > ?
+                     OR (sort_seq = ? AND create_time > ?)
+                     OR (sort_seq = ? AND create_time = ? AND local_id > ?)
+                   )
+                   ORDER BY sort_seq ASC, create_time ASC, local_id ASC
+                   LIMIT ?`
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
+              cursorSortSeq,
+              cursorSortSeq,
+              effectiveCursorCreateTime,
+              cursorSortSeq,
+              effectiveCursorCreateTime,
+              effectiveCursorLocalId,
+              fetchLimitPerDb
+            ])
+          } else {
+            sql = `SELECT * FROM ${tableName}
+                   WHERE (
+                     create_time > ?
+                     OR (create_time = ? AND local_id > ?)
+                   )
+                   ORDER BY create_time ASC, local_id ASC
+                   LIMIT ?`
+            rows = await dbAdapter.all<any>('message', dbPath, sql, [
+              effectiveCursorCreateTime,
+              effectiveCursorCreateTime,
+              effectiveCursorLocalId,
+              fetchLimitPerDb
+            ])
+          }
         }
 
         for (const row of rows) {

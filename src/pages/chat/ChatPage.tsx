@@ -443,11 +443,12 @@ function ChatPage(_props: ChatPageProps) {
       }
 
       const oldestLoadedMessage = messagesRef.current[0]
-      const useCursorPagination = offset > 0 && oldestLoadedMessage !== undefined && typeof oldestLoadedMessage.sortSeq === 'number'
+      const oldestSortSeq = Number(oldestLoadedMessage?.sortSeq || 0)
+      const useCursorPagination = offset > 0 && oldestLoadedMessage !== undefined && Number.isFinite(oldestSortSeq) && oldestSortSeq > 0
       const result = useCursorPagination
         ? await window.electronAPI.chat.getMessagesBefore(
           sessionId,
-          oldestLoadedMessage.sortSeq,
+          oldestSortSeq,
           50,
           typeof oldestLoadedMessage.createTime === 'number' ? oldestLoadedMessage.createTime : undefined,
           typeof oldestLoadedMessage.localId === 'number' ? oldestLoadedMessage.localId : undefined
