@@ -38,7 +38,7 @@ import LockScreen from './pages/LockScreen'
 import { useAuthStore } from './stores/authStore'
 import { X, Shield, Loader2 } from 'lucide-react'
 import { applyWindowChromeToDocument, syncWindowControlsOverlayToDocument } from './utils/windowChrome'
-import './App.scss'
+import './App.css'
 
 type AppUpdateInfo = {
   hasUpdate: boolean
