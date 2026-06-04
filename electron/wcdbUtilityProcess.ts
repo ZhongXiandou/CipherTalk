@@ -17,6 +17,7 @@ if (!parentPort) {
 
 const core = new WcdbCore()
 let monitorRegistered = false
+const keepAliveTimer = setInterval(() => undefined, 60_000)
 
 // 串行化所有请求：每个请求（含游标 open→fetch→close 全过程）跑完后下一个才开始。
 // 防止 close/open/shutdown 在某个游标批次的 await 间隙插入，导致 native 句柄被释放后
@@ -30,6 +31,7 @@ parentPort.on('message', (event: Electron.MessageEvent) => {
 
 async function handleMessage(msg: any) {
   const { id, type, payload } = msg || {}
+  let shouldExitAfterReply = false
   try {
     let result: any
     switch (type) {
@@ -50,6 +52,7 @@ async function handleMessage(msg: any) {
       case 'shutdown':
         core.shutdown()
         result = { success: true }
+        shouldExitAfterReply = true
         break
       case 'isConnected':
         result = core.isConnected()
@@ -125,6 +128,7 @@ async function handleMessage(msg: any) {
         result = { success: false, error: `unknown type: ${type}` }
     }
     parentPort.postMessage({ id, result })
+    if (shouldExitAfterReply) clearInterval(keepAliveTimer)
   } catch (e: any) {
     parentPort.postMessage({ id, error: e?.message || String(e) })
   }

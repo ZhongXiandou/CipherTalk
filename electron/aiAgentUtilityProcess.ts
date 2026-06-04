@@ -16,9 +16,14 @@ if (!parentPort) {
 }
 
 const aborters = new Map<string, AbortController>()
+const keepAliveTimer = setInterval(() => undefined, 60_000)
 
 parentPort.on('message', (event: Electron.MessageEvent) => {
   void handleMessage(event.data)
+})
+
+process.once('exit', () => {
+  clearInterval(keepAliveTimer)
 })
 
 async function handleMessage(msg: any): Promise<void> {
