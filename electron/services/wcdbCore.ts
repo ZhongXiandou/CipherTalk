@@ -841,12 +841,19 @@ export class WcdbCore {
       case -4: return '数据库打开失败'
       case -5: return '查询执行失败'
       case -6: return 'WCDB 尚未初始化'
+      case -7: return 'WCDB 表结构不匹配'
+      case -8: return '软件偷来的吧！'
+      case -9: return '快提醒作者更新软件了！'
+      case -10: return '靠，你从哪搞得软件？'
       default: return `WCDB 错误码: ${code}`
     }
   }
 
   private mapCursorStatusCode(code: number, prefix: string): string {
     if (code === -7) return 'message schema mismatch：当前账号消息表结构与程序要求不一致'
+    if (code === -8) return `${prefix}: ${code}（软件偷来的吧！）`
+    if (code === -9) return `${prefix}: ${code}（快提醒作者更新软件了！）`
+    if (code === -10) return `${prefix}: ${code}（靠，你从哪搞得软件？）`
     if (code === -3) return `${prefix}: ${code}（消息数据库未找到）`
     return `${prefix}: ${code}`
   }
