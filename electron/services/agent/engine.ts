@@ -6,6 +6,7 @@ import { generateText, ToolLoopAgent, stepCountIs, type ProviderOptions, type UI
 import { createLanguageModel } from './provider'
 import { buildSystemPrompt } from './prompts'
 import { buildTools } from './tools'
+import { compactMessages } from './compaction'
 import type { AgentProviderConfig, AgentRunInput } from './types'
 
 const MAX_STEPS = 24
@@ -42,6 +43,8 @@ export async function runAgent(
     tools: buildTools(input.scope),
     stopWhen: stepCountIs(MAX_STEPS),
     providerOptions: buildReasoningProviderOptions(input),
+    // 每步压缩上下文：裁掉旧工具结果/推理痕迹，防长对话或多工具循环爆上下文（见 compaction.ts）
+    prepareStep: ({ messages }) => ({ messages: compactMessages(messages) }),
   })
 
   const result = await agent.stream({ messages: input.messages, abortSignal: signal })

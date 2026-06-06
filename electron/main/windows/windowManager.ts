@@ -644,10 +644,11 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
         height: 760,
         minWidth: 900,
         minHeight: 640,
-        frame: false,
+        frame: true,
         transparent: false,
         backgroundColor: nativeTheme.shouldUseDarkColors ? '#1A1A1A' : '#FFFFFF',
         hasShadow: true,
+        autoHideMenuBar: true,
         ...getWindowIconOptions(ctx),
         webPreferences: {
           preload: join(__dirname, 'preload.js'),

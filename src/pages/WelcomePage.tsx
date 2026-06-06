@@ -1,14 +1,32 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import {
+  Alert,
+  Button,
+  Card,
+  Chip,
+  Description,
+  InputGroup,
+  Label,
+  ListBox,
+  ProgressBar,
+  ScrollShadow,
+  Spinner,
+  TextField,
+  Tooltip,
+  Typography
+} from '@heroui/react'
 import { useAppStore } from '../stores/appStore'
 import { dialog } from '../services/ipc'
 import * as configService from '../services/config'
 import {
   ArrowLeft, ArrowRight, CheckCircle2, Eye, EyeOff,
-  FolderOpen, ShieldCheck, Wand2, RotateCcw, Minus, X, Fingerprint, Lock
+  FolderOpen, ShieldCheck, Wand2, RotateCcw, Fingerprint, Lock, BookOpen
 } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
-import './WelcomePage.scss'
+import './WelcomePage.css'
+
+const GUIDE_URL = 'https://ilovebinglu.notion.site/ciphertalk'
 
 const steps = [
   { id: 'intro', title: '欢迎', desc: '准备开始你的本地数据探索' },
@@ -200,8 +218,8 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
   }, [dbPath, cachePath, wxid, decryptKey, imageXorKey, imageAesKey, isAddAccountMode])
 
   const currentStep = steps[stepIndex]
-  const showWindowControls = standalone
-  const rootClassName = `welcome-page${isClosing ? ' is-closing' : ''}${standalone ? ' is-standalone' : ''}${showWindowControls ? (isMac ? ' is-mac' : ' is-windows') : ''}`
+  const rootClassName = `welcome-page${isClosing ? ' is-closing' : ''}${standalone ? ' is-standalone' : ''}`
+  const progressValue = ((stepIndex + 1) / steps.length) * 100
 
   useEffect(() => {
     if (currentStep.id !== 'db') return
@@ -211,40 +229,8 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
     void handleAutoDetectPath(true)
   }, [currentStep.id, dbPath, isDetectingPath])
 
-  const handleMinimize = () => {
-    window.electronAPI.window.minimize()
-  }
-
-  const handleCloseWindow = () => {
-    window.electronAPI.window.close()
-  }
-
-  const renderWindowControls = () => {
-    if (!showWindowControls) return null
-
-    return (
-      <div className="window-controls">
-        {isMac ? (
-          <>
-            <button type="button" className="window-btn is-close" onClick={handleCloseWindow} aria-label="关闭">
-              <X size={14} />
-            </button>
-            <button type="button" className="window-btn" onClick={handleMinimize} aria-label="最小化">
-              <Minus size={14} />
-            </button>
-          </>
-        ) : (
-          <>
-            <button type="button" className="window-btn" onClick={handleMinimize} aria-label="最小化">
-              <Minus size={14} />
-            </button>
-            <button type="button" className="window-btn is-close" onClick={handleCloseWindow} aria-label="关闭">
-              <X size={14} />
-            </button>
-          </>
-        )}
-      </div>
-    )
+  const handleOpenGuide = () => {
+    void window.electronAPI.shell.openExternal(GUIDE_URL)
   }
 
   const handleResetCachePath = async () => {
@@ -642,33 +628,510 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
     }
   }
 
+  const handleSelectWxidCandidate = (candidateWxid: string) => {
+    setWxid(candidateWxid)
+    setIsAccountVerified(false)
+    if (decryptKey.length === 64) {
+      void verifyAccountDirectory(candidateWxid, decryptKey)
+    }
+  }
+
+  const handleEnterHome = () => {
+    if (standalone) {
+      setIsClosing(true)
+      setTimeout(() => {
+        window.electronAPI.window.completeWelcome()
+      }, 450)
+    } else {
+      navigate('/home')
+    }
+  }
+
+  const renderInfoList = (items: ReactNode[]) => (
+    <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
+      {items.map((item, index) => (
+        <li key={index} className="flex min-w-0 items-start gap-2 text-sm leading-6 text-foreground">
+          <CheckCircle2 size={15} className="mt-1 shrink-0 text-accent" />
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  )
+
+  const renderStatusAlert = (message: string, status: 'default' | 'accent' | 'success' | 'warning' | 'danger' = 'default') => (
+    <Alert status={status}>
+      <Alert.Indicator />
+      <Alert.Content>
+        <Alert.Description>{message}</Alert.Description>
+      </Alert.Content>
+    </Alert>
+  )
+
+  const renderTextField = (
+    label: string,
+    value: string,
+    onChange: (value: string) => void,
+    options: {
+      placeholder?: string
+      description?: ReactNode
+      type?: string
+      suffix?: ReactNode
+    } = {}
+  ) => (
+    <TextField fullWidth value={value} onChange={onChange}>
+      <Label>{label}</Label>
+      <InputGroup fullWidth variant="secondary">
+        <InputGroup.Input type={options.type || 'text'} placeholder={options.placeholder} />
+        {options.suffix && <InputGroup.Suffix className="pr-0">{options.suffix}</InputGroup.Suffix>}
+      </InputGroup>
+      {options.description ? <Description>{options.description}</Description> : null}
+    </TextField>
+  )
+
+  const renderStepInfo = () => {
+    if (currentStep.id === 'intro') {
+      return (
+        <div className="flex min-w-0 flex-col gap-3.5">
+          <Typography.Heading level={4}>准备开始</Typography.Heading>
+          <Typography.Paragraph size="sm" color="muted">
+            这个向导会完成数据库目录、缓存目录、密钥和本地连接配置。
+          </Typography.Paragraph>
+          {renderInfoList(['数据仅在本地处理', '不上传聊天记录或密钥', '完成后直接进入主应用'])}
+        </div>
+      )
+    }
+
+    if (currentStep.id === 'db') {
+      return (
+        <div className="flex min-w-0 flex-col gap-3.5">
+          <Typography.Heading level={4}>数据库目录</Typography.Heading>
+          <Typography.Paragraph size="sm" color="muted">
+            系统会优先自动识别当前设备上的微信数据存储目录。
+          </Typography.Paragraph>
+          {renderInfoList([
+            '进入本步骤后会先尝试自动检测',
+            '检测到结果后可直接打开文件夹确认',
+            isMac ? '未命中时手动选择版本目录或账号目录' : '未命中时按微信存储位置手动选择'
+          ])}
+          {!isMac && renderStatusAlert('目录路径不可包含中文，如有中文请先在微信中迁移到英文目录。', 'warning')}
+        </div>
+      )
+    }
+
+    if (currentStep.id === 'cache') {
+      return (
+        <div className="flex min-w-0 flex-col gap-3.5">
+          <Typography.Heading level={4}>缓存目录</Typography.Heading>
+          <Typography.Paragraph size="sm" color="muted">
+            缓存目录用于存储头像、表情与图片等本地媒体缓存。
+          </Typography.Paragraph>
+          {renderInfoList([
+            isMac ? '默认使用文稿目录下的 CipherTalkData' : '自动选择更适合存储的磁盘',
+            '需要预留足够空间',
+            '后续仍可在设置中修改'
+          ])}
+        </div>
+      )
+    }
+
+    if (currentStep.id === 'key') {
+      return (
+        <div className="flex min-w-0 flex-col gap-3.5">
+          <Typography.Heading level={4}>解密密钥</Typography.Heading>
+          <Typography.Paragraph size="sm" color="muted">
+            此步骤会在本机完成密钥识别与账号目录校验。
+          </Typography.Paragraph>
+          {renderInfoList([
+            isMac ? '建议先启动微信并按提示完成授权' : '点击自动获取后按提示登录微信',
+            '识别完成后会尝试匹配账号目录',
+            '密钥仅保存在本地配置中'
+          ])}
+          {renderStatusAlert(isMac ? '若系统环境不满足要求，界面会直接给出提示。' : '密钥不会上传到服务器。', 'default')}
+        </div>
+      )
+    }
+
+    if (currentStep.id === 'image') {
+      return (
+        <div className="flex min-w-0 flex-col gap-3.5">
+          <Typography.Heading level={4}>图片密钥</Typography.Heading>
+          <Typography.Paragraph size="sm" color="muted">
+            图片密钥用于解密微信图片，可自动获取，也可以稍后手动填写。
+          </Typography.Paragraph>
+          {renderInfoList([
+            '优先通过本地缓存目录和 kvcomm 码推导',
+            isMac ? 'kvcomm 失败时再回退到进程内存扫描' : '请先在电脑微信中打开几张图片',
+            '此步骤可跳过'
+          ])}
+        </div>
+      )
+    }
+
+    if (currentStep.id === 'security') {
+      return (
+        <div className="flex min-w-0 flex-col gap-3.5">
+          <Typography.Heading level={4}>安全防护</Typography.Heading>
+          <Typography.Paragraph size="sm" color="muted">
+            应用锁是可选项，用于在启动应用时增加一道系统验证。
+          </Typography.Paragraph>
+          {renderInfoList([
+            `使用 ${biometricLabel} 进行认证`,
+            isMac ? '设备不支持时可跳过后改用密码' : '支持面部识别、指纹或 PIN 码',
+            '适合共享设备或公共电脑'
+          ])}
+          {renderStatusAlert('推荐开启，但不会影响继续完成初始化。', 'success')}
+        </div>
+      )
+    }
+
+    return (
+      <div className="flex min-w-0 flex-col gap-3.5">
+        <Typography.Heading level={4}>连接数据库</Typography.Heading>
+        <Typography.Paragraph size="sm" color="muted">
+          最后一步会保存账号配置，并测试本地 WCDB 直连。
+        </Typography.Paragraph>
+        {renderInfoList(['验证数据库目录、账号目录和密钥', '连接成功后保存当前账号配置', '完成后自动进入主应用'])}
+        {renderStatusAlert('请确认前面的必填项都已正确配置。', 'warning')}
+      </div>
+    )
+  }
+
+  const renderDbStep = () => (
+    <div className="flex min-w-0 flex-col gap-3.5">
+      {hasCache && renderStatusAlert('已从缓存加载配置数据。', 'success')}
+      {renderTextField('数据库根目录', dbPath, setDbPath, {
+        placeholder: isMac
+          ? '~/Library/Containers/com.tencent.xinWeChat/Data/Library/Application Support/com.tencent.xinWeChat/2.0b4.0.9'
+          : 'C:\\Users\\xxx\\Documents\\xwechat_files',
+        description: isMac ? '请选择微信版本目录或账号根目录。' : '请选择微信-设置-存储位置对应的目录。'
+      })}
+      <div className="flex flex-wrap items-center gap-2.5">
+        <Button type="button" variant="primary" onPress={() => void handleAutoDetectPath()} isPending={isDetectingPath}>
+          {isDetectingPath ? <Spinner size="sm" color="current" /> : <Wand2 size={16} />}
+          {isDetectingPath ? '自动检测中' : '自动检测'}
+        </Button>
+        <Button type="button" variant="secondary" onPress={() => void handleSelectPath()}>
+          <FolderOpen size={16} /> 浏览选择目录
+        </Button>
+        {dbPath && (
+          <Button type="button" variant="tertiary" onPress={() => void handleOpenDetectedPath()}>
+            <FolderOpen size={16} /> 打开此文件夹
+          </Button>
+        )}
+      </div>
+      {!isMac && renderStatusAlert('目录路径不可包含中文。如有中文，请在微信设置中更改存储位置并迁移至英文目录。', 'warning')}
+    </div>
+  )
+
+  const renderCacheStep = () => (
+    <div className="flex min-w-0 flex-col gap-3.5">
+      {renderTextField('缓存目录', cachePath, setCachePath, {
+        placeholder: isMac ? '~/Documents/CipherTalkData' : 'D:\\CipherTalkDB',
+        description: isMac ? '用于头像、表情与图片缓存，默认已选文稿目录。' : '用于头像、表情与图片缓存，已自动选择最佳磁盘。'
+      })}
+      <div className="flex flex-wrap items-center gap-2.5">
+        <Button type="button" variant="primary" onPress={() => void handleSelectCachePath()}>
+          <FolderOpen size={16} /> 浏览选择
+        </Button>
+        <Button type="button" variant="secondary" onPress={() => void handleResetCachePath()}>
+          <RotateCcw size={16} /> 恢复默认
+        </Button>
+      </div>
+    </div>
+  )
+
+  const renderKeyStep = () => (
+    <div className="flex min-w-0 flex-col gap-3.5">
+      {renderTextField('账号目录', wxid, (value) => {
+        setWxid(value)
+        setIsAccountVerified(false)
+      }, {
+        placeholder: '获取密钥后将自动填充',
+        description: (
+          <span className="inline-flex items-center gap-2">
+            状态：
+            <Chip size="sm" variant="soft" color={isAccountVerified ? 'success' : 'warning'}>
+              <Chip.Label>{isAccountVerified ? '已验证' : '未验证'}</Chip.Label>
+            </Chip>
+          </span>
+        )
+      })}
+
+      {wxidOptions.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <Typography.Paragraph size="xs" color="muted">候选账号目录</Typography.Paragraph>
+          <ScrollShadow hideScrollBar className="max-h-44 rounded-lg border border-border">
+            <ListBox
+              aria-label="候选账号目录"
+              selectionMode="single"
+              selectedKeys={wxid ? [wxid] : []}
+              onSelectionChange={(keys) => {
+                if (keys === 'all') return
+                const selectedWxid = Array.from(keys)[0]
+                if (selectedWxid != null) handleSelectWxidCandidate(String(selectedWxid))
+              }}
+            >
+              {wxidOptions.map((id) => (
+                <ListBox.Item key={id} id={id} textValue={id}>
+                  <div className="flex min-w-0 flex-col">
+                    <Label className="truncate">{id}</Label>
+                    <Description>{wxid === id ? '当前选择' : '点击选择并验证'}</Description>
+                  </div>
+                  <ListBox.ItemIndicator />
+                </ListBox.Item>
+              ))}
+            </ListBox>
+          </ScrollShadow>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2.5">
+        <Button
+          type="button"
+          variant="secondary"
+          onPress={() => void verifyAccountDirectory(wxid, decryptKey)}
+          isDisabled={isVerifyingAccount || !wxid || decryptKey.length !== 64}
+          isPending={isVerifyingAccount}
+        >
+          {isVerifyingAccount ? <Spinner size="sm" color="current" /> : <ShieldCheck size={16} />}
+          {isVerifyingAccount ? '验证中' : '验证账号目录'}
+        </Button>
+        <Button
+          type="button"
+          variant="tertiary"
+          onPress={() => void handleScanWxid()}
+          isDisabled={!dbPath || isScanningWxid}
+          isPending={isScanningWxid}
+        >
+          {isScanningWxid ? <Spinner size="sm" color="current" /> : <FolderOpen size={16} />}
+          扫描账号目录
+        </Button>
+      </div>
+
+      {renderTextField('解密密钥', decryptKey, (value) => setDecryptKey(value.trim()), {
+        placeholder: '64 位十六进制密钥',
+        type: showDecryptKey ? 'text' : 'password',
+        suffix: (
+          <Tooltip delay={0}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              isIconOnly
+              aria-label={showDecryptKey ? '隐藏密钥' : '显示密钥'}
+              onPress={() => setShowDecryptKey(!showDecryptKey)}
+            >
+              {showDecryptKey ? <EyeOff size={16} /> : <Eye size={16} />}
+            </Button>
+            <Tooltip.Content>{showDecryptKey ? '隐藏密钥' : '显示密钥'}</Tooltip.Content>
+          </Tooltip>
+        )
+      })}
+
+      <Button
+        type="button"
+        variant="secondary"
+        className="self-start"
+        onPress={() => void handleAutoGetDbKey()}
+        isPending={isFetchingDbKey}
+      >
+        {isFetchingDbKey ? <Spinner size="sm" color="current" /> : <Wand2 size={16} />}
+        {isFetchingDbKey ? '获取中' : '自动获取密钥'}
+      </Button>
+
+      {!isMac && showWechatPathPrompt && (
+        <Card variant="secondary" className="w-full">
+          <Card.Header>
+            <Card.Title>选择微信程序</Card.Title>
+            <Card.Description>未能自动找到微信安装位置，请手动选择 Weixin.exe。</Card.Description>
+          </Card.Header>
+          <Card.Content className="flex min-w-0 flex-col gap-3.5">
+            {renderTextField('微信程序路径', customWechatPath, setCustomWechatPath, {
+              placeholder: 'C:\\Program Files\\Tencent\\WeChat\\Weixin.exe'
+            })}
+            <div className="flex flex-wrap items-center gap-2.5">
+              <Button type="button" variant="secondary" onPress={() => void handleSelectWechatPath()}>
+                <FolderOpen size={16} /> 浏览选择
+              </Button>
+              <Button type="button" variant="primary" onPress={handleConfirmWechatPath}>
+                确认并继续
+              </Button>
+            </div>
+          </Card.Content>
+        </Card>
+      )}
+
+      {dbKeyStatus && renderStatusAlert(dbKeyStatus, isAccountVerified ? 'success' : 'default')}
+      {renderStatusAlert(
+        isMac
+          ? '获取密钥会调用 mac helper，并尝试识别候选账号目录。macOS 可能需要管理员授权。'
+          : '点击自动获取后等待 hook 安装成功提示，然后登录微信即可。',
+        'default'
+      )}
+    </div>
+  )
+
+  const renderImageStep = () => (
+    <div className="flex min-w-0 flex-col gap-3.5">
+      {renderTextField('图片 XOR 密钥', imageXorKey, setImageXorKey, {
+        placeholder: '例如：0xA4'
+      })}
+      {renderTextField('图片 AES 密钥', imageAesKey, setImageAesKey, {
+        placeholder: '16 位密钥'
+      })}
+      <Button
+        type="button"
+        variant="secondary"
+        className="self-start"
+        onPress={() => void handleAutoGetImageKey()}
+        isDisabled={isFetchingImageKey}
+        isPending={isFetchingImageKey}
+      >
+        {isFetchingImageKey ? <Spinner size="sm" color="current" /> : <Wand2 size={16} />}
+        {isFetchingImageKey ? '获取中' : '自动获取图片密钥'}
+      </Button>
+      {imageKeyStatus && renderStatusAlert(imageKeyStatus, 'default')}
+      {isFetchingImageKey && renderStatusAlert(isMac ? '正在尝试 kvcomm / 内存扫描，请稍候。' : '正在扫描内存，请稍候。', 'accent')}
+      <Description>{isMac ? '优先从 kvcomm 和模板文件推导，失败后回退到内存扫描。' : '如获取失败，请先在电脑微信中打开查看几张图片后重试。'}</Description>
+    </div>
+  )
+
+  const renderSecurityStep = () => (
+    <div className="flex min-w-0 flex-col gap-3.5">
+      <Card variant="secondary" className="w-full">
+        <Card.Header className="flex-row items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="grid size-12 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
+              {isMac ? <Lock size={28} /> : <Fingerprint size={28} />}
+            </div>
+            <div className="min-w-0">
+              <Card.Title>{biometricLabel} 认证</Card.Title>
+              <Card.Description>
+                {isMac ? '启用 Touch ID 以保护您的数据。' : '启用 Windows Hello 以保护您的数据。'}
+              </Card.Description>
+            </div>
+          </div>
+          {isAuthEnabled && (
+            <Chip size="sm" variant="soft" color="success">
+              <CheckCircle2 size={12} />
+              <Chip.Label>已启用</Chip.Label>
+            </Chip>
+          )}
+        </Card.Header>
+        <Card.Content>
+          <Description>
+            {isMac ? '启用后，每次打开应用都需要进行系统 Touch ID 验证。' : '启用后，每次打开应用都需要进行生物识别或 PIN 码验证。'}
+          </Description>
+        </Card.Content>
+        <Card.Footer className="flex-wrap gap-2">
+          {!isAuthEnabled ? (
+            <Button
+              type="button"
+              variant="primary"
+              onPress={async () => {
+                setIsEnablingAuth(true)
+                setAuthStatus(`正在等待${biometricLabel}验证...`)
+                const result = await enableAuth()
+                setIsEnablingAuth(false)
+                if (result.success) {
+                  setAuthStatus('已成功启用认证保护')
+                } else {
+                  setError(result.error || '启用失败')
+                  setAuthStatus('')
+                }
+              }}
+              isPending={isEnablingAuth}
+            >
+              {isEnablingAuth ? <Spinner size="sm" color="current" /> : <ShieldCheck size={16} />}
+              {isEnablingAuth ? '正在配置' : '启用应用锁'}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="danger"
+              onPress={async () => {
+                await disableAuth()
+                setAuthStatus('')
+              }}
+            >
+              关闭保护
+            </Button>
+          )}
+        </Card.Footer>
+      </Card>
+      {authStatus && renderStatusAlert(authStatus, 'success')}
+    </div>
+  )
+
+  const renderSummaryItem = (label: string, value: ReactNode) => (
+    <div className="grid grid-cols-[96px_minmax(0,1fr)] items-start gap-3.5 border-b border-dashed border-border py-2.5 last:border-b-0">
+      <span className="text-[13px] text-muted">{label}</span>
+      <strong className="break-all text-right font-mono text-[13px] font-semibold text-foreground">{value}</strong>
+    </div>
+  )
+
+  const renderDecryptStep = () => (
+    <div className="flex min-w-0 flex-col gap-3.5">
+      <Card variant="secondary" className="w-full">
+        <Card.Header>
+          <Card.Title>配置摘要</Card.Title>
+          <Card.Description>确认无误后连接数据库。</Card.Description>
+        </Card.Header>
+        <Card.Content className="flex flex-col gap-0">
+          {renderSummaryItem('数据库目录', dbPath || '未设置')}
+          {renderSummaryItem('缓存目录', cachePath || '未设置')}
+          {renderSummaryItem('账号目录', wxid ? `${wxid}${isAccountVerified ? '（已验证）' : '（未验证）'}` : '未设置')}
+          {renderSummaryItem('解密密钥', decryptKey ? '已设置 (64位)' : '未设置')}
+          {renderSummaryItem('图片密钥', imageXorKey || imageAesKey ? '已设置' : '未设置（可选）')}
+        </Card.Content>
+      </Card>
+      <Button type="button" variant="primary" fullWidth onPress={() => void handleConfirm()} isPending={isDecrypting}>
+        {isDecrypting ? <Spinner size="sm" color="current" /> : <ShieldCheck size={16} />}
+        {isDecrypting ? '连接中' : '连接数据库'}
+      </Button>
+      {decryptStatus && countdown === 0 && renderStatusAlert(decryptStatus, 'accent')}
+      {!isDecrypting && !decryptStatus && <Description className="text-center">点击连接数据库后，系统将验证配置并直连 WCDB。</Description>}
+    </div>
+  )
+
+  const renderStepForm = () => {
+    if (currentStep.id === 'intro') {
+      return (
+        <div className="flex min-h-82.5 flex-col items-center justify-center gap-3.5 text-center">
+          <div className="grid size-18 place-items-center rounded-lg bg-accent-soft text-accent">
+            <Wand2 size={34} />
+          </div>
+          <Typography.Heading level={3}>点击下一步开始配置</Typography.Heading>
+          <Typography.Paragraph size="sm" color="muted">整个过程大约需要 3-5 分钟。</Typography.Paragraph>
+        </div>
+      )
+    }
+    if (currentStep.id === 'db') return renderDbStep()
+    if (currentStep.id === 'cache') return renderCacheStep()
+    if (currentStep.id === 'key') return renderKeyStep()
+    if (currentStep.id === 'image') return renderImageStep()
+    if (currentStep.id === 'security') return renderSecurityStep()
+    return renderDecryptStep()
+  }
+
   if (isDbConnected && !isAddAccountMode) {
     return (
       <div className={rootClassName}>
-        {renderWindowControls()}
-        <div className="welcome-shell">
-          <div className="connected-panel">
-            <div className="connected-icon">
+        <div className="welcome-shell z-1 flex h-[min(700px,calc(100vh-40px))] w-[min(1080px,calc(100vw-48px))] flex-col gap-3">
+          <Card className="m-auto w-[min(420px,100%)] items-center p-6 pt-9 text-center">
+            <div className="grid size-20 place-items-center rounded-lg bg-accent-soft text-accent">
               <CheckCircle2 size={48} />
             </div>
-            <h1>已连接数据库</h1>
-            <p>配置已完成，可以开始使用了</p>
-            <button
-              className="btn btn-primary btn-large"
-              onClick={() => {
-                if (standalone) {
-                  setIsClosing(true)
-                  setTimeout(() => {
-                    window.electronAPI.window.completeWelcome()
-                  }, 450)
-                } else {
-                  navigate('/home')
-                }
-              }}
-            >
+            <Card.Header className="items-center text-center">
+              <Card.Title>已连接数据库</Card.Title>
+              <Card.Description>配置已完成，可以开始使用了。</Card.Description>
+            </Card.Header>
+            <Card.Footer className="justify-center">
+              <Button type="button" variant="primary" size="lg" onPress={handleEnterHome}>
               进入首页
-            </button>
-          </div>
+              </Button>
+            </Card.Footer>
+          </Card>
         </div>
       </div>
     )
@@ -676,8 +1139,6 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
 
   return (
     <div className={rootClassName}>
-      {renderWindowControls()}
-
       {/* Hook 安装成功气泡提示 */}
       {showHookSuccessToast && (
         <div className="hook-success-toast">
@@ -696,503 +1157,113 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         </div>
       )}
 
-      <div className="welcome-shell">
-        {/* 顶部进度条 */}
-        <div className="progress-header">
-          <div className="step-progress">
-            {steps.map((step, index) => (
-              <div key={step.id} className={`progress-step ${index === stepIndex ? 'active' : ''} ${index < stepIndex ? 'done' : ''}`}>
-                <div className="progress-dot">
-                  {index < stepIndex ? <CheckCircle2 size={16} /> : index + 1}
+      <div className="welcome-shell z-1 flex h-[min(700px,calc(100vh-40px))] w-[min(1080px,calc(100vw-48px))] flex-col gap-3">
+        <Card className="shrink-0">
+          <Card.Content className="grid grid-cols-[minmax(260px,0.78fr)_minmax(360px,1fr)] items-center gap-6 pb-2 max-[940px]:grid-cols-1">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <img src="./logo.png" alt="CipherTalk" className="size-11 shrink-0 rounded-lg shadow-[0_10px_24px_color-mix(in_oklch,var(--foreground)_12%,transparent)]" />
+                <div className="min-w-0">
+                  <Typography.Heading level={3} className="truncate">CipherTalk 初始化</Typography.Heading>
+                  <Typography.Paragraph size="sm" color="muted" className="truncate">{currentStep.desc}</Typography.Paragraph>
                 </div>
-                <div className="progress-label">{step.title}</div>
-                {index < steps.length - 1 && <div className="progress-line" />}
               </div>
-            ))}
-          </div>
-        </div>
-
-        {/* 底部内容区 */}
-        <div className="content-area">
-          {/* 左侧说明 */}
-          <div className="info-panel">
-            <div className="panel-brand">
-              <img src="./logo.png" alt="CipherTalk" className="brand-logo" />
-              <div>
-                <h1 className="brand-title">CipherTalk</h1>
-                <p className="brand-subtitle">初始引导</p>
-              </div>
+              <Button type="button" variant="secondary" size="sm" onPress={handleOpenGuide} className="shrink-0">
+                <BookOpen size={16} />
+                使用教程
+              </Button>
             </div>
-
-            <div className="info-divider"></div>
-
-            <div className="step-header">
-              <h2>{currentStep.title}</h2>
-              <p className="info-desc">{currentStep.desc}</p>
+            <div className="flex min-w-0 flex-col gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <Chip color="accent" variant="soft" size="sm">
+                  <Chip.Label>{stepIndex + 1} / {steps.length}</Chip.Label>
+                </Chip>
+                <Typography.Paragraph size="sm" weight="medium">{currentStep.title}</Typography.Paragraph>
+              </div>
+              <ProgressBar aria-label="初始化进度" value={progressValue} valueLabel={`${Math.round(progressValue)}%`}>
+                <ProgressBar.Track><ProgressBar.Fill /></ProgressBar.Track>
+              </ProgressBar>
             </div>
-
-            {currentStep.id === 'intro' && (
-              <div className="info-content">
-                <h3>准备好了吗？</h3>
-                <p>接下来只需配置数据库目录和获取解密密钥。</p>
-                <div className="info-tips">
-                  <div className="tip-item">
-                    <CheckCircle2 size={16} />
-                    <span>数据仅在本地处理</span>
-                  </div>
-                  <div className="tip-item">
-                    <CheckCircle2 size={16} />
-                    <span>不上传任何信息</span>
-                  </div>
-                  <div className="tip-item">
-                    <CheckCircle2 size={16} />
-                    <span>完全离线运行</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {currentStep.id === 'db' && (
-              <div className="info-content">
-                <h3>自动获取数据库目录</h3>
-                <p>系统会优先自动识别当前设备上的微信数据存储目录。</p>
-                <ul className="info-list">
-                  <li>进入本步骤后会先尝试自动检测</li>
-                  <li>检测到结果后可直接打开文件夹确认</li>
-                  <li>{isMac ? '若未命中，再手动选择版本目录或账号目录' : '若未命中，再按微信存储位置手动选择'}</li>
-                </ul>
-                {!isMac && (
-                  <div className="info-warning">
-                    <ShieldCheck size={16} />
-                    <span>如路径包含中文，请在微信中更改存储位置</span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {currentStep.id === 'cache' && (
-              <div className="info-content">
-                <h3>缓存目录说明</h3>
-                <p>用于存储解密后的图片、表情等媒体文件。</p>
-                <ul className="info-list">
-                  <li>{isMac ? 'macOS 默认使用文稿目录下的 CipherTalkData' : '自动检测可用磁盘（优先 D、E、F 盘）'}</li>
-                  <li>{isMac ? '也可以手动指定到其他本地目录' : '避免使用系统盘（C盘）'}</li>
-                  <li>需要足够的存储空间</li>
-                  <li>可以手动修改路径</li>
-                </ul>
-              </div>
-            )}
-
-            {currentStep.id === 'key' && (
-              <div className="info-content">
-                <h3>解密密钥说明</h3>
-                <p>此步骤会在本机完成密钥识别与账号校验。</p>
-                <ul className="info-list">
-                  <li>{isMac ? '建议先启动微信，并按界面提示完成授权' : '点击“自动获取”后按提示操作'}</li>
-                  <li>{isMac ? '识别完成后会自动尝试匹配账号目录' : '完成后会自动识别账号目录'}</li>
-                  <li>密钥仅保存在本地配置中</li>
-                </ul>
-                <div className="info-warning">
-                  <ShieldCheck size={16} />
-                  <span>{isMac ? '若系统环境不满足要求，界面会直接给出提示' : '密钥不会上传到服务器'}</span>
-                </div>
-              </div>
-            )}
-
-            {currentStep.id === 'image' && (
-              <div className="info-content">
-                <h3>图片密钥说明</h3>
-                <p>用于解密微信图片的密钥（可选）。</p>
-                <ul className="info-list">
-                  <li>优先通过本地缓存目录和 kvcomm 码推导图片密钥</li>
-                  <li>{isMac ? 'kvcomm 失败时才回退到微信进程内存扫描' : '无需启动微信，秒级获取'}</li>
-                  <li>自动匹配当前 wxid 的密钥</li>
-                  <li>如无法获取，可手动填写</li>
-                </ul>
-              </div>
-            )}
-
-            {currentStep.id === 'security' && (
-              <div className="info-content">
-                <h3>安全防护说明</h3>
-                <p>为应用添加额外的安全保护（可选）。</p>
-                {isMac ? (
-                  <>
-                    <ul className="info-list">
-                      <li>启用后每次启动需要验证</li>
-                      <li>使用 macOS 系统 Touch ID 进行认证</li>
-                      <li>若当前设备不支持，可跳过后改用应用密码</li>
-                      <li>保护您的聊天记录隐私</li>
-                    </ul>
-                    <div className="info-warning" style={{ background: 'rgba(76, 175, 80, 0.1)', color: '#4CAF50' }}>
-                      <ShieldCheck size={16} />
-                      <span>推荐在共享设备上开启此功能</span>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <ul className="info-list">
-                      <li>启用后每次启动需要验证</li>
-                      <li>使用 Windows Hello 进行认证</li>
-                      <li>支持面部识别、指纹或 PIN 码</li>
-                      <li>保护您的聊天记录隐私</li>
-                    </ul>
-                    <div className="info-warning" style={{ background: 'rgba(76, 175, 80, 0.1)', color: '#4CAF50' }}>
-                      <ShieldCheck size={16} />
-                      <span>推荐在公共电脑上开启此功能</span>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {currentStep.id === 'decrypt' && (
-              <div className="info-content">
-                <h3>连接数据库说明</h3>
-                <p>直连本地 WCDB，无需落地解密缓存。</p>
-                <ul className="info-list">
-                  <li>点击"连接数据库"验证配置</li>
-                  <li>系统会测试 WCDB 直连</li>
-                  <li>连接成功后保存账号配置</li>
-                  <li>完成后即可开始使用</li>
-                </ul>
-                <div className="info-warning">
-                  <ShieldCheck size={16} />
-                  <span>请确保前面的步骤都已正确配置</span>
-                </div>
-              </div>
-            )}
-
-            <div className="info-footer">
-              <ShieldCheck size={14} />
-              <span>数据仅在本地处理，不上传服务器</span>
-            </div>
-          </div>
-
-          {/* 右侧配置表单 */}
-          <div className="setup-card">
-            <div className="setup-body">
-              {currentStep.id === 'intro' && (
-                <div className="intro-message">
-                  <Wand2 size={32} />
-                  <h3>点击"下一步"开始配置</h3>
-                  <p>整个过程大约需要 3-5 分钟</p>
-                </div>
-              )}
-
-              {currentStep.id === 'db' && (
-                <div className="setup-body">
-                  <label className="field-label">数据库根目录</label>
-                  {hasCache && (
-                    <div className="field-hint" style={{ color: '#4CAF50', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <CheckCircle2 size={14} />
-                      <span>已从缓存加载配置数据</span>
-                    </div>
-                  )}
-                  <input
-                    type="text"
-                    className="field-input"
-                    placeholder={isMac
-                      ? '例如：~/Library/Containers/com.tencent.xinWeChat/Data/Library/Application Support/com.tencent.xinWeChat/2.0b4.0.9'
-                      : '例如：C:\\Users\\xxx\\Documents\\xwechat_files'}
-                    value={dbPath}
-                    onChange={(e) => setDbPath(e.target.value)}
-                  />
-                  <div className="button-row">
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => handleAutoDetectPath()}
-                      disabled={isDetectingPath}
-                    >
-                      <Wand2 size={16} /> {isDetectingPath ? '自动检测中...' : '自动检测'}
-                    </button>
-                    <button className="btn btn-secondary" onClick={handleSelectPath}>
-                      <FolderOpen size={16} /> 浏览选择目录
-                    </button>
-                  </div>
-                  {dbPath && (
-                    <div className="button-row">
-                      <button className="btn btn-secondary" onClick={handleOpenDetectedPath}>
-                        <FolderOpen size={16} /> 打开此文件夹
-                      </button>
-                    </div>
-                  )}
-                  <div className="field-hint">{isMac ? '请选择微信版本目录或账号根目录' : '请选择微信-设置-存储位置对应的目录'}</div>
-                  {!isMac && (
-                    <div className="field-hint" style={{ color: '#ff6b6b', marginTop: '4px' }}>⚠️ 目录路径不可包含中文，如有中文请去微信-设置-存储位置点击更改，迁移至全英文目录</div>
-                  )}
-                </div>
-              )}
-
-              {currentStep.id === 'cache' && (
-                <div className="setup-body">
-                  <label className="field-label">缓存目录</label>
-                  <input
-                    type="text"
-                    className="field-input"
-                    placeholder={isMac ? '~/Documents/CipherTalkData' : 'D:\\CipherTalkDB'}
-                    value={cachePath}
-                    onChange={(e) => setCachePath(e.target.value)}
-                  />
-                  <div className="button-row">
-                    <button className="btn btn-primary" onClick={handleSelectCachePath}>
-                      <FolderOpen size={16} /> 浏览选择
-                    </button>
-                    <button className="btn btn-secondary" onClick={handleResetCachePath}>
-                      <RotateCcw size={16} /> 恢复默认
-                    </button>
-                  </div>
-                  <div className="field-hint">{isMac ? '用于头像、表情与图片缓存，默认已选文稿目录' : '用于头像、表情与图片缓存，已自动选择最佳磁盘'}</div>
-                </div>
-              )}
-
-              {currentStep.id === 'key' && (
-                <div className="setup-body">
-                  <label className="field-label">账号目录（待验证）</label>
-                  <input
-                    type="text"
-                    className="field-input"
-                    placeholder="获取密钥后将自动填充"
-                    value={wxid}
-                    onChange={(e) => {
-                      setWxid(e.target.value)
-                      setIsAccountVerified(false)
-                    }}
-                  />
-                  {wxidOptions.length > 0 && (
-                    <div className="wxid-options">
-                      {wxidOptions.map((id) => (
-                        <button
-                          key={id}
-                          className={`wxid-option ${wxid === id ? 'is-selected' : ''}`}
-                          onClick={async () => {
-                            setWxid(id)
-                            setIsAccountVerified(false)
-                            if (decryptKey.length === 64) {
-                              await verifyAccountDirectory(id, decryptKey)
-                            }
-                          }}
-                        >
-                          <div className="wxid-option-name">{id}</div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <div className="button-row">
-                    <button
-                      className="btn btn-secondary btn-inline"
-                      onClick={() => verifyAccountDirectory(wxid, decryptKey)}
-                      disabled={isVerifyingAccount || !wxid || decryptKey.length !== 64}
-                    >
-                      {isVerifyingAccount ? '验证中...' : '验证账号目录'}
-                    </button>
-                  </div>
-                  <div className="field-hint">
-                    状态：{isAccountVerified ? '✅ 已验证' : '⚠️ 未验证（密钥前只能识别候选目录）'}
-                  </div>
-                  <label className="field-label">解密密钥</label>
-                  <div className="field-with-toggle">
-                    <input
-                      type={showDecryptKey ? 'text' : 'password'}
-                      className="field-input"
-                      placeholder="64 位十六进制密钥"
-                      value={decryptKey}
-                      onChange={(e) => setDecryptKey(e.target.value.trim())}
-                    />
-                    <button type="button" className="toggle-btn" onClick={() => setShowDecryptKey(!showDecryptKey)}>
-                      {showDecryptKey ? <EyeOff size={14} /> : <Eye size={14} />}
-                    </button>
-                  </div>
-
-                  <button className="btn btn-secondary btn-inline" onClick={() => handleAutoGetDbKey()} disabled={isFetchingDbKey}>
-                    {isFetchingDbKey ? '获取中...' : '自动获取密钥'}
-                  </button>
-
-                  {!isMac && showWechatPathPrompt && (
-                    <div className="manual-prompt">
-                      <p className="prompt-text">未能自动找到微信安装位置，请手动选择 Weixin.exe</p>
-                      <input
-                        type="text"
-                        className="field-input"
-                        placeholder="例如：C:\Program Files\Tencent\WeChat\Weixin.exe"
-                        value={customWechatPath}
-                        onChange={(e) => setCustomWechatPath(e.target.value)}
-                        style={{ marginBottom: '8px' }}
-                      />
-                      <div className="button-row">
-                        <button className="btn btn-secondary" onClick={handleSelectWechatPath}>
-                          <FolderOpen size={16} /> 浏览选择
-                        </button>
-                        <button className="btn btn-primary" onClick={handleConfirmWechatPath}>
-                          确认并继续
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {dbKeyStatus && <div className="field-hint status-text">{dbKeyStatus}</div>}
-                  <div className="field-hint">{isMac ? '获取密钥会调用 mac helper，并尝试识别候选账号目录' : '获取密钥会自动启动微信并识别候选账号目录'}</div>
-                  <div className="field-hint">
-                    {isMac ? 'macOS 要求先关闭 SIP；点击后会弹出管理员授权，再等待微信触发数据库访问即可。' : <>点击自动获取后等待提示<span style={{ color: 'red' }}>hook安装成功</span>，然后登录微信即可</>}
-                  </div>
-                </div>
-              )}
-
-              {currentStep.id === 'image' && (
-                <div className="setup-body">
-                  <label className="field-label">图片 XOR 密钥</label>
-                  <input
-                    type="text"
-                    className="field-input"
-                    placeholder="例如：0xA4"
-                    value={imageXorKey}
-                    onChange={(e) => setImageXorKey(e.target.value)}
-                  />
-                  <label className="field-label">图片 AES 密钥</label>
-                  <input
-                    type="text"
-                    className="field-input"
-                    placeholder="16 位密钥"
-                    value={imageAesKey}
-                    onChange={(e) => setImageAesKey(e.target.value)}
-                  />
-                  <button className="btn btn-secondary btn-inline" onClick={handleAutoGetImageKey} disabled={isFetchingImageKey}>
-                    {isFetchingImageKey ? '获取中...' : '自动获取图片密钥'}
-                  </button>
-                  {imageKeyStatus && <div className="field-hint status-text">{imageKeyStatus}</div>}
-                  <div className="field-hint">{isMac ? '优先从 kvcomm 和模板文件推导，若失败再回退到内存扫描。' : '请在电脑微信中打开查看几个图片后再点击获取秘钥，如获取失败请重复以上操作'}</div>
-                  {isFetchingImageKey && <div className="field-hint status-text">{isMac ? '正在尝试 kvcomm / 内存扫描，请稍候...' : '正在扫描内存，请稍候...'}</div>}
-                </div>
-              )}
-
-              {currentStep.id === 'security' && (
-                <div className="setup-body">
-                  <div className="auth-setup-card">
-                    <div className="auth-icon-large">
-                      {isMac ? <Lock size={48} /> : <Fingerprint size={48} />}
-                    </div>
-                    <h3>{biometricLabel} 认证</h3>
-                    <p className="auth-desc">
-                      {isMac ? '启用 Touch ID 以保护您的数据。' : '启用 Windows Hello 以保护您的数据。'}
-                      <br />
-                      {isMac ? '启用后，每次打开应用都需要进行系统 Touch ID 验证。' : '启用后，每次打开应用都需要进行生物识别或 PIN 码验证。'}
-                    </p>
-
-                    <div className="auth-actions">
-                      {!isAuthEnabled ? (
-                        <button
-                          className="btn btn-primary"
-                          onClick={async () => {
-                            setIsEnablingAuth(true)
-                            setAuthStatus(`正在等待${biometricLabel}验证...`)
-                            const result = await enableAuth()
-                            setIsEnablingAuth(false)
-                            if (result.success) {
-                              setAuthStatus('已成功启用认证保护')
-                            } else {
-                              setError(result.error || '启用失败')
-                              setAuthStatus('')
-                            }
-                          }}
-                          disabled={isEnablingAuth}
-                        >
-                          {isEnablingAuth ? '正在配置...' : '启用应用锁'}
-                        </button>
-                      ) : (
-                        <div className="auth-success-state">
-                          <div className="success-badge">
-                            <CheckCircle2 size={16} />
-                            <span>已启用保护</span>
-                          </div>
-                          <button
-                            className="btn btn-text-danger"
-                            onClick={async () => {
-                              await disableAuth()
-                              setAuthStatus('')
-                            }}
-                          >
-                            关闭保护
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    {authStatus && (
-                      <div className="auth-status-text">
-                        {authStatus}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {currentStep.id === 'decrypt' && (
-                <div className="setup-body">
-                  <div className="decrypt-summary">
-                    <h3>配置摘要</h3>
-                    <div className="summary-item">
-                      <span className="summary-label">数据库目录：</span>
-                      <span className="summary-value">{dbPath || '未设置'}</span>
-                    </div>
-                    <div className="summary-item">
-                      <span className="summary-label">缓存目录：</span>
-                      <span className="summary-value">{cachePath || '未设置'}</span>
-                    </div>
-                    <div className="summary-item">
-                      <span className="summary-label">账号目录：</span>
-                      <span className="summary-value">{wxid ? `${wxid}${isAccountVerified ? '（已验证）' : '（未验证）'}` : '未设置'}</span>
-                    </div>
-                    <div className="summary-item">
-                      <span className="summary-label">解密密钥：</span>
-                      <span className="summary-value">{decryptKey ? '已设置 (64位)' : '未设置'}</span>
-                    </div>
-                    <div className="summary-item">
-                      <span className="summary-label">图片密钥：</span>
-                      <span className="summary-value">
-                        {imageXorKey || imageAesKey ? '已设置' : '未设置（可选）'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <button
-                    className="btn btn-primary btn-full"
-                    onClick={handleConfirm}
-                    disabled={isDecrypting}
-                    style={{ marginTop: '16px' }}
+          </Card.Content>
+          <div className="grid grid-cols-7 gap-2 px-4 pb-4">
+            {steps.map((step, index) => {
+              const active = index === stepIndex
+              const done = index < stepIndex
+              return (
+                <Tooltip key={step.id} delay={0}>
+                  <div
+                    className={`grid h-7.5 min-w-0 place-items-center rounded-lg border text-xs font-bold transition-colors ${
+                      done
+                        ? 'border-success bg-success text-success-foreground'
+                        : active
+                          ? 'border-accent bg-accent text-accent-foreground'
+                          : 'border-border bg-surface-secondary text-muted'
+                    }`}
                   >
-                    {isDecrypting ? '连接中...' : '连接数据库'}
-                  </button>
-
-                  {decryptStatus && countdown === 0 && (
-                    <div className="decrypt-status-container" style={{ marginTop: '16px' }}>
-                      <div className="field-hint status-text" style={{ textAlign: 'center' }}>
-                        {decryptStatus}
-                      </div>
-                    </div>
-                  )}
-
-                  {!isDecrypting && !decryptStatus && (
-                    <div className="field-hint" style={{ marginTop: '12px', textAlign: 'center' }}>
-                      点击"连接数据库"按钮，系统将验证配置并直连 WCDB
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {error && <div className="error-message">{error}</div>}
-
-            <div className="setup-actions">
-              <button className="btn btn-tertiary" onClick={handleBack} disabled={stepIndex === 0 || isDecrypting}>
-                <ArrowLeft size={16} /> 上一步
-              </button>
-              {stepIndex < steps.length - 1 && (
-                <button className="btn btn-primary" onClick={handleNext} disabled={!canGoNext()}>
-                  下一步 <ArrowRight size={16} />
-                </button>
-              )}
-            </div>
+                    {done ? <CheckCircle2 size={14} /> : index + 1}
+                  </div>
+                  <Tooltip.Content>{step.title}</Tooltip.Content>
+                </Tooltip>
+              )
+            })}
           </div>
+        </Card>
+
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(280px,0.86fr)_minmax(440px,1.14fr)] gap-3 max-[940px]:grid-cols-1">
+          <Card className="flex min-h-0 flex-col max-[940px]:hidden">
+            <Card.Header>
+              <Card.Title>{currentStep.title}</Card.Title>
+              <Card.Description>{currentStep.desc}</Card.Description>
+            </Card.Header>
+            <Card.Content className="min-h-0">
+              <ScrollShadow hideScrollBar className="h-full min-h-0" size={64}>
+                {renderStepInfo()}
+              </ScrollShadow>
+            </Card.Content>
+            <Card.Footer>
+              <Chip size="sm" variant="soft" color="success">
+                <ShieldCheck size={12} />
+                <Chip.Label>仅本地处理</Chip.Label>
+              </Chip>
+            </Card.Footer>
+          </Card>
+
+          <Card className="flex min-h-0 flex-col">
+            <Card.Header className="flex-row items-start justify-between gap-3">
+              <div className="min-w-0">
+                <Card.Title>{currentStep.title}</Card.Title>
+                <Card.Description>{currentStep.desc}</Card.Description>
+              </div>
+              <Chip size="sm" variant="soft" color={canGoNext() || currentStep.id === 'decrypt' ? 'accent' : 'warning'}>
+                <Chip.Label>{currentStep.id === 'decrypt' ? '最终确认' : canGoNext() ? '可继续' : '待完成'}</Chip.Label>
+              </Chip>
+            </Card.Header>
+            <Card.Content className="min-h-0">
+              <ScrollShadow hideScrollBar className="h-full min-h-0 pr-0.5" size={56}>
+                {renderStepForm()}
+              </ScrollShadow>
+            </Card.Content>
+            {error && (
+              <div className="px-4 pb-3">
+                <Alert status="danger">
+                  <Alert.Indicator />
+                  <Alert.Content>
+                    <Alert.Description>{error}</Alert.Description>
+                  </Alert.Content>
+                </Alert>
+              </div>
+            )}
+            <Card.Footer className="flex shrink-0 justify-between gap-3">
+              <Button type="button" variant="tertiary" onPress={handleBack} isDisabled={stepIndex === 0 || isDecrypting}>
+                <ArrowLeft size={16} /> 上一步
+              </Button>
+              {stepIndex < steps.length - 1 && (
+                <Button type="button" variant="primary" onPress={handleNext} isDisabled={!canGoNext()}>
+                  下一步 <ArrowRight size={16} />
+                </Button>
+              )}
+            </Card.Footer>
+          </Card>
         </div>
       </div>
     </div>
