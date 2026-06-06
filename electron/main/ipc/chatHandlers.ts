@@ -49,6 +49,14 @@ export function registerChatHandlers(ctx: MainProcessContext): void {
     return result
   })
 
+  ipcMain.handle('chat:getMentionTargets', async (_, offset?: number, limit?: number) => {
+    const result = await chatService.getMentionTargets(offset, limit)
+    if (!result.success) {
+      ctx.getLogService()?.warn('Chat', '获取 Agent @ 列表失败', { error: result.error })
+    }
+    return result
+  })
+
   ipcMain.handle('chat:getContacts', async () => {
     const result = await chatService.getContacts()
     if (!result.success) {

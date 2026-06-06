@@ -584,11 +584,12 @@ function App() {
   }
 
   // 主窗口 - 完整布局
-  const disableContentOverflow = ['/data-management', '/settings', '/open-api', '/mcp'].includes(location.pathname)
+  const disableContentOverflow = ['/data-management', '/settings', '/open-api', '/mcp', '/agent'].includes(location.pathname)
   const fullPageRoutes = ['/home']
   const isFullPage = fullPageRoutes.includes(location.pathname)
-  const edgeToEdgeRoutes = ['/agent']
+  const edgeToEdgeRoutes: string[] = []
   const isEdgeToEdge = edgeToEdgeRoutes.includes(location.pathname)
+  const isAgentPage = location.pathname === '/agent'
 
   return (
     <div className={`app-container${navLayout === 'sidebar' ? ' app-container--sidebar' : ''}`}>
@@ -667,7 +668,7 @@ function App() {
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <main
           className={`flex-1 min-w-0 ${(disableContentOverflow || isFullPage || isEdgeToEdge) ? 'overflow-hidden' : 'overflow-auto'} ${navLayout === 'sidebar' && !isEdgeToEdge ? 'bg-[var(--bg-primary)] rounded-xl mr-3 mb-3' : ''}`}
-          style={{ paddingLeft: (isFullPage || isEdgeToEdge) ? 0 : 24, paddingRight: (isFullPage || isEdgeToEdge) ? 0 : 24, paddingTop: (isFullPage || isEdgeToEdge) ? 0 : 24 }}
+          style={{ paddingLeft: (isFullPage || isEdgeToEdge || isAgentPage) ? 0 : 24, paddingRight: (isFullPage || isEdgeToEdge || isAgentPage) ? 0 : 24, paddingTop: (isFullPage || isEdgeToEdge || isAgentPage) ? 0 : 24 }}
         >
           <RouteGuard>
             <Routes>

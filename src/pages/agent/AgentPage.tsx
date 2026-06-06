@@ -2,11 +2,14 @@
  * AI Agent 对话页（Phase C）——使用 AI SDK 的 useChat + AI Elements 组件。
  * 数据：useChat 走 IpcChatTransport（IPC → AI 子进程 → 流式 UIMessageChunk）。
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type UIEvent } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { isToolUIPart, type ChatStatus } from 'ai'
 import { Surface } from '@heroui/react'
-import { AtSign, BarChart3, Braces, Brain, CheckIcon, Clock3, FileText, Image as ImageIcon, Search, Users, Wrench, X } from 'lucide-react'
+import { AtSign, BarChart3, Braces, Brain, CheckIcon, Clock3, FileText, Image as ImageIcon, Quote, Search, Users, Wrench, X } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { useChatStore } from '@/stores/chatStore'
+import { Sources, SourcesContent, SourcesTrigger } from '@/components/ai-elements/sources'
 import {
   Conversation,
   ConversationContent,
@@ -196,12 +199,81 @@ function collectToolBadges(value: unknown, badges: string[] = []): string[] {
 }
 
 // ====== @ 提及（聚焦某个联系人/群的数据）======
-type MentionTarget = { username: string; displayName: string; kind: 'person' | 'group' | 'official' }
+type MentionTarget = {
+  username: string
+  displayName: string
+  kind: 'person' | 'group' | 'official'
+  avatarUrl?: string
+}
+
+const MENTION_SESSION_PAGE_SIZE = 1000
+const MENTION_RESULT_BATCH_SIZE = 30
 
 function classifyTarget(username: string): MentionTarget['kind'] {
   if (username.endsWith('@chatroom')) return 'group'
   if (username.startsWith('gh_')) return 'official'
   return 'person'
+}
+
+function toMentionTarget(username: string, displayName?: string, avatarUrl?: string): MentionTarget {
+  return {
+    username,
+    displayName: displayName || username,
+    kind: classifyTarget(username),
+    avatarUrl,
+  }
+}
+
+function getAvatarLetter(name: string): string {
+  const text = name.trim()
+  return text ? text.slice(0, 1).toUpperCase() : '?'
+}
+
+function MentionAvatar({ target, className = 'size-7' }: { target: MentionTarget; className?: string }) {
+  const [avatarUrl, setAvatarUrl] = useState(target.avatarUrl || '')
+  const [imageError, setImageError] = useState(false)
+
+  useEffect(() => {
+    setAvatarUrl(target.avatarUrl || '')
+    setImageError(false)
+  }, [target.avatarUrl, target.username])
+
+  useEffect(() => {
+    if (avatarUrl || imageError) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const result = await (window as any)?.electronAPI?.chat?.getContactAvatar?.(target.username)
+        if (!cancelled && result?.avatarUrl) setAvatarUrl(result.avatarUrl)
+      } catch {
+        // 头像兜底失败时保持文字占位。
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [avatarUrl, imageError, target.username])
+
+  return (
+    <span
+      className={`${className} inline-flex shrink-0 items-center justify-center overflow-hidden rounded-(--agent-radius,12px) bg-muted text-muted-foreground text-xs`}
+    >
+      {avatarUrl && !imageError ? (
+        <img
+          alt=""
+          className="size-full object-cover"
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          src={avatarUrl}
+          onError={() => setImageError(true)}
+        />
+      ) : target.kind === 'group' ? (
+        <Users className="size-4" />
+      ) : (
+        <span>{getAvatarLetter(target.displayName || target.username)}</span>
+      )}
+    </span>
+  )
 }
 
 /**
@@ -211,12 +283,18 @@ function classifyTarget(username: string): MentionTarget['kind'] {
 function MentionField({
   sessions,
   mentions,
+  hasMore,
+  isLoading,
   onAdd,
+  onLoadMore,
   onRemove,
 }: {
   sessions: MentionTarget[]
   mentions: MentionTarget[]
+  hasMore: boolean
+  isLoading: boolean
   onAdd: (m: MentionTarget) => void
+  onLoadMore: () => void
   onRemove: (username: string) => void
 }) {
   const { textInput } = usePromptInputController()
@@ -224,15 +302,42 @@ function MentionField({
   // 触发条件：行首或空格后的 @，后跟 0~20 个非空白非 @ 字符（在末尾）
   const match = value.match(/(?:^|\s)@([^\s@]{0,20})$/)
   const query = match ? match[1] : null
+  const [visibleLimit, setVisibleLimit] = useState(MENTION_RESULT_BATCH_SIZE)
   const picked = useMemo(() => new Set(mentions.map((m) => m.username)), [mentions])
-  const results = useMemo(() => {
+  const pickedKey = useMemo(() => mentions.map((m) => m.username).join('\n'), [mentions])
+  const allResults = useMemo(() => {
     if (query === null) return []
     const q = query.toLowerCase()
     return sessions
       .filter((s) => !picked.has(s.username))
       .filter((s) => !q || s.displayName.toLowerCase().includes(q) || s.username.toLowerCase().includes(q))
-      .slice(0, 8)
   }, [sessions, query, picked])
+  const results = allResults.slice(0, visibleLimit)
+
+  useEffect(() => {
+    setVisibleLimit(MENTION_RESULT_BATCH_SIZE)
+  }, [query, pickedKey])
+
+  useEffect(() => {
+    if (query !== null && sessions.length === 0 && hasMore && !isLoading) onLoadMore()
+  }, [hasMore, isLoading, onLoadMore, query, sessions.length])
+
+  const loadNextVisibleBatch = useCallback(() => {
+    if (visibleLimit < allResults.length) {
+      setVisibleLimit((limit) => Math.min(limit + MENTION_RESULT_BATCH_SIZE, allResults.length))
+      return
+    }
+    if (hasMore && !isLoading) onLoadMore()
+  }, [allResults.length, hasMore, isLoading, onLoadMore, visibleLimit])
+
+  const handleResultsScroll = useCallback(
+    (event: UIEvent<HTMLDivElement>) => {
+      const el = event.currentTarget
+      if (el.scrollHeight - el.scrollTop - el.clientHeight > 48) return
+      loadNextVisibleBatch()
+    },
+    [loadNextVisibleBatch]
+  )
 
   const select = (s: MentionTarget) => {
     onAdd(s)
@@ -240,7 +345,7 @@ function MentionField({
     textInput.setInput(atIdx >= 0 ? value.slice(0, atIdx) : value)
   }
 
-  if (mentions.length === 0 && (query === null || results.length === 0)) return null
+  if (mentions.length === 0 && query === null) return null
 
   return (
     <div className="relative flex flex-col gap-1.5">
@@ -251,7 +356,7 @@ function MentionField({
               className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-primary text-xs"
               key={m.username}
             >
-              {m.kind === 'group' ? <Users className="size-3" /> : <AtSign className="size-3" />}
+              <MentionAvatar className="size-4" target={m} />
               <span className="max-w-32 truncate">{m.displayName}</span>
               <button
                 aria-label={`移除 ${m.displayName}`}
@@ -265,24 +370,51 @@ function MentionField({
           ))}
         </div>
       )}
-      {query !== null && results.length > 0 && (
-        <div className="absolute bottom-full left-0 z-50 mb-2 max-h-64 w-72 overflow-auto rounded-(--agent-radius,12px) border border-border bg-popover p-1 shadow-lg">
-          {results.map((s) => (
-            <button
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
-              key={s.username}
-              onClick={() => select(s)}
-              type="button"
-            >
-              {s.kind === 'group' ? (
-                <Users className="size-4 shrink-0 text-muted-foreground" />
-              ) : (
-                <AtSign className="size-4 shrink-0 text-muted-foreground" />
+      {query !== null && (
+        <div
+          className="absolute bottom-full left-0 z-50 mb-2 max-h-80 w-80 overflow-auto rounded-(--agent-radius,12px) border border-border bg-popover p-1 shadow-lg"
+          onScroll={handleResultsScroll}
+        >
+          {results.length > 0 ? (
+            <>
+              {results.map((s) => (
+                <button
+                  className="flex w-full items-center gap-2 rounded-(--agent-radius,12px) px-2 py-1.5 text-left text-sm hover:bg-accent"
+                  key={s.username}
+                  onClick={() => select(s)}
+                  type="button"
+                >
+                  <MentionAvatar target={s} />
+                  <span className="min-w-0 flex-1 truncate">{s.displayName}</span>
+                  {s.kind === 'group' && <span className="ml-auto shrink-0 text-muted-foreground text-xs">群</span>}
+                </button>
+              ))}
+              {(visibleLimit < allResults.length || hasMore || isLoading) && (
+                <button
+                  className="mt-1 w-full rounded-(--agent-radius,12px) px-2 py-2 text-center text-muted-foreground text-xs hover:bg-accent"
+                  disabled={isLoading}
+                  onClick={loadNextVisibleBatch}
+                  type="button"
+                >
+                  {isLoading ? '加载中…' : '加载更多会话'}
+                </button>
               )}
-              <span className="truncate">{s.displayName}</span>
-              {s.kind === 'group' && <span className="ml-auto shrink-0 text-muted-foreground text-xs">群</span>}
-            </button>
-          ))}
+            </>
+          ) : (
+            <div className="px-2 py-3 text-center text-muted-foreground text-xs">
+              {isLoading
+                ? '联系人加载中…'
+                : hasMore
+                  ? (
+                    <button className="rounded-(--agent-radius,12px) px-2 py-1 hover:bg-accent" onClick={onLoadMore} type="button">
+                      继续加载更多会话
+                    </button>
+                  )
+                  : sessions.length === 0
+                    ? '暂无可用私聊或群聊'
+                    : '未找到匹配的联系人'}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -305,6 +437,75 @@ function MentionTriggerButton() {
     >
       <AtSign className="size-3.5" />
     </Button>
+  )
+}
+
+// ====== 出处（让用户能核对答案来源）======
+type SourceItem = { id: string; sessionId: string; localId?: number; time?: string; sender?: string; text: string }
+
+/** 从助手消息的工具结果里抽出"被引用的真实消息"作为出处。 */
+function extractSources(parts: any[]): SourceItem[] {
+  const items: SourceItem[] = []
+  const seen = new Set<string>()
+  const push = (it: SourceItem) => {
+    if (!it.text || !it.sessionId || seen.has(it.id)) return
+    seen.add(it.id)
+    items.push(it)
+  }
+  for (const part of parts) {
+    if (!isToolUIPart(part) || part.state !== 'output-available') continue
+    const name = part.type.replace(/^tool-/, '')
+    const out: any = part.output
+    if (!out || out.error) continue
+    if (name === 'get_context' || name === 'get_timeline') {
+      const sid = out.sessionId
+      for (const m of out.messages || []) {
+        push({ id: `${sid}:${m.localId}`, sessionId: sid, localId: m.localId, time: m.time, sender: m.sender, text: m.text })
+      }
+    } else if (name === 'search_messages' || name === 'semantic_search') {
+      const arr = Array.isArray(out) ? out : []
+      for (const h of arr) {
+        const lid = h?.anchor?.localId
+        push({ id: `${h.sessionId}:${lid ?? h.title ?? ''}`, sessionId: h.sessionId, localId: lid, time: h.time, text: h.excerpt || h.title })
+      }
+    }
+  }
+  return items.slice(0, 15)
+}
+
+function MessageSources({
+  items,
+  nameOf,
+  onOpen,
+}: {
+  items: SourceItem[]
+  nameOf: (sessionId: string) => string
+  onOpen: (sessionId: string) => void
+}) {
+  if (items.length === 0) return null
+  return (
+    <Sources>
+      <SourcesTrigger count={items.length}>
+        <Quote className="size-3.5" />
+        <span className="font-medium">出处 {items.length} 条</span>
+      </SourcesTrigger>
+      <SourcesContent className="w-full">
+        {items.map((it) => (
+          <button
+            className="w-full rounded-md border border-border/60 bg-card/50 px-2.5 py-1.5 text-left hover:bg-accent/50"
+            key={it.id}
+            onClick={() => onOpen(it.sessionId)}
+            title="在聊天中打开该会话"
+            type="button"
+          >
+            <div className="text-muted-foreground text-[11px]">
+              {[nameOf(it.sessionId), it.sender, it.time].filter(Boolean).join(' · ')}
+            </div>
+            <div className="line-clamp-2 text-foreground text-xs">{it.text}</div>
+          </button>
+        ))}
+      </SourcesContent>
+    </Sources>
   )
 }
 
@@ -355,7 +556,14 @@ export default function AgentPage() {
 
   // @ 提及：会话列表（选择源）+ 已选对象
   const [sessions, setSessions] = useState<MentionTarget[]>([])
+  const [mentionHasMore, setMentionHasMore] = useState(true)
+  const [mentionLoading, setMentionLoading] = useState(false)
   const [mentions, setMentions] = useState<MentionTarget[]>([])
+  const mentionOffsetRef = useRef(0)
+  const mentionLoadingRef = useRef(false)
+  const mentionHasMoreRef = useRef(true)
+  const mentionConnectedRef = useRef(false)
+  const mentionSeenRef = useRef(new Set<string>())
   const addMention = useCallback(
     (m: MentionTarget) => setMentions((prev) => (prev.some((x) => x.username === m.username) ? prev : [...prev, m])),
     []
@@ -366,18 +574,69 @@ export default function AgentPage() {
   )
   // 单个 @ → 锁定该会话 scope；多个/零个 → 全局（多个走消息注入，见 handleSubmit）
   const scopeRef = useRef<AgentScope>({ kind: 'global' })
+  const submitScopeRef = useRef<AgentScope | null>(null)
   scopeRef.current =
     mentions.length === 1
       ? { kind: 'session', sessionId: mentions[0].username, displayName: mentions[0].displayName }
       : { kind: 'global' }
 
   const transport = useMemo(
-    () => new IpcChatTransport(() => scopeRef.current, () => selectedModelConfigRef.current),
+    () => new IpcChatTransport(() => submitScopeRef.current ?? scopeRef.current, () => selectedModelConfigRef.current),
     []
   )
   const { messages, sendMessage, status, stop } = useChat({ transport })
   const [modelOpen, setModelOpen] = useState(false)
   const busy = status === 'submitted' || status === 'streaming'
+
+  const appendMentionTargets = useCallback((items: MentionTarget[]) => {
+    if (items.length === 0) return
+    setSessions((prev) => {
+      const next = [...prev]
+      for (const item of items) {
+        if (mentionSeenRef.current.has(item.username)) continue
+        mentionSeenRef.current.add(item.username)
+        next.push(item)
+      }
+      return next
+    })
+  }, [])
+
+  const updateMentionHasMore = useCallback((hasMore: boolean) => {
+    mentionHasMoreRef.current = hasMore
+    setMentionHasMore(hasMore)
+  }, [])
+
+  const loadMentionSessions = useCallback(async () => {
+    if (mentionLoadingRef.current || !mentionHasMoreRef.current) return
+    mentionLoadingRef.current = true
+    setMentionLoading(true)
+    const chat = (window as any)?.electronAPI?.chat
+
+    try {
+      if (!mentionConnectedRef.current) {
+        try { await chat?.connect?.() } catch { /* 配置不全则后续为空 */ }
+        mentionConnectedRef.current = true
+      }
+
+      const offset = mentionOffsetRef.current
+      const res = await chat?.getMentionTargets?.(offset, MENTION_SESSION_PAGE_SIZE)
+      if (res?.success && Array.isArray(res.sessions)) {
+        appendMentionTargets(
+          res.sessions
+            .map((s: any) => toMentionTarget(s.username, s.displayName, s.avatarUrl))
+        )
+        mentionOffsetRef.current = offset + MENTION_SESSION_PAGE_SIZE
+        updateMentionHasMore(!!res.hasMore)
+        return
+      }
+      updateMentionHasMore(false)
+    } catch {
+      updateMentionHasMore(false)
+    } finally {
+      mentionLoadingRef.current = false
+      setMentionLoading(false)
+    }
+  }, [appendMentionTargets, updateMentionHasMore])
 
   useEffect(() => {
     let cancelled = false
@@ -392,18 +651,6 @@ export default function AgentPage() {
     void getAIProviders().then((items) => {
       if (!cancelled) setProvidersInfo(items)
     })
-    // @ 选择源：会话列表（联系人 + 群），username 即 sessionId
-    void (window as any)?.electronAPI?.chat?.getSessions?.(0, 2000)?.then((res: any) => {
-      if (cancelled || !res?.success || !Array.isArray(res.sessions)) return
-      const list: MentionTarget[] = res.sessions
-        .filter((s: any) => s?.username && !String(s.username).startsWith('@') && s.username !== 'brandsessionholder')
-        .map((s: any) => ({
-          username: s.username,
-          displayName: s.displayName || s.username,
-          kind: classifyTarget(s.username),
-        }))
-      setSessions(list)
-    })
     return () => {
       cancelled = true
     }
@@ -415,13 +662,20 @@ export default function AgentPage() {
       return
     }
     let text = message.text.trim()
-    if (!text && message.files.length === 0) return
-    // 多个 @：scope 仍全局，把限定对象注入消息，交给模型按 username 收窄
-    if (mentions.length >= 2 && text) {
-      const list = mentions.map((m) => `${m.displayName}[${m.username}]`).join('、')
-      text = `（本次只参考这些对象的数据：${list}）\n${text}`
+    const currentMentions = mentions
+    if (currentMentions.length > 0) {
+      const mentionLine = currentMentions.map((m) => `@${m.displayName}[${m.username}]`).join(' ')
+      text = text ? `${mentionLine}\n${text}` : mentionLine
     }
-    void sendMessage({ text, files: message.files })
+    if (!text && message.files.length === 0) return
+    submitScopeRef.current =
+      currentMentions.length === 1
+        ? { kind: 'session', sessionId: currentMentions[0].username, displayName: currentMentions[0].displayName }
+        : { kind: 'global' }
+    void Promise.resolve(sendMessage({ text, files: message.files })).finally(() => {
+      submitScopeRef.current = null
+    })
+    setMentions([])
   }
 
   const handleModelSelect = useCallback((id: string) => {
@@ -429,14 +683,28 @@ export default function AgentPage() {
     setModelOpen(false)
   }, [])
 
+  // 出处：会话名解析 + 点击打开该会话
+  const navigate = useNavigate()
+  const setCurrentSession = useChatStore((s) => s.setCurrentSession)
+  const sessionNameMap = useMemo(() => new Map(sessions.map((s) => [s.username, s.displayName])), [sessions])
+  const sessionNameOf = useCallback((sessionId: string) => sessionNameMap.get(sessionId) || sessionId, [sessionNameMap])
+  const openInChat = useCallback(
+    (sessionId: string) => {
+      if (!sessionId) return
+      setCurrentSession(sessionId)
+      navigate('/home')
+    },
+    [navigate, setCurrentSession]
+  )
+
   return (
     <Surface
-      className="flex h-full min-h-0 flex-col bg-background"
+      className="flex h-full min-h-0 flex-col"
       style={{ '--agent-radius': '12px' } as CSSProperties}
       variant="transparent"
     >
       <Conversation className="min-h-0 flex-1">
-        <ConversationContent className="px-0 py-4">
+        <ConversationContent className="mx-auto w-full min-w-80 max-w-[82%] py-4">
           {messages.length === 0 ? (
             <ConversationEmptyState
               title="开始查询聊天记录"
@@ -512,6 +780,9 @@ export default function AgentPage() {
                       }
                       return null
                     })}
+                    {message.role === 'assistant' && (
+                      <MessageSources items={extractSources(message.parts)} nameOf={sessionNameOf} onOpen={openInChat} />
+                    )}
                   </MessageContent>
                 </Message>
               )
@@ -526,14 +797,22 @@ export default function AgentPage() {
         <PromptInputProvider>
           <PromptInput
             accept="image/*,.txt,.md,.json,.csv"
-            className="m-3 w-auto **:data-[slot=input-group]:rounded-(--agent-radius,12px) **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-xs"
+            className="mx-auto mb-3 w-full min-w-80 max-w-[82%] **:data-[slot=input-group]:rounded-(--agent-radius,12px) **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-xs"
             maxFiles={6}
             maxFileSize={8 * 1024 * 1024}
             multiple
             onSubmit={handleSubmit}
           >
             <PromptInputHeader className="flex-col items-stretch gap-2 border-b">
-              <MentionField mentions={mentions} onAdd={addMention} onRemove={removeMention} sessions={sessions} />
+              <MentionField
+                hasMore={mentionHasMore}
+                isLoading={mentionLoading}
+                mentions={mentions}
+                onAdd={addMention}
+                onLoadMore={loadMentionSessions}
+                onRemove={removeMention}
+                sessions={sessions}
+              />
               <PromptInputAttachments className="p-0">
                 {(attachment) => <PromptInputAttachment data={attachment} />}
               </PromptInputAttachments>

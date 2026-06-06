@@ -19,6 +19,8 @@ import {
   getMyUserInfo,
   getUinFromMiscDb,
 } from './chat/contactQueries'
+import { isOfficialAccountUsername, isOfficialFolderUsername } from './chat/accountUtils'
+import { isSystemContactUsername } from './chat/constants'
 import { getSessionDetail } from './chat/sessionDetail'
 import { getSessions } from './chat/sessionList'
 import {
@@ -189,6 +191,63 @@ class ChatService extends EventEmitter {
    */
   async getContacts(): Promise<{ success: boolean; contacts?: ContactInfo[]; error?: string }> {
     return getContacts(this.state)
+  }
+
+  /**
+   * 获取 AI Agent @ 选择列表：只返回私聊和群聊，过滤公众号/系统号。
+   * 独立于通用 getSessions，避免影响聊天页、导出页等其他会话列表。
+   */
+  async getMentionTargets(offset?: number, limit?: number): Promise<{ success: boolean; sessions?: ChatSession[]; hasMore?: boolean; error?: string }> {
+    const safeOffset = Math.max(0, Math.floor(Number(offset) || 0))
+    const safeLimit = Math.max(1, Math.min(1000, Math.floor(Number(limit) || 300)))
+    const result = await this.getSessions(safeOffset, safeLimit)
+
+    if (result.success && Array.isArray(result.sessions)) {
+      const sessions = result.sessions.filter((session) => {
+        const username = String(session.username || '')
+        if (!username) return false
+        if (session.isOfficialAccount || session.isOfficialFolder || session.isFoldGroup) return false
+        if (isOfficialAccountUsername(username) || isOfficialFolderUsername(username)) return false
+        if (isSystemContactUsername(username)) return false
+        return true
+      })
+
+      if (sessions.length > 0 || result.hasMore || safeOffset > 0) {
+        return { success: true, sessions, hasMore: !!result.hasMore }
+      }
+    }
+
+    if (safeOffset > 0) {
+      return result.success ? { success: true, sessions: [], hasMore: false } : result
+    }
+
+    const contactsResult = await this.getContacts()
+    if (!contactsResult.success || !Array.isArray(contactsResult.contacts)) {
+      return result.success ? { success: true, sessions: [], hasMore: false } : result
+    }
+
+    const contacts = contactsResult.contacts
+      .filter((contact) => (contact.type === 'friend' || contact.type === 'group') && !isSystemContactUsername(contact.username))
+      .slice(safeOffset, safeOffset + safeLimit)
+      .map((contact) => ({
+        username: contact.username,
+        type: contact.type === 'group' ? 2 : 1,
+        unreadCount: 0,
+        summary: '',
+        sortTimestamp: contact.lastContactTime || 0,
+        lastTimestamp: contact.lastContactTime || 0,
+        lastMsgType: 0,
+        displayName: contact.displayName,
+        avatarUrl: contact.avatarUrl,
+        isWeCom: contact.isWeCom,
+        weComCorp: contact.weComCorp,
+      }))
+
+    return {
+      success: true,
+      sessions: contacts,
+      hasMore: contacts.length === safeLimit && (contactsResult.contacts.length > safeOffset + safeLimit),
+    }
   }
 
   /**
