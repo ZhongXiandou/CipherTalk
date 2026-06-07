@@ -10,6 +10,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { ConfigService } from './config'
 import { getAppPath, getUserDataPath, isElectronPackaged } from './runtimePaths'
+import { getElectronWorkerEnv } from './workerEnvironment'
 
 type UtilityRequest = { id: number; type: string; payload?: any }
 type UtilityResponse = { id: number; result?: any; error?: string; type?: string; payload?: any }
@@ -249,6 +250,7 @@ export class WcdbService extends EventEmitter {
         worker = utilityProcess.fork(utilityPath, [], {
           serviceName: 'CipherTalk WCDB',
           stdio: 'pipe',
+          env: getElectronWorkerEnv(),
           allowLoadingUnsignedLibraries: process.platform === 'darwin'
         })
       } catch (e: any) {

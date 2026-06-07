@@ -9,6 +9,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import type { UIMessageChunk } from 'ai'
 import { getAppPath, isElectronPackaged } from '../runtimePaths'
+import { getElectronWorkerEnv } from '../workerEnvironment'
 import type { AgentProgressEvent, AgentProviderConfig, AgentRunInput } from './types'
 
 const UTILITY_FILE = 'aiAgentUtilityProcess.js'
@@ -134,7 +135,7 @@ export class AgentProcessService {
         worker = utilityProcess.fork(utilityPath, [], {
           serviceName: 'CipherTalk AI Agent',
           stdio: 'pipe',
-          env: { ...process.env, CT_AGENT_WCDB_PROXY: '1' },
+          env: { ...getElectronWorkerEnv(), CT_AGENT_WCDB_PROXY: '1' },
         })
       } catch (e: any) {
         this.initPromise = null
