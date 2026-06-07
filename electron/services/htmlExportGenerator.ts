@@ -2,6 +2,7 @@
  * HTML 导出生成器
  * 生成现代风格的聊天记录 HTML 页面
  * 支持图片/视频内联显示、搜索、主题切换、日期跳转
+ * 支持消息类型筛选、时间范围筛选、统计面板（聚合网页）
  */
 
 import * as fs from 'fs'
@@ -64,7 +65,6 @@ export class HtmlExportGenerator {
       : ''
     const wechatEmojiMap = this.buildWechatEmojiDataMap(exportData)
 
-    // 头像 HTML：优先使用真实头像图片，回退到首字符
     const avatarHtml = exportData.meta.sessionAvatar
       ? `<img src="${this.escapeHtml(exportData.meta.sessionAvatar)}" onerror="this.style.display='none';this.parentElement.textContent='${escapedSessionName.charAt(0)}'"/>`
       : escapedSessionName.charAt(0)
@@ -88,11 +88,34 @@ export class HtmlExportGenerator {
         </div>
       </div>
       <div class="header-actions">
+        <button class="icon-btn" id="statsToggle" title="统计面板">📊</button>
+        <button class="icon-btn" id="filterToggle" title="筛选面板">🔽</button>
         <button class="icon-btn" id="dateJumpToggle" title="跳转到指定日期">📅</button>
         <button class="icon-btn" id="themeToggle" title="切换主题">🌓</button>
         <button class="icon-btn" id="searchToggle" title="搜索">🔍</button>
       </div>
     </header>
+
+    <!-- 统计面板 -->
+    <div class="stats-panel" id="statsPanel">
+      <div class="stats-row" id="statsRow"></div>
+    </div>
+
+    <!-- 消息类型筛选面板 -->
+    <div class="filter-panel" id="filterPanel">
+      <div class="filter-label">消息类型</div>
+      <div class="filter-tags" id="typeFilters"></div>
+      <div class="filter-divider"></div>
+      <div class="filter-label">时间范围</div>
+      <div class="date-range-row">
+        <input type="date" id="filterDateStart" />
+        <span class="date-range-sep">至</span>
+        <input type="date" id="filterDateEnd" />
+        <button class="filter-btn" id="applyDateFilter">确定</button>
+        <button class="filter-btn secondary" id="clearDateFilter">重置</button>
+      </div>
+      <div class="filter-result" id="filterResult"></div>
+    </div>
 
     <div class="search-bar" id="searchBar">
       <input type="text" id="searchInput" placeholder="搜索消息内容或发送者..." />
@@ -117,7 +140,6 @@ export class HtmlExportGenerator {
     </footer>
   </div>
 
-  <!-- 图片预览层 -->
   <div class="lightbox" id="lightbox">
     <button class="lightbox-close" id="lightboxClose">✕</button>
     <img id="lightboxImg" />
@@ -130,9 +152,6 @@ export class HtmlExportGenerator {
 </html>`
   }
 
-  /**
-   * 生成 CSS 样式
-   */
   static generateCss(): string {
     return `
 :root {
@@ -152,6 +171,11 @@ export class HtmlExportGenerator {
   --shadow: rgba(0,0,0,0.08);
   --link: #027eb5;
   --media-bg: #e4e4e4;
+  --panel-bg: #ffffff;
+  --tag-bg: #f0f2f5;
+  --tag-active-bg: #075e54;
+  --tag-active-text: #fff;
+  --stat-value: #075e54;
 }
 
 [data-theme="dark"] {
@@ -171,6 +195,11 @@ export class HtmlExportGenerator {
   --shadow: rgba(0,0,0,0.3);
   --link: #53bdeb;
   --media-bg: #1a2a33;
+  --panel-bg: #1a2731;
+  --tag-bg: #222d34;
+  --tag-active-bg: #00a884;
+  --tag-active-text: #111b21;
+  --stat-value: #00a884;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -192,7 +221,6 @@ body {
   box-shadow: 0 0 40px var(--shadow);
 }
 
-/* 头部 */
 .chat-header {
   background: var(--header-bg);
   color: var(--header-text);
@@ -204,983 +232,755 @@ body {
   z-index: 10;
 }
 
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
+.header-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
 
 .header-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
+  width: 40px; height: 40px; border-radius: 50%;
   background: rgba(255,255,255,0.2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  font-weight: 600;
-  flex-shrink: 0;
-  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; font-weight: 600; flex-shrink: 0; overflow: hidden;
 }
-
-.header-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.header-info {
-  min-width: 0;
-}
-
-.header-info h1 {
-  font-size: 16px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.header-meta {
-  font-size: 12px;
-  opacity: 0.8;
-}
-
-.header-actions {
-  display: flex;
-  gap: 4px;
-}
+.header-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.header-info { min-width: 0; }
+.header-info h1 { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.header-meta { font-size: 12px; opacity: 0.8; }
+.header-actions { display: flex; gap: 4px; }
 
 .icon-btn {
-  background: none;
-  border: none;
-  color: var(--header-text);
-  font-size: 18px;
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 50%;
-  transition: background 0.2s;
-  line-height: 1;
+  background: none; border: none; color: var(--header-text);
+  font-size: 18px; cursor: pointer; padding: 8px; border-radius: 50%;
+  transition: background 0.2s; line-height: 1;
 }
+.icon-btn:hover { background: rgba(255,255,255,0.15); }
 
-.icon-btn:hover {
-  background: rgba(255,255,255,0.15);
+/* 统计面板 */
+.stats-panel {
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+  display: none; padding: 12px 16px; flex-shrink: 0;
 }
+.stats-panel.active { display: block; }
+.stats-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.stat-card {
+  background: var(--tag-bg); border-radius: 10px;
+  padding: 10px 14px; min-width: 90px; flex: 1; text-align: center;
+}
+.stat-card .stat-num { font-size: 22px; font-weight: 700; color: var(--stat-value); line-height: 1.2; }
+.stat-card .stat-label { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+
+/* 筛选面板 */
+.filter-panel {
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+  display: none; padding: 12px 16px; flex-shrink: 0;
+}
+.filter-panel.active { display: block; }
+.filter-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; letter-spacing: 0.5px; }
+.filter-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+
+.type-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 5px 12px; border-radius: 16px;
+  border: 1.5px solid var(--border); background: var(--tag-bg);
+  color: var(--text); font-size: 13px; cursor: pointer;
+  transition: all 0.15s; user-select: none;
+}
+.type-tag:hover { border-color: var(--tag-active-bg); }
+.type-tag.active { background: var(--tag-active-bg); color: var(--tag-active-text); border-color: var(--tag-active-bg); }
+.type-tag .tag-count { font-size: 11px; opacity: 0.7; font-weight: 600; }
+.type-tag.active .tag-count { opacity: 0.9; }
+
+.filter-divider { height: 1px; background: var(--border); margin: 10px 0; }
+
+.date-range-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.date-range-row input[type="date"] {
+  padding: 6px 10px; border: 1.5px solid var(--border); border-radius: 8px;
+  background: var(--tag-bg); color: var(--text); font-size: 13px; outline: none;
+}
+.date-range-row input[type="date"]:focus { border-color: var(--tag-active-bg); }
+.date-range-sep { color: var(--text-secondary); font-size: 13px; }
+
+.filter-btn {
+  padding: 6px 16px; border: none; border-radius: 8px;
+  background: var(--tag-active-bg); color: var(--tag-active-text);
+  font-size: 13px; cursor: pointer; transition: opacity 0.15s;
+}
+.filter-btn:hover { opacity: 0.85; }
+.filter-btn.secondary { background: var(--tag-bg); color: var(--text); border: 1.5px solid var(--border); }
+
+.filter-result { margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
 
 /* 搜索栏 */
 .search-bar {
-  background: var(--header-bg);
-  padding: 0 16px 10px;
-  display: none;
-  align-items: center;
-  gap: 8px;
+  background: var(--header-bg); padding: 0 16px 10px;
+  display: none; align-items: center; gap: 8px;
 }
-
-.search-bar.active {
-  display: flex;
-}
-
+.search-bar.active { display: flex; }
 .search-bar input {
-  flex: 1;
-  padding: 8px 12px;
-  border: none;
-  border-radius: 8px;
-  background: rgba(255,255,255,0.15);
-  color: var(--header-text);
-  font-size: 14px;
-  outline: none;
+  flex: 1; padding: 8px 12px; border: none; border-radius: 8px;
+  background: rgba(255,255,255,0.15); color: var(--header-text); font-size: 14px; outline: none;
 }
-
-.search-bar input::placeholder {
-  color: rgba(255,255,255,0.5);
-}
-
-#searchCount {
-  color: rgba(255,255,255,0.7);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-#clearSearch {
-  background: none;
-  border: none;
-  color: rgba(255,255,255,0.7);
-  font-size: 16px;
-  cursor: pointer;
-  padding: 4px 8px;
-}
+.search-bar input::placeholder { color: rgba(255,255,255,0.5); }
+#searchCount { color: rgba(255,255,255,0.7); font-size: 12px; white-space: nowrap; }
+#clearSearch { background: none; border: none; color: rgba(255,255,255,0.7); font-size: 16px; cursor: pointer; padding: 4px 8px; }
 
 /* 日期跳转栏 */
 .date-jump-bar {
-  background: var(--header-bg);
-  padding: 0 16px 10px;
-  display: none;
-  align-items: center;
-  gap: 8px;
+  background: var(--header-bg); padding: 0 16px 10px;
+  display: none; align-items: center; gap: 8px;
 }
-
-.date-jump-bar.active {
-  display: flex;
-}
-
+.date-jump-bar.active { display: flex; }
 .date-jump-bar input[type="date"] {
-  padding: 6px 12px;
-  border: none;
-  border-radius: 8px;
-  background: rgba(255,255,255,0.15);
-  color: var(--header-text);
-  font-size: 14px;
-  outline: none;
-  color-scheme: dark;
-}
-
+  padding: 6px 12px; border: none; border-radius: 8px;
+  background: rgba(255,255,255,0.15); color: var(--header-text); font-size: 14px; outline: none; color-scheme: dark;}
 #dateJumpBtn {
-  padding: 6px 14px;
-  border: none;
-  border-radius: 8px;
-  background: rgba(255,255,255,0.25);
-  color: var(--header-text);
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.2s;
+  padding: 6px 14px; border: none; border-radius: 8px;
+  background: rgba(255,255,255,0.25); color: var(--header-text); font-size: 13px; cursor: pointer;
 }
-
-#dateJumpBtn:hover {
-  background: rgba(255,255,255,0.35);
-}
-
-#dateJumpHint {
-  color: rgba(255,255,255,0.7);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-#closeDateJump {
-  background: none;
-  border: none;
-  color: rgba(255,255,255,0.7);
-  font-size: 16px;
-  cursor: pointer;
-  padding: 4px 8px;
-}
+#dateJumpBtn:hover { background: rgba(255,255,255,0.35); }
+#dateJumpHint { color: rgba(255,255,255,0.7); font-size: 12px; white-space: nowrap; }
+#closeDateJump { background: none; border: none; color: rgba(255,255,255,0.7); font-size: 16px; cursor: pointer; padding: 4px 8px; }
 
 /* 聊天体 */
-.chat-body {
-  flex: 1;
-  overflow-y: auto;
-  background: var(--chat-bg);
-  padding: 8px 0;
-}
-
+.chat-body { flex: 1; overflow-y: auto; background: var(--chat-bg); padding: 8px 0; }
 .chat-body::-webkit-scrollbar { width: 6px; }
 .chat-body::-webkit-scrollbar-track { background: transparent; }
 .chat-body::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 3px; }
 
-/* 日期分割线 */
-.date-divider {
-  text-align: center;
-  padding: 12px 0 8px;
-}
+.date-divider { text-align: center; padding: 12px 0 8px; }
+.date-divider span { background: var(--system-bg); color: var(--system-text); padding: 4px 12px; border-radius: 8px; font-size: 12px; font-weight: 500; }
+.date-divider.highlight span { background: var(--link); color: #fff; animation: dateHighlight 2s ease-out forwards; }
+@keyframes dateHighlight { 0% { background: var(--link); color: #fff; } 100% { background: var(--system-bg); color: var(--system-text); } }
 
-.date-divider span {
-  background: var(--system-bg);
-  color: var(--system-text);
-  padding: 4px 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 500;
-}
+.system-msg { text-align: center; padding: 4px 60px; margin: 2px 0; }
+.system-msg span { background: var(--system-bg); color: var(--system-text); padding: 4px 12px; border-radius: 8px; font-size: 12px; display: inline-block; max-width: 100%; word-break: break-word; }
 
-.date-divider.highlight span {
-  background: var(--link);
-  color: #fff;
-  animation: dateHighlight 2s ease-out forwards;
-}
+.msg-row { display: flex; padding: 1px 10px; align-items: flex-end; gap: 6px; }
+.msg-row.sent { flex-direction: row-reverse; }
 
-@keyframes dateHighlight {
-  0% { background: var(--link); color: #fff; }
-  100% { background: var(--system-bg); color: var(--system-text); }
-}
-
-/* 系统消息 */
-.system-msg {
-  text-align: center;
-  padding: 4px 60px;
-  margin: 2px 0;
-}
-
-.system-msg span {
-  background: var(--system-bg);
-  color: var(--system-text);
-  padding: 4px 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  display: inline-block;
-  max-width: 100%;
-  word-break: break-word;
-}
-
-/* 消息行 */
-.msg-row {
-  display: flex;
-  padding: 1px 10px;
-  align-items: flex-end;
-  gap: 6px;
-}
-
-.msg-row.sent {
-  flex-direction: row-reverse;
-}
-
-/* 头像 */
 .msg-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  overflow: hidden;
-  background: #dfe5e7;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 600;
-  color: #fff;
-  align-self: flex-start;
-  margin-top: 2px;
+  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; overflow: hidden;
+  background: #dfe5e7; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 600; color: #fff; align-self: flex-start; margin-top: 2px;
 }
+.msg-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.msg-avatar.c0 { background: #25d366; } .msg-avatar.c1 { background: #128c7e; }
+.msg-avatar.c2 { background: #075e54; } .msg-avatar.c3 { background: #34b7f1; }
+.msg-avatar.c4 { background: #00a884; } .msg-avatar.c5 { background: #7c5cbf; }
+.msg-avatar.c6 { background: #e67e22; } .msg-avatar.c7 { background: #e74c3c; }
 
-.msg-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.msg-avatar.c0 { background: #25d366; }
-.msg-avatar.c1 { background: #128c7e; }
-.msg-avatar.c2 { background: #075e54; }
-.msg-avatar.c3 { background: #34b7f1; }
-.msg-avatar.c4 { background: #00a884; }
-.msg-avatar.c5 { background: #7c5cbf; }
-.msg-avatar.c6 { background: #e67e22; }
-.msg-avatar.c7 { background: #e74c3c; }
-
-/* 气泡 */
-.msg-bubble {
-  max-width: 65%;
-  min-width: 80px;
-}
-
-.msg-sender {
-  font-size: 12px;
-  color: var(--link);
-  font-weight: 500;
-  margin-bottom: 1px;
-  padding: 0 4px;
-}
+.msg-bubble { max-width: 65%; min-width: 80px; }
+.msg-sender { font-size: 12px; color: var(--link); font-weight: 500; margin-bottom: 1px; padding: 0 4px; }
 
 .bubble-body {
-  background: var(--bubble-recv);
-  padding: 6px 8px 4px;
-  border-radius: 8px;
-  position: relative;
-  box-shadow: 0 1px 1px var(--shadow);
-  word-break: break-word;
-  white-space: pre-wrap;
-  font-size: 14px;
+  background: var(--bubble-recv); padding: 6px 8px 4px; border-radius: 8px;
+  position: relative; box-shadow: 0 1px 1px var(--shadow);
+  word-break: break-word; white-space: pre-wrap; font-size: 14px;
 }
+.msg-row.sent .bubble-body { background: var(--bubble-send); }
+.msg-text { line-height: 1.4; }
 
-.msg-row.sent .bubble-body {
-  background: var(--bubble-send);
-}
+.wechat-emoji { width: 20px; height: 20px; display: inline-block; vertical-align: text-bottom; margin: 0 2px; object-fit: contain; }
+.msg-time { font-size: 11px; color: var(--text-time); text-align: right; margin-top: 2px; white-space: nowrap; }
 
-.msg-text {
-  line-height: 1.4;
-}
+.msg-image { cursor: pointer; border-radius: 6px; max-width: 300px; max-height: 300px; display: block; object-fit: contain; background: var(--media-bg); }
+.msg-image.broken { width: 200px; height: 60px; display: flex; align-items: center; justify-content: center; background: var(--media-bg); color: var(--text-secondary); font-size: 12px; border-radius: 6px; }
+.msg-video { max-width: 320px; max-height: 240px; border-radius: 6px; background: #000; }
+.msg-emoji { max-width: 120px; max-height: 120px; display: block; cursor: pointer; }
 
-.wechat-emoji {
-  width: 20px;
-  height: 20px;
-  display: inline-block;
-  vertical-align: text-bottom;
-  margin: 0 2px;
-  object-fit: contain;
-}
+.msg-voice { display: flex; flex-direction: column; gap: 4px; }
+.msg-voice audio { height: 32px; max-width: 240px; }
+.msg-voice .voice-text { font-size: 12px; opacity: 0.8; }
 
-.msg-time {
-  font-size: 11px;
-  color: var(--text-time);
-  text-align: right;
-  margin-top: 2px;
-  white-space: nowrap;
-}
-
-/* 媒体样式 */
-.msg-image {
-  cursor: pointer;
-  border-radius: 6px;
-  max-width: 300px;
-  max-height: 300px;
-  display: block;
-  object-fit: contain;
-  background: var(--media-bg);
-}
-
-.msg-image.broken {
-  width: 200px;
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--media-bg);
-  color: var(--text-secondary);
-  font-size: 12px;
-  border-radius: 6px;
-}
-
-.msg-video {
-  max-width: 320px;
-  max-height: 240px;
-  border-radius: 6px;
-  background: #000;
-}
-
-/* 表情包 */
-.msg-emoji {
-  max-width: 120px;
-  max-height: 120px;
-  display: block;
-  cursor: pointer;
-}
-
-/* 语音播放器 */
-.msg-voice {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.msg-voice audio {
-  height: 32px;
-  max-width: 240px;
-}
-
-.msg-voice .voice-text {
-  font-size: 12px;
-  color: var(--secondary-text);
-  opacity: 0.8;
-}
-
-/* 红包卡片 */
 .hongbao-message {
-  width: 240px;
-  max-width: 100%;
+  width: 240px; max-width: 100%;
   background: linear-gradient(135deg, #e25b4a 0%, #c94535 100%);
-  border-radius: 12px;
-  padding: 14px 16px;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  color: #fff;
-  white-space: normal;
+  border-radius: 12px; padding: 14px 16px;
+  display: flex; gap: 12px; align-items: center; color: #fff; white-space: normal;
 }
+.hongbao-icon { flex-shrink: 0; width: 32px; height: 32px; }
+.hongbao-icon svg { display: block; width: 32px; height: 32px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1)); }
+.hongbao-info { flex: 1; min-width: 0; }
+.hongbao-greeting { font-size: 15px; font-weight: 500; line-height: 1.35; margin-bottom: 6px; word-break: break-word; }
+.hongbao-label { font-size: 12px; opacity: 0.8; }
 
-.hongbao-icon {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-}
-
-.hongbao-icon svg {
-  display: block;
-  width: 32px;
-  height: 32px;
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));
-}
-
-.hongbao-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.hongbao-greeting {
-  font-size: 15px;
-  font-weight: 500;
-  line-height: 1.35;
-  margin-bottom: 6px;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.1);
-  word-break: break-word;
-}
-
-.hongbao-label {
-  font-size: 12px;
-  opacity: 0.8;
-}
-
-/* 聊天记录引用 */
-.chat-records {
-  margin-top: 4px;
-  padding: 6px 8px;
-  background: rgba(0,0,0,0.04);
-  border-radius: 6px;
-  border-left: 3px solid var(--link);
-  font-size: 13px;
-}
-
-[data-theme="dark"] .chat-records {
-  background: rgba(255,255,255,0.05);
-}
-
-.chat-records .cr-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--link);
-  margin-bottom: 4px;
-}
-
-.cr-item {
-  padding: 3px 0;
-  border-bottom: 1px solid rgba(0,0,0,0.05);
-}
-
+.chat-records { margin-top: 4px; padding: 6px 8px; background: rgba(0,0,0,0.04); border-radius: 6px; border-left: 3px solid var(--link); font-size: 13px; }
+[data-theme="dark"] .chat-records { background: rgba(255,255,255,0.05); }
+.chat-records .cr-title { font-size: 12px; font-weight: 600; color: var(--link); margin-bottom: 4px; }
+.cr-item { padding: 3px 0; border-bottom: 1px solid rgba(0,0,0,0.05); }
 .cr-item:last-child { border-bottom: none; }
+.cr-item .cr-sender { font-weight: 600; font-size: 12px; }
+.cr-item .cr-time { font-size: 10px; color: var(--text-secondary); margin-left: 6px; }
+.cr-item .cr-content { color: var(--text-secondary); font-size: 12px; margin-top: 1px; }
 
-.cr-item .cr-sender {
-  font-weight: 600;
-  font-size: 12px;
+/* 消息类型卡片 - 微信风格 */
+.wx-card {
+  max-width: 260px; padding: 10px 12px; border-radius: 4px;
+  background: var(--panel-bg); border: 1px solid rgba(0,0,0,0.06);
+  display: flex; gap: 10px; cursor: default;
 }
-
-.cr-item .cr-time {
-  font-size: 10px;
-  color: var(--text-secondary);
-  margin-left: 6px;
+.wx-card-left {
+  width: 36px; height: 36px; border-radius: 4px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; background: #f5f5f5;
 }
+.wx-card-right { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.wx-card-title { font-size: 14px; color: var(--text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; }
+.wx-card-sub { font-size: 11px; color: var(--text-secondary); margin-top: 3px; }
+.wx-card-footer { font-size: 11px; color: #b2b2b2; margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(0,0,0,0.05); display: flex; align-items: center; gap: 3px; }
 
-.cr-item .cr-content {
-  color: var(--text-secondary);
-  font-size: 12px;
-  margin-top: 1px;
-}
+/* 转账 - 微信绿色 */
+.wx-transfer { background: #fa9e3b; border-color: transparent; color: #fff; }
+.wx-transfer .wx-card-title { color: #fff; font-weight: 600; }
+.wx-transfer .wx-card-sub { color: rgba(255,255,255,0.8); }
+.wx-transfer .wx-card-left { background: rgba(255,255,255,0.2); color: #fff; }
 
-/* 底部 */
-.chat-footer {
-  background: var(--bg);
-  text-align: center;
-  padding: 10px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-}
+/* 红包补充 */
+.wx-hongbao .wx-card-sub { color: rgba(255,255,255,0.7); }
 
-/* 加载指示器 */
-.loading-indicator {
-  text-align: center;
-  padding: 20px;
-  color: var(--text-secondary);
-  font-size: 13px;
-  display: none;
-}
+/* 位置 - 地图底色 */
+.wx-location .wx-card-left { background: #d8e8d0; }
 
+/* 名片 */
+.wx-contact .wx-card-left { background: #e8e8e8; font-size: 14px; }
+
+/* 通话 */
+.wx-call .wx-card-left { background: #e8f4f8; }
+
+a > .wx-card { cursor: pointer; transition: opacity 0.15s; }
+a > .wx-card:hover { opacity: 0.85; }
+
+[data-theme="dark"] .wx-card { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.08); }
+[data-theme="dark"] .wx-card-left { background: rgba(255,255,255,0.08); }
+[data-theme="dark"] .wx-card-footer { border-top-color: rgba(255,255,255,0.06); }
+[data-theme="dark"] .wx-location .wx-card-left { background: rgba(100,160,80,0.15); }
+[data-theme="dark"] .wx-contact .wx-card-left { background: rgba(255,255,255,0.08); }
+[data-theme="dark"] .wx-call .wx-card-left { background: rgba(0,131,143,0.15); }
+
+.empty-state { text-align: center; padding: 60px 20px; color: var(--text-secondary); }
+.empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.5; }
+.empty-state .empty-text { font-size: 14px; }
+
+.chat-footer { background: var(--bg); text-align: center; padding: 10px; font-size: 12px; color: var(--text-secondary); border-top: 1px solid var(--border); flex-shrink: 0; }
+.loading-indicator { text-align: center; padding: 20px; color: var(--text-secondary); font-size: 13px; display: none; }
 .loading-indicator.active { display: block; }
 
-/* 图片预览 */
-.lightbox {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.9);
-  z-index: 1000;
-  align-items: center;
-  justify-content: center;
-  cursor: zoom-out;
-}
-
-.lightbox.active {
-  display: flex;
-}
-
-.lightbox img {
-  max-width: 95vw;
-  max-height: 95vh;
-  object-fit: contain;
-  border-radius: 4px;
-}
-
-.lightbox-close {
-  position: absolute;
-  top: 16px;
-  right: 20px;
-  background: none;
-  border: none;
-  color: #fff;
-  font-size: 28px;
-  cursor: pointer;
-  z-index: 1001;
-  opacity: 0.7;
-}
-
+.lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 1000; align-items: center; justify-content: center; cursor: zoom-out; }
+.lightbox.active { display: flex; }
+.lightbox img { max-width: 95vw; max-height: 95vh; object-fit: contain; border-radius: 4px; }
+.lightbox-close { position: absolute; top: 16px; right: 20px; background: none; border: none; color: #fff; font-size: 28px; cursor: pointer; z-index: 1001; opacity: 0.7; }
 .lightbox-close:hover { opacity: 1; }
 
-/* 响应式 */
 @media (max-width: 600px) {
   .msg-bubble { max-width: 80%; }
   .msg-image { max-width: 220px; }
   .msg-video { max-width: 260px; }
   .msg-emoji { max-width: 100px; }
+  .stat-card { min-width: 70px; padding: 8px 10px; }
+  .stat-card .stat-num { font-size: 18px; }
 }
 `
   }
 
-  /**
-   * 生成 JavaScript 逻辑
-   */
   static generateJs(): string {
     return `
 (function() {
-  const data = window.CHAT_DATA;
-  const messages = data.messages;
-  const members = {};
-  data.members.forEach(m => { members[m.id] = m; });
-  const wechatEmojis = window.WECHAT_EMOJIS || {};
+  var data = window.CHAT_DATA;
+  var messages = data.messages;
+  var members = {};
+  data.members.forEach(function(m) { members[m.id] = m; });
+  var wechatEmojis = window.WECHAT_EMOJIS || {};
 
-  const chatBody = document.getElementById('chatBody');
-  const container = document.getElementById('messagesContainer');
-  const loadingEl = document.getElementById('loadingIndicator');
-  const lightbox = document.getElementById('lightbox');
-  const lightboxImg = document.getElementById('lightboxImg');
+  var chatBody = document.getElementById('chatBody');
+  var container = document.getElementById('messagesContainer');
+  var loadingEl = document.getElementById('loadingIndicator');
+  var lightbox = document.getElementById('lightbox');
+  var lightboxImg = document.getElementById('lightboxImg');
 
-  let filteredMessages = messages;
-  let loadedCount = 0;
-  const BATCH = 50;
-  let isLoading = false;
+  var filteredMessages = messages;
+  var loadedCount = 0;
+  var BATCH = 50;
+  var isLoading = false;
 
-  // 主题切换
-  document.getElementById('themeToggle').addEventListener('click', () => {
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  /* ===== 消息类型分类 ===== */
+  var MSG_CATS = [
+    { key: 'all',      icon: '\\u{1F4AC}', label: '\\u5168\\u90E8' },
+    { key: 'text',     icon: '\\u{1F4DD}', label: '\\u6587\\u672C' },
+    { key: 'image',    icon: '\\u{1F5BC}\\uFE0F', label: '\\u56FE\\u7247' },
+    { key: 'video',    icon: '\\u{1F3AC}', label: '\\u89C6\\u9891' },
+    { key: 'voice',    icon: '\\u{1F399}\\uFE0F', label: '\\u8BED\\u97F3' },
+    { key: 'emoji',    icon: '\\u{1F600}', label: '\\u8868\\u60C5' },
+    { key: 'hongbao',  icon: '\\u{1F9E7}', label: '\\u7EA2\\u5305' },
+    { key: 'transfer', icon: '\\u{1F4B8}', label: '\\u8F6C\\u8D26' },
+    { key: 'location', icon: '\\u{1F4CD}', label: '\\u4F4D\\u7F6E' },
+    { key: 'link',     icon: '\\u{1F517}', label: '\\u94FE\\u63A5' },
+    { key: 'file',     icon: '\\u{1F4CE}', label: '\\u6587\\u4EF6' },
+    { key: 'card',     icon: '\\u{1F464}', label: '\\u540D\\u7247' },
+    { key: 'call',     icon: '\\u{1F4DE}', label: '\\u901A\\u8BDD' },
+    { key: 'system',   icon: '\\u{1F4E2}', label: '\\u7CFB\\u7EDF' },
+    { key: 'other',    icon: '\\u{1F4E6}', label: '\\u5176\\u4ED6' }
+  ];
+
+  function classifyMsg(msg) {
+    var c = msg.content || '';
+    if (msg.type === 10000 || msg.type === 266287972401) return 'system';
+    if (/^\\[\\u7EA2\\u5305\\]/.test(c)) return 'hongbao';
+    if (/^\\[\\u8F6C\\u8D26\\]/.test(c)) return 'transfer';
+    if (/^\\[\\u56FE\\u7247\\]/.test(c)) return 'image';
+    if (/^\\[\\u89C6\\u9891\\]/.test(c)) return 'video';
+    if (/^\\[\\u8BED\\u97F3\\u6D88\\u606F\\]/.test(c)) return 'voice';
+    if (/^\\[\\u52A8\\u753B\\u8868\\u60C5\\]/.test(c)) return 'emoji';
+    if (/^\\[\\u4F4D\\u7F6E\\]/.test(c)) return 'location';
+    if (/^\\[\\u94FE\\u63A5\\]/.test(c) || /^\\[\\u5C0F\\u7A0B\\u5E8F\\]/.test(c) || /^\\[\\u97F3\\u4E50\\]/.test(c) || /^\\[\\u804A\\u5929\\u8BB0\\u5F55\\]/.test(c)) return 'link';
+    if (/^\\[\\u6587\\u4EF6\\]/.test(c)) return 'file';
+    if (/^\\[\\u540D\\u7247\\]/.test(c)) return 'card';
+    if (/^\\[\\u901A\\u8BDD\\]/.test(c)) return 'call';
+    if (/^\\[\\u7FA4\\u516C\\u544A\\]/.test(c)) return 'system';
+    if (/^\\[\\u5FAE\\u4FE1\\u793C\\u7269\\]/.test(c)) return 'other';
+    return 'text';
+  }
+
+  /* ===== 统计 ===== */
+  var typeCounts = {};
+  MSG_CATS.forEach(function(cat) { typeCounts[cat.key] = 0; });
+  messages.forEach(function(m) { var cat = classifyMsg(m); typeCounts[cat] = (typeCounts[cat] || 0) + 1; });
+  typeCounts.all = messages.length;
+
+  function renderStats() {
+    var row = document.getElementById('statsRow');
+    var stats = [
+      { label: '\\u603B\\u6D88\\u606F', value: typeCounts.all },
+      { label: '\\u6587\\u672C', value: typeCounts.text },
+      { label: '\\u56FE\\u7247', value: typeCounts.image },
+      { label: '\\u89C6\\u9891', value: typeCounts.video },
+      { label: '\\u8BED\\u97F3', value: typeCounts.voice },
+      { label: '\\u7EA2\\u5305', value: typeCounts.hongbao },
+      { label: '\\u94FE\\u63A5', value: typeCounts.link },
+      { label: '\\u7CFB\\u7EDF', value: typeCounts.system }
+    ];
+    var html = '';
+    stats.forEach(function(s) {
+      html += '<div class="stat-card"><div class="stat-num">' + s.value + '</div><div class="stat-label">' + s.label + '</div></div>';
+    });
+    row.innerHTML = html;
+  }
+
+  /* ===== 类型筛选按钮 ===== */
+  var activeType = 'all';
+
+  function renderTypeFilters() {
+    var el = document.getElementById('typeFilters');
+    var html = '';
+    MSG_CATS.forEach(function(cat) {
+      var count = typeCounts[cat.key] || 0;
+      if (cat.key !== 'all' && count === 0) return;
+      var isActive = activeType === cat.key;
+      html += '<span class="type-tag' + (isActive ? ' active' : '') + '" data-type="' + cat.key + '">'
+        + cat.icon + ' ' + cat.label
+        + ' <span class="tag-count">' + count + '</span></span>';
+    });
+    el.innerHTML = html;
+    el.querySelectorAll('.type-tag').forEach(function(tag) {
+      tag.addEventListener('click', function() {
+        activeType = this.dataset.type;
+        renderTypeFilters();
+        applyAllFilters();
+      });
+    });
+  }
+
+  /* ===== 时间范围筛选 ===== */
+  var dateStart = null;
+  var dateEnd = null;
+
+  function initDateFilters() {
+    var startEl = document.getElementById('filterDateStart');
+    var endEl = document.getElementById('filterDateEnd');
+    if (messages.length > 0) {
+      var minD = toDateStr(new Date(messages[0].timestamp * 1000));
+      var maxD = toDateStr(new Date(messages[messages.length - 1].timestamp * 1000));
+      startEl.min = minD; startEl.max = maxD;
+      endEl.min = minD; endEl.max = maxD;
+    }
+  }
+
+  document.getElementById('applyDateFilter').addEventListener('click', function() {
+    var sv = document.getElementById('filterDateStart').value;
+    var ev = document.getElementById('filterDateEnd').value;
+    dateStart = sv ? parseDateStart(sv) : null;
+    dateEnd = ev ? parseDateEnd(ev) : null;
+    applyAllFilters();
+  });
+
+  document.getElementById('clearDateFilter').addEventListener('click', function() {
+    document.getElementById('filterDateStart').value = '';
+    document.getElementById('filterDateEnd').value = '';
+    dateStart = null;
+    dateEnd = null;
+    applyAllFilters();
+  });
+
+  function parseDateStart(s) { var p = s.split('-'); return Math.floor(new Date(+p[0], +p[1]-1, +p[2], 0,0,0).getTime() / 1000); }
+  function parseDateEnd(s) { var p = s.split('-'); return Math.floor(new Date(+p[0], +p[1]-1, +p[2], 23,59,59).getTime() / 1000); }
+
+  /* ===== 综合筛选 ===== */
+  function applyAllFilters() {
+    filteredMessages = messages.filter(function(m) {
+      if (activeType !== 'all' && classifyMsg(m) !== activeType) return false;
+      if (dateStart !== null && m.timestamp < dateStart) return false;
+      if (dateEnd !== null && m.timestamp > dateEnd) return false;
+      return true;
+    });
+    var resultEl = document.getElementById('filterResult');
+    var parts = [];
+    if (activeType !== 'all') {
+      var found = MSG_CATS.find(function(c) { return c.key === activeType; });
+      if (found) parts.push(found.icon + ' ' + found.label);
+    }
+    if (dateStart !== null || dateEnd !== null) parts.push('\\u65F6\\u95F4\\u8303\\u56F4\\u7B5B\\u9009\\u4E2D');
+    if (parts.length > 0) {
+      resultEl.textContent = '\\u7B5B\\u9009\\u6761\\u4EF6: ' + parts.join(' + ') + ' \\u2014 \\u5171 ' + filteredMessages.length + ' \\u6761\\u6D88\\u606F';
+    } else {
+      resultEl.textContent = '';
+    }
+    loadedCount = 0;
+    container.innerHTML = '';
+    if (filteredMessages.length === 0) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">\\u{1F50D}</div><div class="empty-text">\\u6CA1\\u6709\\u7B26\\u5408\\u7B5B\\u9009\\u6761\\u4EF6\\u7684\\u6D88\\u606F</div></div>';
+    } else {
+      loadMore();
+    }
+  }
+
+  /* ===== 面板切换 ===== */
+  document.getElementById('statsToggle').addEventListener('click', function() {
+    document.getElementById('statsPanel').classList.toggle('active');
+  });
+  document.getElementById('filterToggle').addEventListener('click', function() {
+    document.getElementById('filterPanel').classList.toggle('active');
+  });
+
+  /* ===== 主题切换 ===== */
+  document.getElementById('themeToggle').addEventListener('click', function() {
+    var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     document.documentElement.setAttribute('data-theme', isDark ? '' : 'dark');
   });
 
-  // 搜索
-  const searchBar = document.getElementById('searchBar');
-  const searchInput = document.getElementById('searchInput');
-  const searchCount = document.getElementById('searchCount');
+  /* ===== 搜索 ===== */
+  var searchBar = document.getElementById('searchBar');
+  var searchInput = document.getElementById('searchInput');
+  var searchCountEl = document.getElementById('searchCount');
 
-  document.getElementById('searchToggle').addEventListener('click', () => {
+  document.getElementById('searchToggle').addEventListener('click', function() {
     searchBar.classList.toggle('active');
     dateJumpBar.classList.remove('active');
     if (searchBar.classList.contains('active')) searchInput.focus();
   });
 
-  let searchTimer;
-  searchInput.addEventListener('input', () => {
+  var searchTimer;
+  searchInput.addEventListener('input', function() {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(doSearch, 300);
   });
 
-  document.getElementById('clearSearch').addEventListener('click', () => {
+  document.getElementById('clearSearch').addEventListener('click', function() {
     searchInput.value = '';
     doSearch();
   });
 
   function doSearch() {
-    const q = searchInput.value.trim().toLowerCase();
+    var q = searchInput.value.trim().toLowerCase();
+    var base = messages.filter(function(m) {
+      if (activeType !== 'all' && classifyMsg(m) !== activeType) return false;
+      if (dateStart !== null && m.timestamp < dateStart) return false;
+      if (dateEnd !== null && m.timestamp > dateEnd) return false;
+      return true;
+    });
     if (!q) {
-      filteredMessages = messages;
-      searchCount.textContent = '';
+      filteredMessages = base;
+      searchCountEl.textContent = '';
     } else {
-      filteredMessages = messages.filter(m => {
-        if (m.content && m.content.toLowerCase().includes(q)) return true;
-        const mem = members[m.sender];
-        if (mem && mem.name.toLowerCase().includes(q)) return true;
-        if (m.senderName && m.senderName.toLowerCase().includes(q)) return true;
+      filteredMessages = base.filter(function(m) {
+        if (m.content && m.content.toLowerCase().indexOf(q) >= 0) return true;
+        var mem = members[m.sender];
+        if (mem && mem.name.toLowerCase().indexOf(q) >= 0) return true;
+        if (m.senderName && m.senderName.toLowerCase().indexOf(q) >= 0) return true;
         return false;
       });
-      searchCount.textContent = filteredMessages.length + ' 条结果';
+      searchCountEl.textContent = filteredMessages.length + ' \\u6761\\u7ED3\\u679C';
     }
     loadedCount = 0;
     container.innerHTML = '';
     loadMore();
   }
 
-  // 日期跳转
-  const dateJumpBar = document.getElementById('dateJumpBar');
-  const dateJumpInput = document.getElementById('dateJumpInput');
-  const dateJumpHint = document.getElementById('dateJumpHint');
+  /* ===== 日期跳转 ===== */
+  var dateJumpBar = document.getElementById('dateJumpBar');
+  var dateJumpInput = document.getElementById('dateJumpInput');
+  var dateJumpHint = document.getElementById('dateJumpHint');
 
-  // 设置日期选择器的范围
   if (messages.length > 0) {
-    const minDate = new Date(messages[0].timestamp * 1000);
-    const maxDate = new Date(messages[messages.length - 1].timestamp * 1000);
+    var minDate = new Date(messages[0].timestamp * 1000);
+    var maxDate = new Date(messages[messages.length - 1].timestamp * 1000);
     dateJumpInput.min = toDateStr(minDate);
     dateJumpInput.max = toDateStr(maxDate);
     dateJumpInput.value = toDateStr(minDate);
   }
 
-  function toDateStr(d) {
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  }
+  function toDateStr(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
 
-  document.getElementById('dateJumpToggle').addEventListener('click', () => {
+  document.getElementById('dateJumpToggle').addEventListener('click', function() {
     dateJumpBar.classList.toggle('active');
     searchBar.classList.remove('active');
     dateJumpHint.textContent = '';
   });
-
-  document.getElementById('closeDateJump').addEventListener('click', () => {
-    dateJumpBar.classList.remove('active');
-  });
-
+  document.getElementById('closeDateJump').addEventListener('click', function() { dateJumpBar.classList.remove('active'); });
   document.getElementById('dateJumpBtn').addEventListener('click', jumpToDate);
-  dateJumpInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') jumpToDate();
-  });
+  dateJumpInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') jumpToDate(); });
 
   function jumpToDate() {
-    const val = dateJumpInput.value;
-    if (!val) {
-      dateJumpHint.textContent = '请选择日期';
-      return;
-    }
-
-    // 将选择的日期转为当天 00:00:00 的时间戳
-    const parts = val.split('-');
-    const targetDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 0, 0, 0);
-    const targetTs = Math.floor(targetDate.getTime() / 1000);
-
-    // 在当前过滤后的消息列表中，用二分查找找到目标日期第一条消息
-    let lo = 0, hi = filteredMessages.length - 1, found = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (filteredMessages[mid].timestamp >= targetTs) {
-        found = mid;
-        hi = mid - 1;
-      } else {
-        lo = mid + 1;
-      }
-    }
-
-    if (found === -1) {
-      dateJumpHint.textContent = '该日期之后无消息';
-      return;
-    }
-
-    // 检查找到的消息是否在目标日期当天
-    const foundDate = new Date(filteredMessages[found].timestamp * 1000);
-    const targetDay = targetDate.toDateString();
-    const foundDay = foundDate.toDateString();
-
-    if (foundDay !== targetDay) {
-      // 该日期无消息，提示跳转到最近的日期
-      var nearFmt = foundDate.getFullYear() + '年' + (foundDate.getMonth() + 1) + '月' + foundDate.getDate() + '日';
-      dateJumpHint.textContent = '该日期无消息，已跳转到最近: ' + nearFmt;
-    } else {
-      dateJumpHint.textContent = '';
-    }
-
-    // 确保消息已加载到 found 的位置
+    var val = dateJumpInput.value;
+    if (!val) { dateJumpHint.textContent = '\\u8BF7\\u9009\\u62E9\\u65E5\\u671F'; return; }
+    var parts = val.split('-');
+    var targetDate = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]), 0,0,0);
+    var targetTs = Math.floor(targetDate.getTime() / 1000);
+    var lo = 0, hi = filteredMessages.length - 1, found = -1;
+    while (lo <= hi) { var mid = (lo+hi)>>1; if (filteredMessages[mid].timestamp >= targetTs) { found = mid; hi = mid-1; } else { lo = mid+1; } }
+    if (found === -1) { dateJumpHint.textContent = '\\u8BE5\\u65E5\\u671F\\u4E4B\\u540E\\u65E0\\u6D88\\u606F'; return; }
+    var foundDate = new Date(filteredMessages[found].timestamp * 1000);
+    if (foundDate.toDateString() !== targetDate.toDateString()) {
+      dateJumpHint.textContent = '\\u8BE5\\u65E5\\u671F\\u65E0\\u6D88\\u606F\\uFF0C\\u5DF2\\u8DF3\\u8F6C\\u5230\\u6700\\u8FD1: ' + foundDate.getFullYear()+'\\u5E74'+(foundDate.getMonth()+1)+'\\u6708'+foundDate.getDate()+'\\u65E5';
+    } else { dateJumpHint.textContent = ''; }
     if (found >= loadedCount) {
-      // 需要加载更多，一次加载到 found 之后一些
       var targetLoad = Math.min(found + BATCH, filteredMessages.length);
       var html = '';
-      for (var i = loadedCount; i < targetLoad; i++) {
-        var prev = i > 0 ? filteredMessages[i - 1] : null;
-        html += renderMsg(filteredMessages[i], prev);
-      }
+      for (var i = loadedCount; i < targetLoad; i++) { var prev = i > 0 ? filteredMessages[i-1] : null; html += renderMsg(filteredMessages[i], prev); }
       container.insertAdjacentHTML('beforeend', html);
       loadedCount = targetLoad;
     }
-
-    // 找到对应的 date-divider 或消息 DOM 元素并滚动到它
     var dividers = container.querySelectorAll('.date-divider');
     var scrollTarget = null;
-
-    // 构建目标日期文本用于匹配
     var targetDateText = fmtDate(filteredMessages[found].timestamp);
-    for (var d = 0; d < dividers.length; d++) {
-      if (dividers[d].textContent.trim() === targetDateText) {
-        scrollTarget = dividers[d];
-        break;
-      }
-    }
-
-    if (scrollTarget) {
-      scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      // 高亮动画
-      scrollTarget.classList.add('highlight');
-      setTimeout(function() { scrollTarget.classList.remove('highlight'); }, 2500);
-    }
+    for (var d = 0; d < dividers.length; d++) { if (dividers[d].textContent.trim() === targetDateText) { scrollTarget = dividers[d]; break; } }
+    if (scrollTarget) { scrollTarget.scrollIntoView({behavior:'smooth',block:'start'}); scrollTarget.classList.add('highlight'); setTimeout(function(){scrollTarget.classList.remove('highlight');},2500); }
   }
 
-  // 图片灯箱
-  lightbox.addEventListener('click', () => lightbox.classList.remove('active'));
-  document.getElementById('lightboxClose').addEventListener('click', (e) => {
-    e.stopPropagation();
-    lightbox.classList.remove('active');
-  });
+  /* ===== 图片灯箱 ===== */
+  lightbox.addEventListener('click', function() { lightbox.classList.remove('active'); });
+  document.getElementById('lightboxClose').addEventListener('click', function(e) { e.stopPropagation(); lightbox.classList.remove('active'); });
+  function openLightbox(src) { lightboxImg.src = src; lightbox.classList.add('active'); }
+  function imgError(el) { var div = document.createElement('div'); div.className = 'msg-image broken'; div.textContent = '\\u{1F4F7} \\u56FE\\u7247'; el.replaceWith(div); }
 
-  function openLightbox(src) {
-    lightboxImg.src = src;
-    lightbox.classList.add('active');
-  }
-
-  // 媒体加载失败处理
-  function imgError(el, label) {
-    var div = document.createElement('div');
-    div.className = 'msg-image broken';
-    div.textContent = label;
-    el.replaceWith(div);
-  }
-
-  // 颜色分配
-  function avatarColor(id) {
-    let hash = 0;
-    for (let i = 0; i < id.length; i++) hash = ((hash << 5) - hash) + id.charCodeAt(i);
-    return 'c' + (Math.abs(hash) % 8);
-  }
-
-  // HTML 实体解码（防止导出数据中残留 &#x20; 等转义字符）
-  function decodeEntities(text) {
-    if (!text) return '';
-    const d = document.createElement('textarea');
-    d.innerHTML = text;
-    return d.value;
-  }
-
-  // HTML 转义
-  function esc(text) {
-    const decoded = decodeEntities(String(text || ''));
-    const d = document.createElement('div');
-    d.textContent = decoded;
-    return d.innerHTML;
-  }
+  /* ===== 工具函数 ===== */
+  function avatarColor(id) { var hash = 0; for (var i = 0; i < id.length; i++) hash = ((hash<<5)-hash)+id.charCodeAt(i); return 'c'+(Math.abs(hash)%8); }
+  function decodeEntities(text) { if (!text) return ''; var d = document.createElement('textarea'); d.innerHTML = text; return d.value; }
+  function esc(text) { var decoded = decodeEntities(String(text||'')); var d = document.createElement('div'); d.textContent = decoded; return d.innerHTML; }
 
   function renderRichText(content) {
-    const text = String(content || '');
-    const re = /\\[([^\\]]+)\\]/g;
-    let html = '';
-    let lastIndex = 0;
-    let match;
-
+    var text = String(content || '');
+    var re = /\\[([^\\]]+)\\]/g;
+    var html = ''; var lastIndex = 0; var match;
     while ((match = re.exec(text)) !== null) {
-      const emojiName = match[1];
-      const emojiSrc = wechatEmojis[emojiName];
-      if (!emojiSrc) continue;
-
-      if (match.index > lastIndex) {
-        html += esc(text.slice(lastIndex, match.index)).replace(/\\n/g, '<br>');
-      }
+      var emojiName = match[1]; var emojiSrc = wechatEmojis[emojiName]; if (!emojiSrc) continue;
+      if (match.index > lastIndex) html += esc(text.slice(lastIndex, match.index)).replace(/\\n/g, '<br>');
       html += '<img class="wechat-emoji" src="' + emojiSrc + '" alt="[' + esc(emojiName) + ']" title="' + esc(emojiName) + '">';
       lastIndex = match.index + match[0].length;
     }
-
-    if (lastIndex < text.length) {
-      html += esc(text.slice(lastIndex)).replace(/\\n/g, '<br>');
-    }
-
+    if (lastIndex < text.length) html += esc(text.slice(lastIndex)).replace(/\\n/g, '<br>');
     return html || esc(text).replace(/\\n/g, '<br>');
   }
 
   function xmlValue(xml, tagName) {
     if (!xml) return '';
-    const re = new RegExp('<' + tagName + '>([\\\\s\\\\S]*?)<\\\\/' + tagName + '>', 'i');
-    const match = re.exec(String(xml));
+    var re = new RegExp('<' + tagName + '>([\\\\s\\\\S]*?)<\\\\/' + tagName + '>', 'i');
+    var match = re.exec(String(xml));
     if (!match) return '';
     return decodeEntities(match[1].replace(/<!\\[CDATA\\[/g, '').replace(/\\]\\]>/g, '').trim());
   }
-
-  function appMsgType(msg) {
-    return xmlValue(msg.rawContent, 'type') || xmlValue(msg.content, 'type');
-  }
+  function appMsgType(msg) { return xmlValue(msg.rawContent, 'type') || xmlValue(msg.content, 'type'); }
 
   function renderHongbao(greeting) {
-    const displayGreeting = greeting || '恭喜发财，大吉大利';
-    return '<div class="hongbao-message">' +
-      '<div class="hongbao-icon">' +
-        '<svg viewBox="0 0 40 40" fill="none" aria-hidden="true">' +
-          '<rect x="4" y="6" width="32" height="28" rx="4" fill="white" fill-opacity="0.3"></rect>' +
-          '<rect x="4" y="6" width="32" height="14" rx="4" fill="white" fill-opacity="0.2"></rect>' +
-          '<circle cx="20" cy="20" r="6" fill="white" fill-opacity="0.4"></circle>' +
-          '<text x="20" y="24" text-anchor="middle" fill="white" font-size="12" font-weight="bold">¥</text>' +
-        '</svg>' +
-      '</div>' +
-      '<div class="hongbao-info">' +
-        '<div class="hongbao-greeting">' + renderRichText(displayGreeting) + '</div>' +
-        '<div class="hongbao-label">微信红包</div>' +
-      '</div>' +
-    '</div>';
+    var g = greeting || '\\u606D\\u559C\\u53D1\\u8D22\\uFF0C\\u5927\\u5409\\u5927\\u5229';
+    return '<div class="hongbao-message"><div class="hongbao-icon"><svg viewBox="0 0 40 40" fill="none"><rect x="4" y="6" width="32" height="28" rx="4" fill="white" fill-opacity="0.3"/><rect x="4" y="6" width="32" height="14" rx="4" fill="white" fill-opacity="0.2"/><circle cx="20" cy="20" r="6" fill="white" fill-opacity="0.4"/><text x="20" y="24" text-anchor="middle" fill="white" font-size="12" font-weight="bold">\\u00A5</text></svg></div><div class="hongbao-info"><div class="hongbao-greeting">' + renderRichText(g) + '</div><div class="hongbao-label">\\u5FAE\\u4FE1\\u7EA2\\u5305</div></div></div>';
   }
 
-  // 格式化时间
-  function fmtTime(ts) {
-    const d = new Date(ts * 1000);
-    const h = String(d.getHours()).padStart(2, '0');
-    const m = String(d.getMinutes()).padStart(2, '0');
-    return h + ':' + m;
-  }
+  function fmtTime(ts) { var d = new Date(ts*1000); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
+  function fmtDate(ts) { var d = new Date(ts*1000); return d.getFullYear()+'\\u5E74'+(d.getMonth()+1)+'\\u6708'+d.getDate()+'\\u65E5 \\u661F\\u671F'+'\\u65E5\\u4E00\\u4E8C\\u4E09\\u56DB\\u4E94\\u516D'[d.getDay()]; }
 
-  function fmtDate(ts) {
-    const d = new Date(ts * 1000);
-    return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日' +
-      ' 星期' + '日一二三四五六'[d.getDay()];
-  }
-
-  // 渲染消息内容（处理图片/视频路径）
   function renderContent(msg) {
-    const content = msg.content || '';
-
-    if (appMsgType(msg) === '2001' || /^\\[红包\\](?:\\s|$)/.test(content)) {
-      const parsedGreeting = /^\\[红包\\](?:\\s+([\\s\\S]*))?$/.exec(content)?.[1]?.trim() || '';
-      const greeting = xmlValue(msg.rawContent, 'receivertitle') ||
-        xmlValue(msg.rawContent, 'sendertitle') ||
-        xmlValue(content, 'receivertitle') ||
-        xmlValue(content, 'sendertitle') ||
-        parsedGreeting;
+    var content = msg.content || '';
+    if (appMsgType(msg) === '2001' || /^\\[\\u7EA2\\u5305\\]/.test(content)) {
+      var parsedGreeting = /^\\[\\u7EA2\\u5305\\](?:\\s+([\\s\\S]*))?$/.exec(content);
+      parsedGreeting = parsedGreeting ? parsedGreeting[1].trim() : '';
+      var greeting = xmlValue(msg.rawContent, 'receivertitle') || xmlValue(msg.rawContent, 'sendertitle') || xmlValue(content, 'receivertitle') || xmlValue(content, 'sendertitle') || parsedGreeting;
       return renderHongbao(greeting);
     }
+    if (!content) return '<em style="opacity:0.5">\\u65E0\\u5185\\u5BB9</em>';
 
-    if (!content) return '<em style="opacity:0.5">无内容</em>';
+    var imgMatch = content.match(/^\\[\\u56FE\\u7247\\]\\s+(.+)$/);
+    if (imgMatch) return '<img class="msg-image" src="'+esc(imgMatch[1])+'" loading="lazy" onclick="window.__lightbox(this.src)" onerror="window.__imgError(this)">';
+    if (content === '['+'\\u56FE\\u7247'+']') return '<div class="msg-image broken">\\u{1F4F7} \\u56FE\\u7247</div>';
 
-    // 图片消息：[图片] images/xxx.jpg
-    const imgMatch = content.match(/^\\[图片\\]\\s+(.+)$/);
-    if (imgMatch) {
-      const src = imgMatch[1];
-      return '<img class="msg-image" src="' + esc(src) + '" loading="lazy" onclick="window.__lightbox(this.src)" onerror="window.__imgError(this)">';
-    }
-    // 仅 [图片] 无路径
-    if (content === '[图片]') return '<div class="msg-image broken">📷 图片</div>';
+    var vidMatch = content.match(/^\\[\\u89C6\\u9891\\]\\s+(.+)$/);
+    if (vidMatch) return '<video class="msg-video" controls preload="metadata" src="'+esc(vidMatch[1])+'"></video>';
+    if (content === '['+'\\u89C6\\u9891'+']') return '<div class="msg-image broken">\\u{1F3AC} \\u89C6\\u9891</div>';
 
-    // 视频消息：[视频] videos/xxx.mp4
-    const vidMatch = content.match(/^\\[视频\\]\\s+(.+)$/);
-    if (vidMatch) {
-      const src = vidMatch[1];
-      return '<video class="msg-video" controls preload="metadata" src="' + esc(src) + '"></video>';
-    }
-    if (content === '[视频]') return '<div class="msg-image broken">🎥 视频</div>';
+    var emojiMatch = content.match(/^\\[\\u52A8\\u753B\\u8868\\u60C5\\]\\s+(.+)$/);
+    if (emojiMatch) return '<img class="msg-emoji" src="'+esc(emojiMatch[1])+'" loading="lazy" onclick="window.__lightbox(this.src)" onerror="window.__imgError(this)">';
+    if (content === '['+'\\u52A8\\u753B\\u8868\\u60C5'+']') return '<div class="msg-image broken">\\u{1F600} \\u8868\\u60C5</div>';
 
-    // 动画表情：[动画表情] emojis/xxx.gif
-    const emojiMatch = content.match(/^\\[动画表情\\]\\s+(.+)$/);
-    if (emojiMatch) {
-      const src = emojiMatch[1];
-      return '<img class="msg-emoji" src="' + esc(src) + '" loading="lazy" onclick="window.__lightbox(this.src)" onerror="window.__imgError(this)">';
-    }
-    if (content === '[动画表情]') return '<div class="msg-image broken">😀 表情</div>';
-
-    // 语音消息：[语音消息] voices/xxx.wav [转写文字]
-    const voiceMatch = content.match(/^\\[语音消息\\]\\s+(voices\\/[^\\s]+)(?:\\s+([\\s\\S]+))?$/);
+    var voiceMatch = content.match(/^\\[\\u8BED\\u97F3\\u6D88\\u606F\\]\\s+(voices\\/[^\\s]+)(?:\\s+([\\s\\S]+))?$/);
     if (voiceMatch) {
-      const src = voiceMatch[1];
-      const transcript = voiceMatch[2] || '';
-      let html = '<div class="msg-voice">';
-      html += '<audio controls preload="metadata" src="' + esc(src) + '"></audio>';
-      if (transcript) html += '<div class="voice-text">' + esc(transcript) + '</div>';
-      html += '</div>';
-      return html;
+      var html = '<div class="msg-voice"><audio controls preload="metadata" src="'+esc(voiceMatch[1])+'"></audio>';
+      if (voiceMatch[2]) html += '<div class="voice-text">'+esc(voiceMatch[2])+'</div>';
+      return html + '</div>';
     }
-    if (content === '[语音消息]') return '<div class="msg-image broken">🎙️ 语音</div>';
+    if (content === '['+'\\u8BED\\u97F3\\u6D88\\u606F'+']') return '<div class="msg-image broken">\\u{1F399}\\uFE0F \\u8BED\\u97F3</div>';
+
+    /* 转账 - 微信橙色风格 */
+    var transferMatch = content.match(/^\\[\\u8F6C\\u8D26\\]\\s+(.+)$/);
+    if (transferMatch) return '<div class="wx-card wx-transfer"><div class="wx-card-left">\\u{1F4B0}</div><div class="wx-card-right"><div class="wx-card-title">'+renderRichText(transferMatch[1])+'</div><div class="wx-card-sub">\\u5FAE\\u4FE1\\u8F6C\\u8D26</div></div></div>';
+
+    /* 链接 - 提取 URL 使其可点击 */
+    var linkMatch = content.match(/^\\[\\u94FE\\u63A5\\]\\s+(.+)$/);
+    if (linkMatch) {
+      var linkUrl = xmlValue(msg.rawContent, 'url') || xmlValue(msg.content, 'url');
+      var linkHtml = '<div class="wx-card"><div class="wx-card-left">\\u{1F517}</div><div class="wx-card-right"><div class="wx-card-title">'+esc(linkMatch[1])+'</div><div class="wx-card-footer">\\u{1F310} \\u7F51\\u9875\\u94FE\\u63A5</div></div></div>';
+      if (linkUrl) linkHtml = '<a href="'+esc(linkUrl)+'" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;">' + linkHtml + '</a>';
+      return linkHtml;
+    }
+
+    /* 小程序 */
+    var miniappMatch = content.match(/^\\[\\u5C0F\\u7A0B\\u5E8F\\]\\s+(.+)$/);
+    if (miniappMatch) {
+      var miniUrl = xmlValue(msg.rawContent, 'url') || xmlValue(msg.content, 'url');
+      var miniHtml = '<div class="wx-card"><div class="wx-card-left">\\u{1F4F1}</div><div class="wx-card-right"><div class="wx-card-title">'+esc(miniappMatch[1])+'</div><div class="wx-card-footer">\\u{1F4F1} \\u5C0F\\u7A0B\\u5E8F</div></div></div>';
+      if (miniUrl) miniHtml = '<a href="'+esc(miniUrl)+'" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;">' + miniHtml + '</a>';
+      return miniHtml;
+    }
+
+    /* 音乐 */
+    var musicMatch = content.match(/^\\[\\u97F3\\u4E50\\]\\s+(.+)$/);
+    if (musicMatch) {
+      var musicUrl = xmlValue(msg.rawContent, 'url') || xmlValue(msg.content, 'url');
+      var musicHtml = '<div class="wx-card"><div class="wx-card-left">\\u{1F3B5}</div><div class="wx-card-right"><div class="wx-card-title">'+esc(musicMatch[1])+'</div><div class="wx-card-footer">\\u{1F3B5} \\u97F3\\u4E50</div></div></div>';
+      if (musicUrl) musicHtml = '<a href="'+esc(musicUrl)+'" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;">' + musicHtml + '</a>';
+      return musicHtml;
+    }
+
+    /* 聊天记录 */
+    var chatrecMatch = content.match(/^\\[\\u804A\\u5929\\u8BB0\\u5F55\\]\\s+(.+)$/);
+    if (chatrecMatch) {
+      var recUrl = xmlValue(msg.rawContent, 'url') || xmlValue(msg.content, 'url');
+      var recHtml = '<div class="wx-card"><div class="wx-card-left">\\u{1F4CB}</div><div class="wx-card-right"><div class="wx-card-title">'+esc(chatrecMatch[1])+'</div><div class="wx-card-footer">\\u{1F4CB} \\u804A\\u5929\\u8BB0\\u5F55</div></div></div>';
+      if (recUrl) recHtml = '<a href="'+esc(recUrl)+'" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;">' + recHtml + '</a>';
+      return recHtml;
+    }
+
+    /* 文件 */
+    var fileMatch = content.match(/^\\[\\u6587\\u4EF6\\]\\s+(.+)$/);
+    if (fileMatch) return '<div class="wx-card"><div class="wx-card-left">\\u{1F4C4}</div><div class="wx-card-right"><div class="wx-card-title">'+esc(fileMatch[1])+'</div><div class="wx-card-footer">\\u{1F4CE} \\u6587\\u4EF6</div></div></div>';
+
+    /* 位置 - 提取坐标生成地图链接 */
+    var locMatch = content.match(/^\\[\\u4F4D\\u7F6E\\]\\s+(.+)$/);
+    if (locMatch) {
+      var raw = msg.rawContent || '';
+      var locLat = raw.match(/(?:lat|x)\\s*=\\s*\\\"?(-?[\\d.]+)/);
+      var locLng = raw.match(/(?:lng|y)\\s*=\\s*\\\"?(-?[\\d.]+)/);
+      var locHtml = '<div class="wx-card wx-location"><div class="wx-card-left">\\u{1F4CD}</div><div class="wx-card-right"><div class="wx-card-title">'+esc(locMatch[1])+'</div><div class="wx-card-footer">\\u{1F4CD} \\u4F4D\\u7F6E</div></div></div>';
+      if (locLat && locLng) locHtml = '<a href="https://uri.amap.com/marker?position='+locLng[1]+','+locLat[1]+'" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;">' + locHtml + '</a>';
+      return locHtml;
+    }
+
+    /* 名片 - 显示昵称和微信号 */
+    var cardMatch = content.match(/^\\[\\u540D\\u7247\\]\\s+(.+)$/);
+    if (cardMatch) {
+      var cardRaw = msg.rawContent || '';
+      var cardWxid = cardRaw.match(/username\\s*=\\s*\\\"([^\\\"]+)/);
+      var cardDesc = cardRaw.match(/(?:(?:province|city)\\s*=\\s*\\\"([^\\\"]*)\"?)|(?:signature\\s*=\\s*\\\"([^\\\"]*)\"?)/g);
+      var cardHtml = '<div class="wx-card wx-contact"><div class="wx-card-left">\\u{1F464}</div><div class="wx-card-right"><div class="wx-card-title">'+esc(cardMatch[1])+'</div>';
+      if (cardWxid) cardHtml += '<div class="wx-card-sub">\\u5FAE\\u4FE1\\u53F7: '+esc(cardWxid[1])+'</div>';
+      cardHtml += '</div></div>';
+      return cardHtml;
+    }
+
+    /* 通话 */
+    var callMatch = content.match(/^\\[\\u901A\\u8BDD\\]\\s*(.*)$/);
+    if (callMatch) return '<div class="wx-card wx-call"><div class="wx-card-left">\\u{1F4DE}</div><div class="wx-card-right"><div class="wx-card-title">'+(callMatch[1] ? esc(callMatch[1]) : '\\u901A\\u8BDD')+'</div><div class="wx-card-footer">\\u{1F4DE} \\u97F3\\u89C6\\u9891\\u901A\\u8BDD</div></div></div>';
+
+    /* 群公告 */
+    var noticeMatch = content.match(/^\\[\\u7FA4\\u516C\\u544A\\]\\s+(.+)$/);
+    if (noticeMatch) return '<div class="wx-card"><div class="wx-card-left">\\u{1F4E2}</div><div class="wx-card-right"><div class="wx-card-title">'+esc(noticeMatch[1])+'</div><div class="wx-card-footer">\\u{1F4E2} \\u7FA4\\u516C\\u544A</div></div></div>';
+
+    /* 微信礼物 */
+    var giftMatch = content.match(/^\\[\\u5FAE\\u4FE1\\u793C\\u7269\\]\\s+(.+)$/);
+    if (giftMatch) return '<div class="wx-card"><div class="wx-card-left">\\u{1F381}</div><div class="wx-card-right"><div class="wx-card-title">'+esc(giftMatch[1])+'</div><div class="wx-card-footer">\\u{1F381} \\u5FAE\\u4FE1\\u793C\\u7269</div></div></div>';
 
     return '<span class="msg-text">' + renderRichText(content) + '</span>';
   }
 
-  // 渲染聊天记录引用
   function renderChatRecords(records) {
     if (!records || records.length === 0) return '';
-    let html = '<div class="chat-records"><div class="cr-title">📋 聊天记录</div>';
-    for (const r of records) {
-      html += '<div class="cr-item">';
-      html += '<span class="cr-sender">' + esc(r.senderDisplayName) + '</span>';
-      if (r.formattedTime) html += '<span class="cr-time">' + esc(r.formattedTime) + '</span>';
-      html += '<div class="cr-content">' + renderRichText(r.content) + '</div></div>';
+    var html = '<div class="chat-records"><div class="cr-title">\\u{1F4CB} \\u804A\\u5929\\u8BB0\\u5F55</div>';
+    for (var i = 0; i < records.length; i++) {
+      var r = records[i];
+      html += '<div class="cr-item"><span class="cr-sender">'+esc(r.senderDisplayName)+'</span>';
+      if (r.formattedTime) html += '<span class="cr-time">'+esc(r.formattedTime)+'</span>';
+      html += '<div class="cr-content">'+renderRichText(r.content)+'</div></div>';
     }
     return html + '</div>';
   }
 
-  // 渲染单条消息
   function renderMsg(msg, prevMsg) {
-    let html = '';
-
-    // 日期分割线
-    if (!prevMsg || fmtDate(msg.timestamp) !== fmtDate(prevMsg.timestamp)) {
-      html += '<div class="date-divider"><span>' + fmtDate(msg.timestamp) + '</span></div>';
-    }
-
-    // 系统消息
-    if (msg.type === 10000 || msg.type === 266287972401) {
-      html += '<div class="system-msg"><span>' + esc(msg.content || '') + '</span></div>';
-      return html;
-    }
-
-    const mem = members[msg.sender];
-    const name = mem ? mem.name : (msg.senderName || msg.sender);
-    const avatar = mem && mem.avatar ? mem.avatar : null;
-    const isGroup = data.meta.isGroup;
-    const isSend = msg.isSend;
-
-    html += '<div class="msg-row' + (isSend ? ' sent' : '') + '">';
-
-    // 头像
-    html += '<div class="msg-avatar ' + avatarColor(msg.sender) + '">';
-    if (avatar) {
-      html += '<img src="' + esc(avatar) + '" onerror="this.style.display=\\'none\\';this.parentElement.textContent=\\'' + esc(name.charAt(0)) + '\\'"/>';
-    } else {
-      html += esc(name.charAt(0));
-    }
+    var html = '';
+    if (!prevMsg || fmtDate(msg.timestamp) !== fmtDate(prevMsg.timestamp)) html += '<div class="date-divider"><span>'+fmtDate(msg.timestamp)+'</span></div>';
+    if (msg.type === 10000 || msg.type === 266287972401) { html += '<div class="system-msg"><span>'+esc(msg.content||'')+'</span></div>'; return html; }
+    var mem = members[msg.sender];
+    var name = mem ? mem.name : (msg.senderName || msg.sender);
+    var avatar = mem && mem.avatar ? mem.avatar : null;
+    var isGroup = data.meta.isGroup;
+    var isSend = msg.isSend;
+    html += '<div class="msg-row'+(isSend?' sent':'')+'">';
+    html += '<div class="msg-avatar '+avatarColor(msg.sender)+'">';
+    if (avatar) { html += '<img src="'+esc(avatar)+'" onerror="this.style.display=\\'none\\';this.parentElement.textContent=\\''+esc(name.charAt(0))+'\\'"/>'; }
+    else { html += esc(name.charAt(0)); }
     html += '</div>';
-
-    // 气泡
     html += '<div class="msg-bubble">';
-    if (isGroup && !isSend) {
-      html += '<div class="msg-sender">' + esc(name) + '</div>';
-    }
+    if (isGroup && !isSend) html += '<div class="msg-sender">'+esc(name)+'</div>';
     html += '<div class="bubble-body">';
     html += renderContent(msg);
     if (msg.chatRecords) html += renderChatRecords(msg.chatRecords);
-    html += '<div class="msg-time">' + fmtTime(msg.timestamp) + '</div>';
+    html += '<div class="msg-time">'+fmtTime(msg.timestamp)+'</div>';
     html += '</div></div></div>';
-
     return html;
   }
 
-  // 按批次加载
   function loadMore() {
-    if (isLoading || loadedCount >= filteredMessages.length) {
-      loadingEl.classList.remove('active');
-      return;
-    }
+    if (isLoading || loadedCount >= filteredMessages.length) { loadingEl.classList.remove('active'); return; }
     isLoading = true;
     loadingEl.classList.add('active');
-
-    requestAnimationFrame(() => {
-      const end = Math.min(loadedCount + BATCH, filteredMessages.length);
-      let html = '';
-      for (let i = loadedCount; i < end; i++) {
-        const prev = i > 0 ? filteredMessages[i - 1] : null;
-        html += renderMsg(filteredMessages[i], prev);
-      }
+    requestAnimationFrame(function() {
+      var end = Math.min(loadedCount + BATCH, filteredMessages.length);
+      var html = '';
+      for (var i = loadedCount; i < end; i++) { var prev = i > 0 ? filteredMessages[i-1] : null; html += renderMsg(filteredMessages[i], prev); }
       container.insertAdjacentHTML('beforeend', html);
       loadedCount = end;
       isLoading = false;
-
-      if (loadedCount >= filteredMessages.length) {
-        loadingEl.classList.remove('active');
-      }
+      if (loadedCount >= filteredMessages.length) loadingEl.classList.remove('active');
     });
   }
 
-  // 滚动加载
-  chatBody.addEventListener('scroll', () => {
-    if (chatBody.scrollTop + chatBody.clientHeight >= chatBody.scrollHeight - 300) {
-      loadMore();
-    }
+  chatBody.addEventListener('scroll', function() {
+    if (chatBody.scrollTop + chatBody.clientHeight >= chatBody.scrollHeight - 300) loadMore();
   });
 
-  // 全局函数
   window.__lightbox = openLightbox;
   window.__imgError = imgError;
 
-  // 初始加载
+  /* ===== 初始化 ===== */
+  renderStats();
+  renderTypeFilters();
+  initDateFilters();
   loadMore();
 })();
 `
@@ -1274,9 +1074,6 @@ body {
     ].filter(Boolean)
   }
 
-  /**
-   * HTML 转义
-   */
   private static escapeHtml(text: string): string {
     const map: Record<string, string> = {
       '&': '&amp;',
