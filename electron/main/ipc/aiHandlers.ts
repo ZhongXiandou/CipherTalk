@@ -229,10 +229,40 @@ export function registerAiHandlers(_ctx: MainProcessContext): void {
     }
   })
 
+  ipcMain.handle('memory:update', async (_event, payload: {
+    id: number
+    sourceType?: 'profile' | 'fact'
+    content?: string
+    importance?: number
+    tags?: string[]
+  }) => {
+    try {
+      const { memoryDatabase } = await import('../../services/memory/memoryDatabase')
+      const id = Number(payload?.id)
+      if (!Number.isFinite(id)) return { success: false, error: '无效的记忆 id' }
+      const content = String(payload?.content || '').trim()
+      if (!content) return { success: false, error: '记忆内容不能为空' }
+      const item = memoryDatabase.updateMemoryItem(id, {
+        ...(payload.sourceType ? { sourceType: payload.sourceType } : {}),
+        title: content.slice(0, 40),
+        content,
+        ...(payload.importance !== undefined ? { importance: payload.importance } : {}),
+        ...(Array.isArray(payload.tags) ? { tags: payload.tags } : {}),
+      })
+      return item ? { success: true, item } : { success: false, error: '未找到该记忆' }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
   ipcMain.handle('memory:consolidate', async () => {
     try {
       const { memoryDatabase } = await import('../../services/memory/memoryDatabase')
-      return { success: true, result: memoryDatabase.consolidate() }
+      const { getEmbeddingConfig } = await import('../../services/ai/embeddingService')
+      const cfg = getEmbeddingConfig()
+      // 管理界面整理：用已建向量做语义去重（不现场补嵌入）+ 超量淘汰；未配嵌入则仅超量淘汰
+      const semantic = cfg.enabled && cfg.apiKey && cfg.model ? { modelId: cfg.model } : undefined
+      return { success: true, result: memoryDatabase.consolidate(50, semantic) }
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) }
     }

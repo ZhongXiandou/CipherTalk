@@ -975,6 +975,7 @@ export interface ElectronAPI {
   memory: {
     list: (opts?: { sourceType?: 'profile' | 'fact'; sessionId?: string; limit?: number }) => Promise<{ success: boolean; items?: AgentMemoryItem[]; stats?: { itemCount: number }; error?: string }>
     delete: (id: number) => Promise<{ success: boolean; error?: string }>
+    update: (payload: { id: number; sourceType?: 'profile' | 'fact'; content?: string; importance?: number; tags?: string[] }) => Promise<{ success: boolean; item?: AgentMemoryItem; error?: string }>
     consolidate: () => Promise<{ success: boolean; result?: { removed: number; groups: number; scanned: number }; error?: string }>
   }
   embedding: {

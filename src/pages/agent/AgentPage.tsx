@@ -170,10 +170,10 @@ function MessageChainOfThought({ active, children }: { active: boolean; children
 
 const TOOL_LABELS: Record<string, string> = {
   delegate_analysis: '委托子助手',
-  remember: '记住',
-  recall: '回忆',
-  list_memories: '浏览记忆',
-  forget: '忘记',
+  remember: '保存记忆',
+  recall: '查找记忆',
+  list_memories: '查看记忆',
+  forget: '删除记忆',
   consolidate_memory: '整理记忆',
   auto_memory: '自动记忆',
 }

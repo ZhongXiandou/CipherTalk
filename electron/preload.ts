@@ -114,6 +114,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('memory:list', opts) as Promise<{ success: boolean; items?: unknown[]; stats?: { itemCount: number }; error?: string }>,
     delete: (id: number) =>
       ipcRenderer.invoke('memory:delete', id) as Promise<{ success: boolean; error?: string }>,
+    update: (payload: { id: number; sourceType?: 'profile' | 'fact'; content?: string; importance?: number; tags?: string[] }) =>
+      ipcRenderer.invoke('memory:update', payload) as Promise<{ success: boolean; item?: unknown; error?: string }>,
     consolidate: () =>
       ipcRenderer.invoke('memory:consolidate') as Promise<{ success: boolean; result?: { removed: number; groups: number; scanned: number }; error?: string }>,
   },

@@ -222,8 +222,13 @@ export function createConsolidate() {
     inputSchema: z.object({}),
     execute: async () => {
       try {
-        // 确定性巩固：分组超量淘汰，逻辑在 memoryDatabase（IPC 管理界面共用）。语义合并（需 LLM）留后续。
-        return memoryDatabase.consolidate()
+        const cfg = getEmbeddingConfig()
+        const semantic = isEmbeddingReady(cfg) ? { modelId: cfg.model } : undefined
+        // 先尽量补全向量，让语义去重覆盖更全（失败/未配嵌入就用已有向量或只做超量淘汰）
+        if (semantic) {
+          try { await ensureMemoryVectors(cfg, null) } catch { /* 建不了就用已有向量 */ }
+        }
+        return memoryDatabase.consolidate(50, semantic)
       } catch (e) {
         return { error: e instanceof Error ? e.message : String(e) }
       }

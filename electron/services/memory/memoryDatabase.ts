@@ -575,8 +575,71 @@ export class MemoryDatabase {
     return result.changes > 0
   }
 
-  /** 分组（session_id × source_type）超量淘汰：每组按 importance×新近度保留前 cap 条，删其余。返回删除数。 */
-  consolidate(capPerGroup = 50): { removed: number; groups: number; scanned: number } {
+  updateMemoryItem(id: number, input: {
+    sourceType?: MemorySourceType
+    title?: string
+    content?: string
+    importance?: number
+    confidence?: number
+    tags?: string[]
+  }): MemoryItem | null {
+    const existing = this.getMemoryItemById(id)
+    if (!existing) return null
+
+    const sourceType = input.sourceType ?? existing.sourceType
+    if (!MEMORY_SOURCE_TYPES.includes(sourceType)) {
+      throw new Error(`Unsupported memory source type: ${sourceType}`)
+    }
+
+    const content = input.content !== undefined ? String(input.content) : existing.content
+    const title = input.title !== undefined ? String(input.title) : existing.title
+    if (!content.trim()) throw new Error('memory content is required')
+
+    const nextTags = input.tags ?? existing.tags
+    const contentHash = hashMemoryContent(title, content)
+    const updatedAt = nowMs()
+
+    this.getDb().prepare(`
+      UPDATE memory_items SET
+        source_type = @sourceType,
+        title = @title,
+        content = @content,
+        content_hash = @contentHash,
+        tags_json = @tagsJson,
+        importance = @importance,
+        confidence = @confidence,
+        updated_at = @updatedAt
+      WHERE id = @id
+    `).run({
+      id,
+      sourceType,
+      title,
+      content,
+      contentHash,
+      tagsJson: safeJsonStringify(nextTags, []),
+      importance: clamp01(input.importance, existing.importance),
+      confidence: clamp01(input.confidence, existing.confidence),
+      updatedAt
+    })
+
+    this.getDb().prepare('DELETE FROM memory_embeddings WHERE memory_id = ?').run(id)
+    const item = this.getMemoryItemById(id)
+    if (item) this.upsertMemoryFtsRow(item)
+    return item
+  }
+
+  /**
+   * 巩固：先语义去重（给了 semantic.modelId 时，用已建向量把同组里意思相近的合并为保留最优一条），
+   * 再分组（session_id × source_type）超量淘汰（每组按 importance×新近度保留前 cap 条）。返回删除数。
+   */
+  consolidate(
+    capPerGroup = 50,
+    semantic?: { modelId: string; threshold?: number }
+  ): { removed: number; semanticRemoved: number; groups: number; scanned: number } {
+    const semanticRemoved = semantic?.modelId
+      ? this.dedupeBySemantic(semantic.modelId, semantic.threshold ?? 0.93)
+      : 0
+
     const all = this.listMemoryItems({ limit: 1000 })
     const groups = new Map<string, MemoryItem[]>()
     for (const m of all) {
@@ -585,15 +648,68 @@ export class MemoryDatabase {
       if (bucket) bucket.push(m)
       else groups.set(key, [m])
     }
-    let removed = 0
+    let capRemoved = 0
     for (const items of groups.values()) {
       if (items.length <= capPerGroup) continue
       const sorted = [...items].sort((a, b) => b.importance - a.importance || b.updatedAt - a.updatedAt)
       for (const victim of sorted.slice(capPerGroup)) {
-        if (this.deleteMemoryItem(victim.id)) removed += 1
+        if (this.deleteMemoryItem(victim.id)) capRemoved += 1
       }
     }
-    return { removed, groups: groups.size, scanned: all.length }
+    return { removed: semanticRemoved + capRemoved, semanticRemoved, groups: groups.size, scanned: all.length }
+  }
+
+  /**
+   * 语义去重：同（session_id × source_type）组内，向量 cosine > threshold 视为同义；
+   * 按 importance×confidence 排序保留最优、删其余。只用已建向量（缺向量的不参与）。返回删除数。
+   * threshold 偏高（默认 0.93），宁可漏合并不误删——不同事实（如"喜欢咖啡"/"喜欢茶"）达不到该相似度。
+   */
+  private dedupeBySemantic(modelId: string, threshold: number): number {
+    const db = this.getDb()
+    const rows = db.prepare(`
+      SELECT m.id AS id, m.session_id AS session_id, m.source_type AS source_type,
+             m.importance AS importance, m.confidence AS confidence, m.updated_at AS updated_at,
+             e.embedding AS embedding
+      FROM memory_embeddings e
+      JOIN memory_items m ON m.id = e.memory_id
+      WHERE e.model_id = ?
+    `).all(modelId) as Array<{
+      id: number; session_id: string | null; source_type: string
+      importance: number; confidence: number; updated_at: number; embedding: Buffer
+    }>
+
+    type Node = { id: number; vec: number[]; rankScore: number; updatedAt: number }
+    const groups = new Map<string, Node[]>()
+    for (const r of rows) {
+      const buf = r.embedding
+      const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+      const node: Node = {
+        id: Number(r.id),
+        vec: Array.from(new Float32Array(ab)),
+        rankScore: Number(r.importance || 0) * 0.5 + Number(r.confidence || 0) * 0.5,
+        updatedAt: Number(r.updated_at || 0),
+      }
+      const key = `${r.session_id ?? ''}::${r.source_type}`
+      const bucket = groups.get(key)
+      if (bucket) bucket.push(node)
+      else groups.set(key, [node])
+    }
+
+    let removed = 0
+    for (const nodes of groups.values()) {
+      if (nodes.length < 2) continue
+      nodes.sort((a, b) => b.rankScore - a.rankScore || b.updatedAt - a.updatedAt)
+      const kept: Node[] = []
+      for (const n of nodes) {
+        const isDup = kept.some((k) => k.vec.length === n.vec.length && cosineSimilarity(k.vec, n.vec) > threshold)
+        if (isDup) {
+          if (this.deleteMemoryItem(n.id)) removed += 1
+        } else {
+          kept.push(n)
+        }
+      }
+    }
+    return removed
   }
 
   // ===== 语义检索：记忆向量（memory_embeddings，Float32 blob，与 messageVectorService 同套存取）=====

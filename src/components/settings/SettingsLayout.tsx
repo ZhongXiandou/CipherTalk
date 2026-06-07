@@ -85,9 +85,9 @@ const STT_ONLINE_DEFAULTS = {
   }
 } as const
 
-function AISettingsSkeleton() {
+function SettingsTabSkeleton() {
   return (
-    <div className="tab-content" aria-busy="true" aria-label="AI 接入配置占位">
+    <div className="tab-content" aria-busy="true" aria-label="设置页内容占位">
       <div className="mx-auto w-full max-w-290 space-y-6 px-2">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 space-y-2">
@@ -1414,28 +1414,28 @@ function SettingsLayout() {
       <ScrollShadow className="settings-body" hideScrollBar size={64}>
         {activeTab === 'appearance' && <AppearanceTab />}
         {activeTab === 'database' && (
-          <Suspense fallback={<div className="tab-content">加载中...</div>}>
+          <Suspense fallback={<SettingsTabSkeleton />}>
             <DatabaseTab showMessage={showMessage} />
           </Suspense>
         )}
         {activeTab === 'security' && <SecurityTab isMac={isMac} showMessage={showMessage} />}
         {activeTab === 'stt' && (
-          <Suspense fallback={<div className="tab-content">加载中...</div>}>
+          <Suspense fallback={<SettingsTabSkeleton />}>
             <SttTab active={activeTab === 'stt'} showMessage={showMessage} />
           </Suspense>
         )}
         {activeTab === 'ai' && (
-          <Suspense fallback={<AISettingsSkeleton />}>
+          <Suspense fallback={<SettingsTabSkeleton />}>
             <AISummarySettings showMessage={showMessage} />
           </Suspense>
         )}
         {activeTab === 'memory' && (
-          <Suspense fallback={<div className="tab-content">加载中...</div>}>
+          <Suspense fallback={<SettingsTabSkeleton />}>
             <MemoryTab showMessage={showMessage} />
           </Suspense>
         )}
         {activeTab === 'data' && (
-          <Suspense fallback={<div className="tab-content">加载中...</div>}>
+          <Suspense fallback={<SettingsTabSkeleton />}>
             <DataManagementTab
               showMessage={showMessage}
               reloadConfig={loadConfig}
