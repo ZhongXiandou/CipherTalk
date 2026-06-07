@@ -177,24 +177,28 @@ export function registerAiHandlers(_ctx: MainProcessContext): void {
       const { getEmbeddingConfig } = await import('../../services/ai/embeddingService')
       const { messageVectorService } = await import('../../services/search/messageVectorService')
       const cfg = getEmbeddingConfig()
-      return { success: true, enabled: messageVectorService.isReady(cfg), count: messageVectorService.getSessionChunkCount(sessionId) }
+      const store = messageVectorService.getSessionVectorStoreInfo(sessionId)
+      return { success: true, enabled: messageVectorService.isReady(cfg), count: store.count, store }
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) }
     }
   })
 
   // 主动为某会话构建向量（懒构建的手动触发；增量，已建则只补新增）
-  ipcMain.handle('embedding:buildSession', async (_e, sessionId: string) => {
+  ipcMain.handle('embedding:buildSession', async (event, sessionId: string) => {
     try {
       const { getEmbeddingConfig } = await import('../../services/ai/embeddingService')
       const { messageVectorService } = await import('../../services/search/messageVectorService')
       const { refreshResolvedProxyUrl } = await import('../../services/ai/proxyFetch')
+      const sender = event.sender
       const cfg = getEmbeddingConfig()
       if (!messageVectorService.isReady(cfg)) {
         return { success: false, error: '未启用或未配置嵌入模型（请先在设置 → 嵌入中配置并启用）' }
       }
       await refreshResolvedProxyUrl()
-      const indexed = await messageVectorService.ensureSessionVectors(sessionId, cfg)
+      const indexed = await messageVectorService.ensureSessionVectors(sessionId, cfg, undefined, (progress) => {
+        if (!sender.isDestroyed()) sender.send('embedding:buildProgress', progress)
+      })
       return { success: true, indexed }
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) }

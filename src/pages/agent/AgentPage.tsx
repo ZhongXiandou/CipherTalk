@@ -283,6 +283,40 @@ function toMentionTarget(username: string, displayName?: string, avatarUrl?: str
   }
 }
 
+function splitMentionPrefix(text: string): { mentions: MentionTarget[]; text: string } {
+  const mentions: MentionTarget[] = []
+  let rest = text
+
+  while (true) {
+    const match = rest.match(/^@([^\[\]\r\n]+)\[([^\]\r\n]+)\][ \t]*/)
+    if (!match) break
+
+    const displayName = match[1].trim()
+    const username = match[2].trim()
+    if (!displayName || !username) break
+
+    mentions.push(toMentionTarget(username, displayName))
+    rest = rest.slice(match[0].length)
+  }
+
+  if (mentions.length === 0) return { mentions, text }
+  return { mentions, text: rest.replace(/^\r?\n/, '') }
+}
+
+function getUserMessageDisplay(parts: UIMessage['parts']): {
+  mentions: MentionTarget[]
+  textByPartIndex: Map<number, string>
+} {
+  const textByPartIndex = new Map<number, string>()
+  const firstTextIndex = parts.findIndex((part) => part.type === 'text')
+  if (firstTextIndex < 0) return { mentions: [], textByPartIndex }
+
+  const firstTextPart = parts[firstTextIndex] as Extract<UIMessage['parts'][number], { type: 'text' }>
+  const parsed = splitMentionPrefix(firstTextPart.text || '')
+  if (parsed.mentions.length > 0) textByPartIndex.set(firstTextIndex, parsed.text)
+  return { mentions: parsed.mentions, textByPartIndex }
+}
+
 function getAvatarLetter(name: string): string {
   const text = name.trim()
   return text ? text.slice(0, 1).toUpperCase() : '?'
@@ -353,6 +387,24 @@ function MentionAvatar({ target, className = 'size-7' }: { target: MentionTarget
         <span>{getAvatarLetter(target.displayName || target.username)}</span>
       )}
     </span>
+  )
+}
+
+function UserMessageMentions({ mentions }: { mentions: MentionTarget[] }) {
+  if (mentions.length === 0) return null
+  return (
+    <div className="ml-auto flex max-w-full flex-wrap justify-end gap-1.5">
+      {mentions.map((mention) => (
+        <span
+          className="inline-flex max-w-72 items-center gap-1.5 rounded-full border border-border/60 bg-card/60 px-2 py-0.5 text-[11px] text-muted-foreground"
+          key={mention.username}
+          title={mention.displayName}
+        >
+          <MentionAvatar className="size-4" target={mention} />
+          <span className="truncate">@{mention.displayName}</span>
+        </span>
+      ))}
+    </div>
   )
 }
 
@@ -574,6 +626,7 @@ function MessageSources({
   nameOf: (sessionId: string) => string
 }) {
   if (items.length === 0) return null
+  const senderNameOf = (item: SourceItem) => item.sender || nameOf(item.sessionId)
   return (
     <Sources>
       <SourcesTrigger count={items.length}>
@@ -581,23 +634,26 @@ function MessageSources({
         <span className="font-medium">出处 {items.length} 条</span>
       </SourcesTrigger>
       <SourcesContent className="w-full flex-row flex-wrap gap-1.5">
-        {items.map((it, index) => (
-          <HoverCard closeDelay={80} key={it.id} openDelay={120}>
-            <HoverCardTrigger asChild>
-              <span className="inline-flex max-w-40 items-center gap-1 rounded-full border border-border/60 bg-card/60 px-2 py-0.5 text-[11px] text-muted-foreground">
-                <Quote className="size-3 shrink-0 opacity-70" />
-                <span className="shrink-0">{index + 1}</span>
-                <span className="truncate">{nameOf(it.sessionId)}</span>
-              </span>
-            </HoverCardTrigger>
-            <HoverCardContent align="start" className="w-80 text-xs" side="top">
-              <div className="mb-1 font-medium text-[11px] text-muted-foreground">
-                {[nameOf(it.sessionId), it.sender, it.time].filter(Boolean).join(' · ')}
-              </div>
-              <div className="max-h-40 overflow-auto whitespace-pre-wrap text-foreground">{it.text}</div>
-            </HoverCardContent>
-          </HoverCard>
-        ))}
+        {items.map((it, index) => {
+          const senderName = senderNameOf(it)
+          return (
+            <HoverCard closeDelay={80} key={it.id} openDelay={120}>
+              <HoverCardTrigger asChild>
+                <span className="inline-flex max-w-40 items-center gap-1 rounded-full border border-border/60 bg-card/60 px-2 py-0.5 text-[11px] text-muted-foreground">
+                  <Quote className="size-3 shrink-0 opacity-70" />
+                  <span className="shrink-0">{index + 1}</span>
+                  <span className="truncate">{senderName}</span>
+                </span>
+              </HoverCardTrigger>
+              <HoverCardContent align="start" className="w-80 text-xs" side="top">
+                <div className="mb-1 font-medium text-[11px] text-muted-foreground">
+                  {[senderName, it.time].filter(Boolean).join(' · ')}
+                </div>
+                <div className="max-h-40 overflow-auto whitespace-pre-wrap text-foreground">{it.text}</div>
+              </HoverCardContent>
+            </HoverCard>
+          )
+        })}
       </SourcesContent>
     </Sources>
   )
@@ -1594,8 +1650,10 @@ export default function AgentPage() {
               const isReasoningStreaming = isLastMessage && status === 'streaming' && lastPart?.type === 'reasoning'
               const chainActive = isLastMessage && busy
               const assistantText = message.role === 'assistant' ? messageTextOf(message) : ''
+              const userDisplay = message.role === 'user' ? getUserMessageDisplay(message.parts) : null
               return (
                 <Message from={message.role} key={message.id}>
+                  {userDisplay && <UserMessageMentions mentions={userDisplay.mentions} />}
                   <MessageContent>
                     {chainParts.length > 0 && (
                       <MessageChainOfThought active={chainActive}>
@@ -1648,7 +1706,9 @@ export default function AgentPage() {
                     )}
                     {message.parts.map((part, index) => {
                       if (part.type === 'text') {
-                        return <MessageResponse key={`text-${index}`}>{part.text}</MessageResponse>
+                        const displayText = userDisplay?.textByPartIndex.get(index) ?? part.text
+                        if (!displayText) return null
+                        return <MessageResponse key={`text-${index}`}>{displayText}</MessageResponse>
                       }
                       if (part.type === 'file') {
                         return (

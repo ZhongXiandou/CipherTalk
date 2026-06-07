@@ -10,7 +10,7 @@
  * - 懒构建 + 增量 + 上限：首次对某会话语义检索时切最近 N 条成片段，之后只补新增（按高水位定位）。
  */
 import Database from 'better-sqlite3'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { cosineSimilarity } from 'ai'
 import { ConfigService } from '../config'
@@ -61,6 +61,28 @@ interface BuiltChunk {
   embedText: string
   excerpt: string
 }
+
+export type VectorBuildStage = 'loading' | 'chunking' | 'embedding' | 'done'
+
+export interface VectorBuildProgress {
+  sessionId: string
+  stage: VectorBuildStage
+  current: number
+  total: number
+  indexed: number
+  message: string
+}
+
+export interface VectorStoreInfo {
+  dbPath: string
+  exists: boolean
+  sizeBytes: number
+  updatedAtMs: number | null
+  count: number
+  dimensions: number[]
+}
+
+type VectorBuildProgressReporter = (progress: VectorBuildProgress) => void
 
 /** 把连续消息切成会话片段（字符预算 / 最大条数 / 时间间隔三者任一触发即断开）。 */
 function buildChunks(messages: SessionMessage[]): BuiltChunk[] {
@@ -187,13 +209,42 @@ class MessageVectorService {
     return this.countChunks(this.getDb(), sessionId)
   }
 
+  /** 当前向量库的落盘位置与某会话的存储证据。 */
+  getSessionVectorStoreInfo(sessionId: string): VectorStoreInfo {
+    const db = this.getDb()
+    const dbPath = this.dbPath || join(this.getCacheBasePath(), VECTOR_DB_NAME)
+    const stat = existsSync(dbPath) ? statSync(dbPath) : null
+    const rows = db.prepare(
+      'SELECT dim, COUNT(*) AS c FROM message_chunks WHERE session_id = ? GROUP BY dim ORDER BY dim'
+    ).all(sessionId) as Array<{ dim: number; c: number }>
+
+    return {
+      dbPath,
+      exists: !!stat,
+      sizeBytes: stat?.size || 0,
+      updatedAtMs: stat?.mtimeMs || null,
+      count: rows.reduce((sum, row) => sum + row.c, 0),
+      dimensions: rows.map((row) => row.dim),
+    }
+  }
+
   /**
    * 确保某会话的片段向量已就绪（懒构建 + 增量）。返回该会话已存片段数。
    */
-  async ensureSessionVectors(sessionId: string, cfg: EmbeddingConfig, cap = DEFAULT_SESSION_CAP): Promise<number> {
+  async ensureSessionVectors(
+    sessionId: string,
+    cfg: EmbeddingConfig,
+    cap = DEFAULT_SESSION_CAP,
+    onProgress?: VectorBuildProgressReporter,
+  ): Promise<number> {
+    onProgress?.({ sessionId, stage: 'loading', current: 0, total: 0, indexed: 0, message: '读取会话消息' })
     const messages = await chatSearchIndexService.listSessionMemoryMessages(sessionId)
-    if (messages.length === 0) return 0
+    if (messages.length === 0) {
+      onProgress?.({ sessionId, stage: 'done', current: 0, total: 0, indexed: 0, message: '没有可向量化的消息' })
+      return 0
+    }
     const db = this.getDb()
+    const existingCount = this.countChunks(db, sessionId)
 
     // 高水位：上次已嵌入到的片段末尾位置（按 sort_seq + local_id 定位，兼容 sort_seq 并列）
     const last = db.prepare(
@@ -203,10 +254,18 @@ class MessageVectorService {
     const pending: SessionMessage[] = last
       ? messages.filter((m) => m.sortSeq > last.s || (m.sortSeq === last.s && m.localId > last.l))
       : messages.slice(-cap)
-    if (pending.length === 0) return this.countChunks(db, sessionId)
+    if (pending.length === 0) {
+      onProgress?.({ sessionId, stage: 'done', current: 0, total: 0, indexed: existingCount, message: '语义索引已是最新' })
+      return existingCount
+    }
 
+    onProgress?.({ sessionId, stage: 'chunking', current: 0, total: pending.length, indexed: existingCount, message: '切分会话片段' })
     const chunks = buildChunks(pending)
-    if (chunks.length === 0) return this.countChunks(db, sessionId)
+    if (chunks.length === 0) {
+      onProgress?.({ sessionId, stage: 'done', current: 0, total: 0, indexed: existingCount, message: '没有可向量化的文本片段' })
+      return existingCount
+    }
+    onProgress?.({ sessionId, stage: 'embedding', current: 0, total: chunks.length, indexed: existingCount, message: '生成向量' })
 
     const insert = db.prepare(
       `INSERT OR REPLACE INTO message_chunks
@@ -231,6 +290,15 @@ class MessageVectorService {
         })
       })
       write()
+      const current = Math.min(i + batch.length, chunks.length)
+      onProgress?.({
+        sessionId,
+        stage: current >= chunks.length ? 'done' : 'embedding',
+        current,
+        total: chunks.length,
+        indexed: this.countChunks(db, sessionId),
+        message: current >= chunks.length ? '语义索引已完成' : '生成向量',
+      })
     }
     return this.countChunks(db, sessionId)
   }
