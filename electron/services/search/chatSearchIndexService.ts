@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { chatService, type Message } from '../chatService'
 import { ConfigService } from '../config'
+import { voiceTranscribeService } from '../voiceTranscribeService'
 
 export type ChatSearchIndexProgressStage =
   | 'preparing_index'
@@ -137,7 +138,7 @@ function uniqueStrings(values: string[]): string[] {
   return result
 }
 
-function extractMessageSearchText(message: Message): string {
+function extractMessageSearchText(message: Message, transcript?: string): string {
   const chatRecordText = Array.isArray(message.chatRecordList)
     ? message.chatRecordList
       .flatMap((item) => [
@@ -155,7 +156,7 @@ function extractMessageSearchText(message: Message): string {
       case 3:
         return '[图片]'
       case 34:
-        return '[语音]'
+        return transcript || '[语音]'
       case 43:
         return '[视频]'
       case 47:
@@ -168,7 +169,7 @@ function extractMessageSearchText(message: Message): string {
   })()
 
   return [
-    message.parsedContent,
+    transcript || message.parsedContent,
     message.quotedContent,
     message.fileName,
     chatRecordText,
@@ -412,61 +413,84 @@ export class ChatSearchIndexService {
     `)
 
     const row = db.prepare('SELECT value FROM meta WHERE key = ?').get('schema_version') as { value?: string } | undefined
-    if (row?.value && row.value !== INDEX_SCHEMA_VERSION) {
-      this.resetSchema(db)
+    const needsMigration = row?.value && row.value !== INDEX_SCHEMA_VERSION
+
+    if (needsMigration) {
+      try {
+        db.exec(`
+          DROP TABLE IF EXISTS message_index_fts;
+          DROP TABLE IF EXISTS message_embedding_vec;
+          DROP TABLE IF EXISTS message_vector_index;
+          DROP TABLE IF EXISTS session_vector_state;
+          DROP TABLE IF EXISTS message_index;
+          DROP TABLE IF EXISTS session_index_state;
+          DELETE FROM meta WHERE key = 'schema_version';
+        `)
+      } catch (err) {
+        console.warn('[ChatSearchIndex] 迁移清表失败，继续重建:', (err as Error)?.message)
+      }
     }
 
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS message_index (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        local_id INTEGER NOT NULL,
-        server_id INTEGER NOT NULL DEFAULT 0,
-        local_type INTEGER NOT NULL DEFAULT 0,
-        create_time INTEGER NOT NULL DEFAULT 0,
-        sort_seq INTEGER NOT NULL DEFAULT 0,
-        is_send INTEGER,
-        sender_username TEXT,
-        parsed_content TEXT NOT NULL DEFAULT '',
-        raw_content TEXT NOT NULL DEFAULT '',
-        search_text TEXT NOT NULL DEFAULT '',
-        token_text TEXT NOT NULL DEFAULT '',
-        message_json TEXT NOT NULL DEFAULT '{}',
-        indexed_at INTEGER NOT NULL,
-        UNIQUE(session_id, local_id, create_time, sort_seq)
-      );
+    const runMigrate = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS message_index (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          local_id INTEGER NOT NULL,
+          server_id INTEGER NOT NULL DEFAULT 0,
+          local_type INTEGER NOT NULL DEFAULT 0,
+          create_time INTEGER NOT NULL DEFAULT 0,
+          sort_seq INTEGER NOT NULL DEFAULT 0,
+          is_send INTEGER,
+          sender_username TEXT,
+          parsed_content TEXT NOT NULL DEFAULT '',
+          raw_content TEXT NOT NULL DEFAULT '',
+          search_text TEXT NOT NULL DEFAULT '',
+          token_text TEXT NOT NULL DEFAULT '',
+          message_json TEXT NOT NULL DEFAULT '{}',
+          indexed_at INTEGER NOT NULL,
+          UNIQUE(session_id, local_id, create_time, sort_seq)
+        );
 
-      CREATE VIRTUAL TABLE IF NOT EXISTS message_index_fts USING fts5(
-        session_id UNINDEXED,
-        cursor_key UNINDEXED,
-        search_text,
-        token_text,
-        tokenize = 'unicode61'
-      );
+        CREATE VIRTUAL TABLE IF NOT EXISTS message_index_fts USING fts5(
+          session_id UNINDEXED,
+          cursor_key UNINDEXED,
+          search_text,
+          token_text,
+          tokenize = 'unicode61'
+        );
 
-      CREATE TABLE IF NOT EXISTS session_index_state (
-        session_id TEXT PRIMARY KEY,
-        newest_sort_seq INTEGER NOT NULL DEFAULT 0,
-        newest_create_time INTEGER NOT NULL DEFAULT 0,
-        newest_local_id INTEGER NOT NULL DEFAULT 0,
-        indexed_count INTEGER NOT NULL DEFAULT 0,
-        updated_at INTEGER NOT NULL,
-        is_complete INTEGER NOT NULL DEFAULT 0
-      );
+        CREATE TABLE IF NOT EXISTS session_index_state (
+          session_id TEXT PRIMARY KEY,
+          newest_sort_seq INTEGER NOT NULL DEFAULT 0,
+          newest_create_time INTEGER NOT NULL DEFAULT 0,
+          newest_local_id INTEGER NOT NULL DEFAULT 0,
+          indexed_count INTEGER NOT NULL DEFAULT 0,
+          updated_at INTEGER NOT NULL,
+          is_complete INTEGER NOT NULL DEFAULT 0
+        );
 
-      CREATE INDEX IF NOT EXISTS idx_message_index_session_time
-        ON message_index(session_id, sort_seq DESC, create_time DESC, local_id DESC);
-      CREATE INDEX IF NOT EXISTS idx_message_index_session_sender
-        ON message_index(session_id, sender_username);
-    `)
+        CREATE INDEX IF NOT EXISTS idx_message_index_session_time
+          ON message_index(session_id, sort_seq DESC, create_time DESC, local_id DESC);
+        CREATE INDEX IF NOT EXISTS idx_message_index_session_sender
+          ON message_index(session_id, sender_username);
+      `)
 
-    db.exec(`
-      DROP TABLE IF EXISTS message_embedding_vec;
-      DROP TABLE IF EXISTS message_vector_index;
-      DROP TABLE IF EXISTS session_vector_state;
-    `)
+      db.exec(`
+        DROP TABLE IF EXISTS message_embedding_vec;
+        DROP TABLE IF EXISTS message_vector_index;
+        DROP TABLE IF EXISTS session_vector_state;
+      `)
 
-    db.prepare('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)').run('schema_version', INDEX_SCHEMA_VERSION)
+      db.prepare('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)').run('schema_version', INDEX_SCHEMA_VERSION)
+    })
+
+    try {
+      runMigrate()
+    } catch (err) {
+      console.error('[ChatSearchIndex] schema 迁移失败:', (err as Error)?.message)
+      throw err
+    }
   }
 
   private resetSchema(db: Database.Database): void {
@@ -576,7 +600,10 @@ export class ChatSearchIndexService {
     const run = db.transaction((items: Message[]) => {
       const indexedAt = Date.now()
       for (const message of items) {
-        const searchText = compactSearchText(extractMessageSearchText(message))
+        const transcript = Number(message.localType) === 34
+          ? voiceTranscribeService.getCachedTranscript(sessionId, message.createTime) || undefined
+          : undefined
+        const searchText = compactSearchText(extractMessageSearchText(message, transcript))
         const tokenText = buildSearchTokens(searchText)
         const payload = {
           sessionId,
