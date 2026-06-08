@@ -13,7 +13,7 @@ import { buildSystemPrompt } from '../prompts'
 import { loopGuardCondition } from '../guards'
 import { compactMessages } from '../compaction'
 import { reportAgentProgress, withSubAgentScope } from '../progress'
-import { activeToolsFor } from '../toolPolicy'
+import { buildToolRuntimeContext } from '../toolPolicy'
 import type { AgentEvidenceItem } from './shared'
 import type { AgentProviderConfig, AgentScope } from '../types'
 
@@ -78,7 +78,6 @@ export function createDelegateAnalysis(opts: {
         })
         try {
           const tools = opts.buildSubTools()
-          const activeToolNames = Object.keys(tools)
           const subAgent = new ToolLoopAgent({
             model: createLanguageModel(opts.providerConfig),
             instructions: buildSystemPrompt(opts.scope) + DELEGATE_SUFFIX,
@@ -87,7 +86,7 @@ export function createDelegateAnalysis(opts: {
             stopWhen: [stepCountIs(SUB_AGENT_MAX_STEPS), loopGuardCondition()],
             prepareStep: ({ messages, steps }) => ({
               messages: compactMessages(messages),
-              activeTools: activeToolsFor(steps, activeToolNames),
+              experimental_context: buildToolRuntimeContext(steps),
             }),
           })
           const result = await subAgent.generate({ prompt: task, abortSignal })

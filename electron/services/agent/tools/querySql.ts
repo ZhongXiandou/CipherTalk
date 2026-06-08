@@ -6,6 +6,7 @@
  */
 import { tool } from 'ai'
 import { z } from 'zod'
+import { readToolRuntimeContext } from '../toolPolicy'
 
 const READ_ONLY_HEAD = /^(select|with|explain)\b/i
 const FORBIDDEN = /\b(insert|update|delete|drop|alter|create|replace|attach|detach|vacuum|reindex|truncate|begin|commit|rollback|pragma)\b/i
@@ -50,8 +51,12 @@ export const querySql = tool({
     attemptedTools: z.array(z.string()).optional().describe('已经尝试过且不足以回答的结构化工具名，如 chat_stats/search_messages'),
     whyStructuredToolsInsufficient: z.string().optional().describe('这些结构化工具为什么无法覆盖本次查询'),
   }),
-  execute: async ({ kind, sql, dbPath, params, limit, reason, attemptedTools, whyStructuredToolsInsufficient }) => {
+  execute: async ({ kind, sql, dbPath, params, limit, reason, attemptedTools, whyStructuredToolsInsufficient }, options) => {
     try {
+      const context = readToolRuntimeContext(options.experimental_context)
+      if (!context.querySqlUnlocked) {
+        return { error: 'query_sql 是最后手段：请先调用 search_messages / semantic_search / chat_stats / get_timeline / get_context 等结构化工具，确认不足后再使用 SQL 兜底。' }
+      }
       if (!reason?.trim()) return { error: 'query_sql 需要填写 reason 审计字段' }
       if (!Array.isArray(attemptedTools) || attemptedTools.filter((item) => item.trim()).length === 0) {
         return { error: 'query_sql 需要填写 attemptedTools，且至少包含一个已尝试的结构化工具' }

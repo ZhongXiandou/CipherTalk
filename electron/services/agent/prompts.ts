@@ -1,4 +1,5 @@
 import type { AgentScope, AgentSkillContextItem } from './types'
+import type { AgentPromptParts } from './cache'
 
 const ROLE_PROMPT = `你是密语（CipherTalk）的聊天记录分析助手。用户用自然语言询问其微信聊天记录，你通过调用工具查询真实数据来回答。`
 
@@ -76,18 +77,27 @@ function buildSkillPrompt(skills: AgentSkillContextItem[] = []): string {
   return `\n\n# 本轮自动启用的 Skills\n以下 Skill 是根据用户问题自动匹配出的行为/知识指导。优先参考它们，但不得违反上面的数据真实性和只读安全要求。\n${blocks.join('\n\n')}`
 }
 
-export function buildSystemPrompt(scope: AgentScope, skills: AgentSkillContextItem[] = []): string {
-  const skillPrompt = buildSkillPrompt(skills)
-  if (scope.kind === 'session') {
-    const who = scope.displayName ? `${scope.displayName}（${scope.sessionId}）` : scope.sessionId
-    const isGroup = scope.sessionId.endsWith('@chatroom')
-    return `${BASE_PROMPT}
+function buildScopePrompt(scope: AgentScope): string {
+  if (scope.kind !== 'session') return ''
 
+  const who = scope.displayName ? `${scope.displayName}（${scope.sessionId}）` : scope.sessionId
+  const isGroup = scope.sessionId.endsWith('@chatroom')
+  return `
 # 当前已锁定对象
 用户用 @ 把本次提问限定在${isGroup ? '群' : '联系人'} ${who}。除非用户在问题里明确点名别人，否则：
 - search_messages / semantic_search / get_timeline / chat_stats 一律把 sessionId 填成 ${scope.sessionId}，只看这个对象的数据。
 - ${isGroup ? `这是群聊，群成员/群内排行用 group_members / group_member_ranking，chatroomId = ${scope.sessionId}。` : '这是私聊联系人，不要去翻别人的会话。'}
-- 不需要再调 list_contacts 解析此人，username 已确定。${skillPrompt}`
+- 不需要再调 list_contacts 解析此人，username 已确定。`
+}
+
+export function buildAgentPromptParts(scope: AgentScope, skills: AgentSkillContextItem[] = []): AgentPromptParts {
+  return {
+    cacheableSystem: BASE_PROMPT,
+    dynamicSystem: [buildScopePrompt(scope), buildSkillPrompt(skills)].filter(Boolean).join('\n'),
   }
-  return BASE_PROMPT + skillPrompt
+}
+
+export function buildSystemPrompt(scope: AgentScope, skills: AgentSkillContextItem[] = []): string {
+  const parts = buildAgentPromptParts(scope, skills)
+  return [parts.cacheableSystem, parts.dynamicSystem].filter(Boolean).join('\n')
 }

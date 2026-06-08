@@ -3,61 +3,42 @@
  * 运行在 AI utilityProcess 子进程内（见文档 §3.1/§5.2）。
  */
 import { generateText, ToolLoopAgent, stepCountIs, type ModelMessage, type UIMessageChunk } from 'ai'
-import type { ProviderOptions } from '@ai-sdk/provider-utils'
+import type { SystemModelMessage } from '@ai-sdk/provider-utils'
 import { createLanguageModel } from './provider'
-import { buildSystemPrompt } from './prompts'
+import { buildAgentPromptParts } from './prompts'
+import { applyAnthropicCacheControl, buildPromptCacheKey, buildProviderOptions } from './cache'
 import { buildTools } from './tools'
 import { buildMemoryContext, extractMemories, preloadRelevantMemories } from './tools/memory'
 import { compactMessages } from './compaction'
 import { runFinalReview, summarizeToolOutput, type ToolOutputSummary } from './finalReview'
 import { loopGuardCondition, withToolTimeouts } from './guards'
 import { reportAgentProgress, withAgentProgress } from './progress'
-import { activeToolsFor } from './toolPolicy'
+import { buildToolRuntimeContext } from './toolPolicy'
 import type { AgentProgressReporter, AgentProviderConfig, AgentRunInput } from './types'
 
 const MAX_STEPS = 24
 const DEFAULT_AGENT_TEMPERATURE = 0.2
 
-function toCamelCase(value: string): string {
-  return value.replace(/[-_\s]+([a-zA-Z0-9])/g, (_match, char: string) => char.toUpperCase())
-}
+export function buildAgentInstructions(
+  input: AgentRunInput,
+  memoryContext: string,
+  relevantMemoryContext: string,
+  tools: ReturnType<typeof buildTools>,
+): { instructions: SystemModelMessage[]; tools: ReturnType<typeof buildTools>; promptCacheKey: string } {
+  const promptParts = buildAgentPromptParts(input.scope, input.skills)
+  const dynamicSystem = [promptParts.dynamicSystem, memoryContext, relevantMemoryContext].filter(Boolean).join('\n')
+  const instructions: SystemModelMessage[] = [
+    { role: 'system', content: promptParts.cacheableSystem },
+    ...(dynamicSystem ? [{ role: 'system' as const, content: dynamicSystem }] : []),
+  ]
+  const promptCacheKey = buildPromptCacheKey(promptParts, tools)
 
-function hostFromUrl(url: string): string | null {
-  if (!url) return null
-  try {
-    return new URL(url).host || null
-  } catch {
-    return null
-  }
-}
-
-function isOfficialOpenAIResponsesEndpoint(input: AgentRunInput): boolean {
-  return input.providerConfig.providerKind === 'openai-responses' &&
-    input.providerConfig.name !== 'custom' &&
-    hostFromUrl(input.providerConfig.baseURL) === 'api.openai.com'
-}
-
-function buildProviderOptions(input: AgentRunInput): ProviderOptions | undefined {
-  const effort = input.providerConfig.reasoningEffort
-  const isOpenAIProtocol = input.providerConfig.providerKind === 'openai-responses' || input.providerConfig.providerKind === 'openai-compatible'
-  if (!isOpenAIProtocol) {
-    return undefined
+  if (input.providerConfig.providerKind === 'anthropic') {
+    const cached = applyAnthropicCacheControl(instructions, tools)
+    return { instructions: cached.messages, tools: cached.tools, promptCacheKey }
   }
 
-  const option: Record<string, unknown> = {}
-  if (effort && effort !== 'auto') option.reasoningEffort = effort
-  if (input.providerConfig.providerKind === 'openai-responses') {
-    option.store = isOfficialOpenAIResponsesEndpoint(input)
-  }
-  if (Object.keys(option).length === 0) return undefined
-
-  const keys = new Set(['openai'])
-  if (input.providerConfig.providerKind === 'openai-compatible') {
-    keys.add(input.providerConfig.name)
-    keys.add(toCamelCase(input.providerConfig.name))
-  }
-
-  return Object.fromEntries([...keys].map((key) => [key, option])) as ProviderOptions
+  return { instructions, tools, promptCacheKey }
 }
 
 /** 取最后一条 user 消息的纯文本，供 L1 自动抽取。 */
@@ -90,6 +71,36 @@ function trackToolChunk(
   if (chunk.type !== 'tool-output-available') return
   const toolName = toolNames.get(chunk.toolCallId) || 'unknown_tool'
   summaries.push(summarizeToolOutput(toolName, chunk.output))
+}
+
+function hasToolEvidence(summaries: ToolOutputSummary[]): boolean {
+  return summaries.some((summary) => (
+    summary.evidence.length > 0 ||
+    Object.values(summary.counts).some((count) => count > 0)
+  ))
+}
+
+function shouldRunFinalReview(userText: string, assistantText: string, summaries: ToolOutputSummary[]): boolean {
+  if (!hasToolEvidence(summaries)) return false
+  const text = `${userText}\n${assistantText}`
+  return /聊天|消息|记录|朋友圈|群|联系人|谁|哪个|哪里|什么时候|时间|提到|说过|统计|排行|最近|今天|昨天|\d{4}[-/年]\d{1,2}/.test(text)
+}
+
+function shouldExtractAutoMemory(userText: string): boolean {
+  const text = userText.replace(/\s+/g, ' ').trim()
+  if (text.length < 6) return false
+  return /(我是|我叫|我的名字|我喜欢|我不喜欢|我偏好|我习惯|我是.*(人|用户|开发|学生|老师|设计|工程|产品|运营)|.+是我的(朋友|同事|家人|对象|伴侣|同学|老板|客户)|记住|以后.*记得)/.test(text)
+}
+
+function withCacheHitRate(usage: unknown): unknown {
+  if (!usage || typeof usage !== 'object') return usage
+  const inputTokens = Number((usage as { inputTokens?: unknown }).inputTokens)
+  const details = (usage as { inputTokenDetails?: { cacheReadTokens?: unknown } }).inputTokenDetails
+  const cacheReadTokens = Number(details?.cacheReadTokens)
+  const cacheHitRate = Number.isFinite(inputTokens) && inputTokens > 0 && Number.isFinite(cacheReadTokens)
+    ? cacheReadTokens / inputTokens
+    : undefined
+  return cacheHitRate === undefined ? usage : { ...(usage as Record<string, unknown>), cacheHitRate }
 }
 
 function appendFinalReviewCorrection(
@@ -138,6 +149,7 @@ async function injectAutoMemories(
   signal?: AbortSignal,
 ): Promise<void> {
   try {
+    if (!shouldExtractAutoMemory(lastUserText(input.messages))) return
     const auto = await extractMemories({
       scope: input.scope,
       providerConfig: input.providerConfig,
@@ -169,20 +181,20 @@ export async function runAgent(
     const userText = lastUserText(input.messages)
     const memoryContext = await buildMemoryContext(input.scope)
     const relevantMemoryContext = await preloadRelevantMemories(userText, input.scope)
-    const tools = withToolTimeouts(buildTools(input.scope, input.providerConfig, input.mcpTools))
-    const activeToolNames = Object.keys(tools)
+    const baseTools = withToolTimeouts(buildTools(input.scope, input.providerConfig, input.mcpTools))
+    const prepared = buildAgentInstructions(input, memoryContext, relevantMemoryContext, baseTools)
     const agent = new ToolLoopAgent({
       model: createLanguageModel(input.providerConfig),
-      instructions: buildSystemPrompt(input.scope, input.skills) + memoryContext + relevantMemoryContext,
-      tools,
+      instructions: prepared.instructions,
+      tools: prepared.tools,
       temperature: DEFAULT_AGENT_TEMPERATURE,
       // 步数上限 + 死循环检测（连续 N 步相同工具调用即停），见 guards.ts
       stopWhen: [stepCountIs(MAX_STEPS), loopGuardCondition()],
-      providerOptions: buildProviderOptions(input),
-      // 每步压缩上下文（裁旧工具结果/推理痕迹，见 compaction.ts）+ query_sql 门控（见 activeToolsFor）
+      providerOptions: buildProviderOptions(input, prepared.promptCacheKey),
+      // 每步压缩上下文（裁旧工具结果/推理痕迹，见 compaction.ts）+ query_sql 执行层门控状态
       prepareStep: ({ messages, steps }) => ({
         messages: compactMessages(messages),
-        activeTools: activeToolsFor(steps, activeToolNames),
+        experimental_context: buildToolRuntimeContext(steps),
       }),
     })
 
@@ -195,7 +207,7 @@ export async function runAgent(
       messageMetadata: ({ part }) => {
         if (part.type !== 'finish') return undefined
         return {
-          usage: part.totalUsage,
+          usage: withCacheHitRate(part.totalUsage),
           finishReason: part.finishReason,
           rawFinishReason: part.rawFinishReason,
           modelProvider: input.providerConfig.name,
@@ -209,10 +221,10 @@ export async function runAgent(
     }
     let assistantText = ''
     try { assistantText = await result.text } catch { /* abort/异常：跳过自动记忆 */ }
-    if (assistantText && !signal?.aborted) {
+    if (assistantText && !signal?.aborted && shouldRunFinalReview(userText, assistantText, toolSummaries)) {
       const review = await runFinalReview({
         providerConfig: input.providerConfig,
-        userText: lastUserText(input.messages),
+        userText,
         assistantText,
         toolSummaries,
         signal,

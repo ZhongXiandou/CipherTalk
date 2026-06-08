@@ -17,7 +17,19 @@ const SQL_GATE_UNLOCK_TOOLS = new Set([
   'moments_stats',
 ])
 
-export function activeToolsFor(steps: ReadonlyArray<StepResult<ToolSet>>, toolNames: string[]): string[] {
-  const unlocked = steps.some((step) => step.toolCalls.some((call) => SQL_GATE_UNLOCK_TOOLS.has(call.toolName)))
-  return unlocked ? toolNames : toolNames.filter((name) => name !== 'query_sql')
+export interface AgentToolRuntimeContext {
+  querySqlUnlocked: boolean
+}
+
+export function isQuerySqlUnlocked(steps: ReadonlyArray<StepResult<ToolSet>>): boolean {
+  return steps.some((step) => step.toolCalls.some((call) => SQL_GATE_UNLOCK_TOOLS.has(call.toolName)))
+}
+
+export function buildToolRuntimeContext(steps: ReadonlyArray<StepResult<ToolSet>>): AgentToolRuntimeContext {
+  return { querySqlUnlocked: isQuerySqlUnlocked(steps) }
+}
+
+export function readToolRuntimeContext(value: unknown): AgentToolRuntimeContext {
+  const context = value && typeof value === 'object' ? value as Partial<AgentToolRuntimeContext> : {}
+  return { querySqlUnlocked: context.querySqlUnlocked === true }
 }

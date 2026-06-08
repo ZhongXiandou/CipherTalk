@@ -960,6 +960,7 @@ function resolveDefaultPresetId(
 
 type AgentUsage = {
   inputTokens?: number
+  cacheHitRate?: number
   inputTokenDetails?: {
     noCacheTokens?: number
     cacheReadTokens?: number
@@ -1055,6 +1056,10 @@ function formatEstimatedCost(value: number): string {
   return `约 $${value < 0.01 ? value.toFixed(4) : value.toFixed(3)}`
 }
 
+function formatPercent(value: number): string {
+  return `${Math.round(value * 1000) / 10}%`
+}
+
 function formatFinishReason(value: string): string {
   switch (value) {
     case 'stop':
@@ -1109,6 +1114,22 @@ function estimateUsageCost(metadata: AgentMessageMetadata, modelInfoByKey: Map<s
   return priced ? total : null
 }
 
+function estimateCacheSavings(metadata: AgentMessageMetadata, modelInfoByKey: Map<string, AIModelInfo>): number | null {
+  const usage = metadata.usage
+  if (!usage) return null
+  const modelInfo = metadata.modelProvider && metadata.modelId
+    ? modelInfoByKey.get(`${metadata.modelProvider}::${metadata.modelId}`) || modelInfoByKey.get(metadata.modelId)
+    : metadata.modelId
+      ? modelInfoByKey.get(metadata.modelId)
+      : undefined
+  const cost = modelInfo?.cost
+  const inputPrice = finiteNumber(cost?.input)
+  const cacheReadPrice = finiteNumber(cost?.cacheRead)
+  const cacheReadTokens = finiteNumber(usage.inputTokenDetails?.cacheReadTokens)
+  if (inputPrice === undefined || cacheReadPrice === undefined || cacheReadTokens === undefined || cacheReadTokens <= 0) return null
+  return Math.max(0, (cacheReadTokens / 1_000_000) * (inputPrice - cacheReadPrice))
+}
+
 type UsageDetailRow = {
   id: string
   label: string
@@ -1132,6 +1153,13 @@ function buildUsageDetailRows(metadata: AgentMessageMetadata, modelInfoByKey: Ma
   if (metadata.finishReason) add('finishReason', '结束原因', formatFinishReason(metadata.finishReason), metadata.rawFinishReason)
 
   addTokens('inputTokens', '输入 tokens', usage?.inputTokens)
+  const cacheHitRate = finiteNumber(usage?.cacheHitRate)
+    ?? (() => {
+      const inputTokens = finiteNumber(usage?.inputTokens)
+      const cacheReadTokens = finiteNumber(usage?.inputTokenDetails?.cacheReadTokens)
+      return inputTokens && cacheReadTokens !== undefined ? cacheReadTokens / inputTokens : undefined
+    })()
+  if (cacheHitRate !== undefined) add('cacheHitRate', '缓存命中率', formatPercent(cacheHitRate))
   addTokens('noCacheTokens', '普通输入 tokens', usage?.inputTokenDetails?.noCacheTokens)
   addTokens('cacheReadTokens', '缓存读 tokens', usage?.inputTokenDetails?.cacheReadTokens)
   addTokens('cacheWriteTokens', '缓存写入 tokens', usage?.inputTokenDetails?.cacheWriteTokens)
@@ -1142,6 +1170,8 @@ function buildUsageDetailRows(metadata: AgentMessageMetadata, modelInfoByKey: Ma
 
   const estimatedCost = estimateUsageCost(metadata, modelInfoByKey)
   if (estimatedCost !== null) add('estimatedCost', '估算费用', formatEstimatedCost(estimatedCost), '按本地模型价格表估算')
+  const cacheSavings = estimateCacheSavings(metadata, modelInfoByKey)
+  if (cacheSavings !== null && cacheSavings > 0) add('cacheSavings', '缓存节省', formatEstimatedCost(cacheSavings), '按普通输入价与缓存读价差估算')
 
   if (usage?.raw) {
     rows.push({
