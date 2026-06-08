@@ -418,17 +418,12 @@ export class ChatSearchIndexService {
     const row = db.prepare('SELECT value FROM meta WHERE key = ?').get('schema_version') as { value?: string } | undefined
     const needsMigration = row?.value && row.value !== INDEX_SCHEMA_VERSION
 
-    if (needsMigration) {
+    if (!needsMigration && row?.value === INDEX_SCHEMA_VERSION && !this.hasHealthySchema(db)) {
+      console.warn('[ChatSearchIndex] 检测到搜索索引 schema 不完整，准备重建')
+      this.resetSchema(db)
+    } else if (needsMigration) {
       try {
-        db.exec(`
-          DROP TABLE IF EXISTS message_index_fts;
-          DROP TABLE IF EXISTS message_embedding_vec;
-          DROP TABLE IF EXISTS message_vector_index;
-          DROP TABLE IF EXISTS session_vector_state;
-          DROP TABLE IF EXISTS message_index;
-          DROP TABLE IF EXISTS session_index_state;
-          DELETE FROM meta WHERE key = 'schema_version';
-        `)
+        this.resetSchema(db)
       } catch (err) {
         console.warn('[ChatSearchIndex] 迁移清表失败，继续重建:', (err as Error)?.message)
       }
@@ -506,6 +501,38 @@ export class ChatSearchIndexService {
       DROP TABLE IF EXISTS session_index_state;
       DELETE FROM meta WHERE key = 'schema_version';
     `)
+  }
+
+  private rebuildSchema(db: Database.Database): void {
+    this.resetSchema(db)
+    this.ensureSchema(db)
+  }
+
+  private tableExists(db: Database.Database, name: string): boolean {
+    const row = db.prepare(
+      "SELECT 1 AS ok FROM sqlite_master WHERE name = ? AND type IN ('table', 'virtual table') LIMIT 1"
+    ).get(name) as { ok?: number } | undefined
+    return Number(row?.ok || 0) === 1
+  }
+
+  private hasHealthySchema(db: Database.Database): boolean {
+    if (!this.tableExists(db, 'message_index') ||
+      !this.tableExists(db, 'message_index_fts') ||
+      !this.tableExists(db, 'session_index_state')) {
+      return false
+    }
+    try {
+      db.prepare('SELECT rowid FROM message_index_fts LIMIT 0')
+      return true
+    } catch (error) {
+      console.warn('[ChatSearchIndex] FTS 虚表不可用，准备重建:', error instanceof Error ? error.message : String(error))
+      return false
+    }
+  }
+
+  private isMissingSearchIndexTableError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error || '')
+    return /no such table:\s*(?:main\.)?(message_index_fts(?:_[a-z]+)?|message_index|session_index_state)\b/i.test(message)
   }
 
   private getSessionState(db: Database.Database, sessionId: string): ChatSearchIndexState | null {
@@ -707,6 +734,22 @@ export class ChatSearchIndexService {
   }
 
   async ensureSessionIndexed(
+    sessionId: string,
+    onProgress?: ChatSearchSessionOptions['onProgress'],
+    options: { maxMessages?: number; reusePartial?: boolean } = {}
+  ): Promise<ChatSearchIndexState> {
+    try {
+      return await this.ensureSessionIndexedOnce(sessionId, onProgress, options)
+    } catch (error) {
+      if (!this.isMissingSearchIndexTableError(error)) throw error
+      const db = this.getDb()
+      console.warn('[ChatSearchIndex] 搜索索引表缺失，重建缓存后重试:', error instanceof Error ? error.message : String(error))
+      this.rebuildSchema(db)
+      return await this.ensureSessionIndexedOnce(sessionId, onProgress, options)
+    }
+  }
+
+  private async ensureSessionIndexedOnce(
     sessionId: string,
     onProgress?: ChatSearchSessionOptions['onProgress'],
     options: { maxMessages?: number; reusePartial?: boolean } = {}
