@@ -6,7 +6,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProper
 import { useChat } from '@ai-sdk/react'
 import { isToolUIPart, type ChatStatus, type UIMessage } from 'ai'
 import { Button as HeroButton, ButtonGroup, Dropdown, Label, Modal, Separator, Surface, Table } from '@heroui/react'
-import { AtSign, BarChart3, Braces, Brain, CheckIcon, ChevronDown, Clock3, Code2, Copy, FileText, History, Image as ImageIcon, Info, Link2, PenLine, Quote, Search, Slash, SquarePen, Table2, Trash2, Users, Volume2, Wrench, X, Sparkles } from 'lucide-react'
+import { AtSign, BarChart3, Braces, Brain, CheckIcon, ChevronDown, Clock3, Code2, Copy, FileText, History, Image as ImageIcon, Info, Link2, PenLine, Quote, RefreshCcw, Search, Slash, SquarePen, Table2, Trash2, Users, Volume2, Wrench, X, Sparkles } from 'lucide-react'
 import { Sources, SourcesContent, SourcesTrigger } from '@/components/ai-elements/sources'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import {
@@ -1101,6 +1101,7 @@ type AgentMessageMetadata = {
   modelId?: string
   ciphertalk?: {
     subAgentProgress?: AgentProgressEvent[]
+    toolElapsed?: Record<string, number>
   }
 }
 
@@ -1152,6 +1153,52 @@ function attachSubAgentProgressToLastAssistant(messages: UIMessage[], progress: 
       },
     } as UIMessage
   })
+}
+
+function readToolElapsedFromMessage(message: UIMessage): Record<string, number> {
+  const value = (message as { metadata?: AgentMessageMetadata }).metadata?.ciphertalk?.toolElapsed
+  if (!value || typeof value !== 'object') return {}
+  const out: Record<string, number> = {}
+  for (const [key, ms] of Object.entries(value)) {
+    if (typeof ms === 'number' && Number.isFinite(ms)) out[key] = ms
+  }
+  return out
+}
+
+function sameToolElapsed(a: Record<string, number>, b: Record<string, number>): boolean {
+  const aKeys = Object.keys(a)
+  if (aKeys.length !== Object.keys(b).length) return false
+  return aKeys.every((key) => a[key] === b[key])
+}
+
+/** 把工具步骤耗时写进各助手消息 metadata，重开会话后思考链里的工具步骤仍显示 "· X.Xs"。 */
+function attachToolElapsedToMessages(messages: UIMessage[], toolElapsedByKey: Record<string, number>): UIMessage[] {
+  let changed = false
+  const next = messages.map((message) => {
+    if (message.role !== 'assistant') return message
+    const elapsed: Record<string, number> = {}
+    for (const part of message.parts) {
+      if (!isToolUIPart(part)) continue
+      const toolName = part.type.replace(/^tool-/, '')
+      const ms = toolElapsedByKey[toolPartProgressKey(part, toolName)]
+      if (typeof ms === 'number' && Number.isFinite(ms)) elapsed[toolPartProgressKey(part, toolName)] = ms
+    }
+    if (Object.keys(elapsed).length === 0) return message
+    if (sameToolElapsed(readToolElapsedFromMessage(message), elapsed)) return message
+    changed = true
+    const metadata = ((message as { metadata?: AgentMessageMetadata }).metadata || {}) as AgentMessageMetadata
+    return {
+      ...message,
+      metadata: {
+        ...metadata,
+        ciphertalk: {
+          ...(metadata.ciphertalk || {}),
+          toolElapsed: elapsed,
+        },
+      },
+    } as UIMessage
+  })
+  return changed ? next : messages
 }
 
 function finiteNumber(value: unknown): number | undefined {
@@ -1315,20 +1362,26 @@ function messageTextOf(message: UIMessage): string {
 }
 
 function MessageUsageStats({
+  canRegenerate,
   metadata,
   messageText,
   copied,
+  regenerating,
   speaking,
   onCopy,
   onOpenDetails,
+  onRegenerate,
   onSpeak,
 }: {
+  canRegenerate: boolean
   metadata: unknown
   messageText: string
   copied: boolean
+  regenerating: boolean
   speaking: boolean
   onCopy: () => void
   onOpenDetails: (data: AgentMessageMetadata) => void
+  onRegenerate: () => void
   onSpeak: () => void
 }) {
   const parsed = parseAgentMessageMetadata(metadata)
@@ -1355,9 +1408,18 @@ function MessageUsageStats({
             <Volume2 className={`size-3.5 ${speaking ? 'text-accent-foreground' : ''}`} />
           </MessageAction>
           <MessageAction
+            disabled={!canRegenerate || regenerating}
+            label="重新生成"
+            onClick={onRegenerate}
+            tooltip="重新生成"
+          >
+            <RefreshCcw className={`size-3.5 ${regenerating ? 'animate-spin' : ''}`} />
+          </MessageAction>
+          <MessageAction
             disabled={!parsed}
             label="详情"
             onClick={() => parsed && onOpenDetails(parsed)}
+            startsGroup
             tooltip="详情"
           >
             <Info className="size-3.5" />
@@ -1597,22 +1659,27 @@ export default function AgentPage() {
     }
     return ''
   }, [messages])
-  const latestUserTargetScrollTop = useCallback((_targetScrollTop: number, context: {
-    scrollElement: HTMLElement
-    contentElement: HTMLElement
-  }) => {
-    const userMessages = context.contentElement.querySelectorAll<HTMLElement>('[data-agent-message-role="user"]')
-    const latest = userMessages[userMessages.length - 1]
-    if (!latest) return _targetScrollTop
-    const topOffset = Math.min(160, Math.max(72, context.scrollElement.clientHeight * 0.18))
-    return Math.max(0, Math.min(_targetScrollTop, latest.offsetTop - topOffset))
-  }, [])
   const shouldAnchorLatestUser = busy && !!latestUserMessageId
   const lastAssistantMessageHasDelegateTool = useMemo(() => {
     const last = messages[messages.length - 1]
     return !!last && last.role === 'assistant' && last.parts.some((part) => (
       isToolUIPart(part) && part.type.replace(/^tool-/, '') === 'delegate_analysis'
     ))
+  }, [messages])
+  // 本次会话累计 token 用量（各助手消息 usage 求和），供输入框底部展示
+  const conversationUsage = useMemo(() => {
+    let input = 0
+    let output = 0
+    let hasAny = false
+    for (const message of messages) {
+      if (message.role !== 'assistant') continue
+      const usage = parseAgentMessageMetadata(message.metadata)?.usage
+      if (!usage) continue
+      hasAny = true
+      input += finiteNumber(usage.inputTokens) ?? 0
+      output += finiteNumber(usage.outputTokens) ?? 0
+    }
+    return { input, output, total: input + output, hasAny }
   }, [messages])
   const showAgentProgressChain = agentProgress.length > 0
     && status !== 'streaming'
@@ -1785,7 +1852,9 @@ export default function AgentPage() {
       setTitleDraft('')
       activeScopeRef.current = loaded.scope || { kind: 'global' }
       setMentions([])
-      setToolElapsedByKey({})
+      const restoredToolElapsed: Record<string, number> = {}
+      for (const message of loaded.messages) Object.assign(restoredToolElapsed, readToolElapsedFromMessage(message))
+      setToolElapsedByKey(restoredToolElapsed)
       setAgentProgress([])
       setAgentRunPending(false)
       setSubAgentProgress([])
@@ -1966,6 +2035,39 @@ export default function AgentPage() {
     }
   }
 
+  const handleRegenerateAssistantMessage = useCallback((messageIndex: number) => {
+    if (busy || !selectedModelSupportsTools) return
+    const userIndex = (() => {
+      for (let index = messageIndex - 1; index >= 0; index -= 1) {
+        if (messages[index]?.role === 'user') return index
+      }
+      return -1
+    })()
+    if (userIndex < 0) return
+
+    const userMessage = messages[userIndex]
+    const text = messageTextOf(userMessage)
+    const files = userMessage.parts.filter((part): part is Extract<UIMessage['parts'][number], { type: 'file' }> => part.type === 'file')
+    if (!text && files.length === 0) return
+
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel()
+      setSpeakingMessageId(null)
+    }
+    setAgentNotice('')
+    setAgentProgress([{ stage: 'run_started', title: AGENT_PENDING_TITLE, detail: '正在重新生成回答', at: Date.now() }])
+    setAgentRunPending(true)
+    setSubAgentProgress([])
+    submitScopeRef.current = activeScopeRef.current
+    setMessages(messages.slice(0, userIndex))
+
+    const sendPromise = Promise.resolve(sendMessage({ text, files })).finally(() => {
+      submitScopeRef.current = null
+      setAgentRunPending(false)
+    })
+    void sendPromise
+  }, [busy, messages, selectedModelSupportsTools, sendMessage, setMessages])
+
   const handleModelSelect = useCallback((id: string) => {
     if (models.find((model) => model.id === id)?.disabled) return
     setSelectedPresetId(id)
@@ -1980,16 +2082,21 @@ export default function AgentPage() {
       setMessages(messagesWithSubAgentProgress)
       return
     }
+    const messagesWithToolElapsed = attachToolElapsedToMessages(messagesWithSubAgentProgress, toolElapsedByKey)
+    if (messagesWithToolElapsed !== messagesWithSubAgentProgress) {
+      setMessages(messagesWithToolElapsed)
+      return
+    }
     let signature = ''
     try {
-      signature = JSON.stringify(messagesWithSubAgentProgress)
+      signature = JSON.stringify(messagesWithToolElapsed)
     } catch {
-      signature = `${messagesWithSubAgentProgress.length}:${Date.now()}`
+      signature = `${messagesWithToolElapsed.length}:${Date.now()}`
     }
     if (signature === lastSavedMessagesRef.current) return
     lastSavedMessagesRef.current = signature
-    void persistConversationMessages(conversationId, messagesWithSubAgentProgress, activeScopeRef.current)
-  }, [busy, conversationId, messages, persistConversationMessages, setMessages, subAgentProgress])
+    void persistConversationMessages(conversationId, messagesWithToolElapsed, activeScopeRef.current)
+  }, [busy, conversationId, messages, persistConversationMessages, setMessages, subAgentProgress, toolElapsedByKey])
 
   // 出处：会话名解析
   const sessionNameMap = useMemo(() => new Map(sessions.map((s) => [s.username, s.displayName])), [sessions])
@@ -2140,10 +2247,7 @@ export default function AgentPage() {
           )}
         </div>
       </div>
-      <Conversation
-        className="min-h-0 flex-1"
-        targetScrollTop={shouldAnchorLatestUser ? latestUserTargetScrollTop : undefined}
-      >
+      <Conversation className="min-h-0 flex-1">
         <ConversationAutoScroll enabled={shouldAnchorLatestUser} trigger={latestUserMessageId} />
         <ConversationContent className="mx-auto w-full min-w-80 max-w-[82%] py-4">
           {messages.length === 0 ? (
@@ -2264,12 +2368,15 @@ export default function AgentPage() {
                     )}
                     {message.role === 'assistant' && (
                       <MessageUsageStats
+                        canRegenerate={selectedModelSupportsTools}
                         copied={copiedMessageId === message.id}
                         metadata={message.metadata}
                         messageText={assistantText}
                         onCopy={() => { void handleCopyAssistantMessage(message.id, assistantText) }}
                         onOpenDetails={setUsageDetailsModal}
+                        onRegenerate={() => handleRegenerateAssistantMessage(messageIndex)}
                         onSpeak={() => handleSpeakAssistantMessage(message.id, assistantText)}
+                        regenerating={busy}
                         speaking={speakingMessageId === message.id}
                       />
                     )}
@@ -2300,12 +2407,12 @@ export default function AgentPage() {
         <PromptInputProvider>
           <PromptInput
             accept="image/*,.txt,.md,.json,.csv"
-            className="mx-auto mb-3 w-full min-w-80 max-w-[82%] **:data-[slot=input-group]:rounded-(--agent-radius,12px) **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-xs"
+            className="mx-auto mb-1.5 w-full min-w-80 max-w-[82%] **:data-[slot=input-group]:rounded-(--agent-radius,12px) **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-xs"
             maxFiles={6}
             maxFileSize={8 * 1024 * 1024}
             multiple
             onSubmit={handleSubmit}
-            style={{ '--agent-radius': '14px' } as CSSProperties}
+            style={{ '--agent-radius': '22px' } as CSSProperties}
           >
             <PromptInputHeader className="flex-col items-stretch gap-2 border-b">
               <MentionField
@@ -2412,6 +2519,14 @@ export default function AgentPage() {
             </PromptInputFooter>
           </PromptInput>
         </PromptInputProvider>
+        {conversationUsage.hasAny && (
+          <div className="mx-auto mb-3 flex w-full min-w-80 max-w-[82%] flex-wrap items-center justify-end gap-x-3 gap-y-0.5 px-2 text-[11px] text-muted-foreground">
+            <span>本次会话Token用量</span>
+            <span>输入 {formatTokenCount(conversationUsage.input)}</span>
+            <span>输出 {formatTokenCount(conversationUsage.output)}</span>
+            <span className="font-medium text-foreground/80">共 {formatTokenCount(conversationUsage.total)}</span>
+          </div>
+        )}
       </div>
       {usageDetailsModal !== null && (
         <UsageDetailsModal

@@ -20,7 +20,8 @@ import {
   checkForUpdatesOnStartup,
   startBackgroundSync,
   startLocalIntegrationServices,
-  stopLocalIntegrationServices
+  stopLocalIntegrationServices,
+  warmupAgentProcess
 } from './main/startup'
 
 type AppWithQuitFlag = typeof app & {
@@ -264,6 +265,9 @@ if (gotSingleInstanceLock) {
 
     // 启动时检测更新
     checkForUpdatesOnStartup(ctx)
+
+    // 后台预热 AI Agent 子进程，消除首次提问的冷启动等待
+    warmupAgentProcess(ctx)
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

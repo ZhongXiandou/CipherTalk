@@ -135,6 +135,34 @@ export async function checkAndConnectOnStartup(ctx: MainProcessContext): Promise
 }
 
 /**
+ * 预热 AI Agent utility 子进程：提前 fork 并加载庞大的 ai/@ai-sdk 依赖图，
+ * 把冷启动成本从"用户首次提问"挪到启动后的空闲时段。子进程常驻，预热一次即可。
+ */
+export function warmupAgentProcess(ctx: MainProcessContext): void {
+  const configService = ensureConfigService(ctx)
+  // 未配置（停留在引导页）时不预热，避免拉起用不到的子进程。
+  if (!String(configService.get('myWxid') || '').trim()) {
+    markStartupMilestone('startup:agent-warmup-skip-unconfigured')
+    return
+  }
+  // 延后到启动关键路径之后，避免和数据库连接/首屏抢 CPU 与磁盘 IO。
+  setTimeout(() => {
+    void (async () => {
+      try {
+        markStartupMilestone('startup:agent-warmup-start')
+        const { agentProcessService } = await import('../services/agent/agentProcessService')
+        agentProcessService.setLogger(ctx.getLogService())
+        const startedAt = Date.now()
+        await agentProcessService.ping()
+        markStartupMilestone('startup:agent-warmup-done', { elapsedMs: Date.now() - startedAt })
+      } catch (e) {
+        warnStartupMilestone('startup:agent-warmup-failed', { error: (e as Error)?.message || String(e) })
+      }
+    })()
+  }, 4000)
+}
+
+/**
  * 启动时自动检测应用更新。
  * 只在生产环境触发，结果沿用 app:updateAvailable 推送给主窗口。
  */

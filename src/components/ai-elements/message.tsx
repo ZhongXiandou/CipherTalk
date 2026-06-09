@@ -12,7 +12,14 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Table as HeroTable } from "@heroui/react";
+import {
+  Button as HeroButton,
+  ButtonGroup as HeroButtonGroup,
+  Separator as HeroSeparator,
+  Table as HeroTable,
+  Toolbar as HeroToolbar,
+  Tooltip as HeroTooltip,
+} from "@heroui/react";
 import type { FileUIPart, UIMessage } from "ai";
 import {
   CheckIcon,
@@ -29,7 +36,7 @@ import {
   XIcon,
 } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactElement, ReactNode } from "react";
-import { Children, createContext, isValidElement, memo, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Children, Fragment, cloneElement, createContext, isValidElement, memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import { bundledLanguages, type BundledLanguage } from "shiki";
 import {
@@ -87,50 +94,105 @@ export const MessageContent = ({
   </div>
 );
 
-export type MessageActionsProps = ComponentProps<"div">;
+export type MessageActionsProps = Omit<ComponentProps<typeof HeroToolbar>, "children"> & {
+  children?: ReactNode;
+};
 
 export const MessageActions = ({
   className,
   children,
+  "aria-label": ariaLabel = "回答操作",
   ...props
-}: MessageActionsProps) => (
-  <div className={cn("flex items-center gap-1", className)} {...props}>
-    {children}
-  </div>
-);
+}: MessageActionsProps) => {
+  const groups: ReactNode[][] = [[]];
+  for (const child of Children.toArray(children)) {
+    if (!isValidElement<MessageActionProps>(child) || child.type !== MessageAction) {
+      groups[groups.length - 1].push(child);
+      continue;
+    }
+    if (child.props.startsGroup && groups[groups.length - 1].length > 0) {
+      groups.push([]);
+    }
+    const groupIndex = groups[groups.length - 1].length;
+    groups[groups.length - 1].push(cloneElement(child, {
+      showGroupSeparator: child.props.showGroupSeparator ?? groupIndex > 0,
+    }));
+  }
 
-export type MessageActionProps = ComponentProps<typeof Button> & {
+  return (
+    <HeroToolbar aria-label={ariaLabel} className={cn("max-w-full gap-2", className)} {...props}>
+      {groups.filter((group) => group.length > 0).map((group, index) => (
+        <Fragment key={`group-${index}`}>
+          {index > 0 && <HeroSeparator />}
+          <HeroButtonGroup size="sm" variant="tertiary">
+            {group}
+          </HeroButtonGroup>
+        </Fragment>
+      ))}
+    </HeroToolbar>
+  );
+};
+
+type HeroMessageActionProps = ComponentProps<typeof HeroButton>;
+
+export type MessageActionProps = Omit<
+  HeroMessageActionProps,
+  "children" | "className" | "isDisabled" | "isIconOnly" | "onPress" | "size"
+> & {
+  children?: ReactNode;
+  className?: string;
+  disabled?: boolean;
+  isDisabled?: boolean;
   tooltip?: string;
   label?: string;
+  onClick?: () => void;
+  onPress?: HeroMessageActionProps["onPress"];
+  showGroupSeparator?: boolean;
+  startsGroup?: boolean;
+  size?: HeroMessageActionProps["size"] | "icon-sm";
 };
 
 export const MessageAction = ({
   tooltip,
   children,
   label,
-  variant = "ghost",
+  variant = "tertiary",
   size = "icon-sm",
+  className,
+  disabled,
+  isDisabled,
+  onClick,
+  onPress,
+  showGroupSeparator,
+  startsGroup: _startsGroup,
   ...props
 }: MessageActionProps) => {
+  const isIconOnly = size === "icon-sm" || Children.count(children) === 1;
+  const heroSize = size === "icon-sm" ? "sm" : size;
   const button = (
-    <Button size={size} type="button" variant={variant} {...props}>
+    <HeroButton
+      aria-label={props["aria-label"] ?? label ?? tooltip}
+      className={cn(
+        isIconOnly && "size-8 p-0 [&_svg]:size-3.5",
+        "text-muted-foreground data-[hovered=true]:text-foreground",
+        className
+      )}
+      isDisabled={isDisabled ?? disabled}
+      isIconOnly={isIconOnly}
+      onPress={(event) => {
+        onPress?.(event);
+        onClick?.();
+      }}
+      size={heroSize}
+      type="button"
+      variant={variant}
+      {...props}
+    >
+      {showGroupSeparator && <HeroButtonGroup.Separator />}
       {children}
       <span className="sr-only">{label || tooltip}</span>
-    </Button>
+    </HeroButton>
   );
-
-  if (tooltip) {
-    return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>{button}</TooltipTrigger>
-          <TooltipContent>
-            <p>{tooltip}</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    );
-  }
 
   return button;
 };
@@ -670,6 +732,11 @@ type MessageTableProps = ComponentProps<"table"> & {
   node?: unknown;
 };
 
+type TableSnapshot = {
+  headers: string[];
+  rows: string[][];
+};
+
 function getElementChildren(node: ReactNode): ReactNode {
   return isValidElement(node) ? (node.props as { children?: ReactNode }).children : null;
 }
@@ -699,21 +766,188 @@ function getTableRows(children: ReactNode): ReactElement[] {
   return getChildElements(children, "tr");
 }
 
+function getNodePlainText(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number" || typeof node === "bigint") {
+    return String(node);
+  }
+  if (Array.isArray(node)) return node.map(getNodePlainText).join("");
+  if (!isValidElement(node)) return "";
+  if (node.type === "br") return "\n";
+  return getNodePlainText((node.props as { children?: ReactNode }).children);
+}
+
+function normalizeTableText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function getTableSnapshot(children: ReactNode): TableSnapshot {
+  const head = getChildElements(children, "thead")[0];
+  const body = getChildElements(children, "tbody")[0];
+  const headerRow = head ? getTableRows(getElementChildren(head))[0] : undefined;
+  const headers = headerRow
+    ? getTableCells(headerRow, "th").map((cell) => normalizeTableText(getNodePlainText(getElementChildren(cell))))
+    : [];
+  const rows = (body ? getTableRows(getElementChildren(body)) : getTableRows(children))
+    .map((row) => {
+      const cells = getTableCells(row, "td");
+      return cells.map((cell) => normalizeTableText(getNodePlainText(getElementChildren(cell))));
+    })
+    .filter((row) => row.length > 0);
+
+  return { headers, rows };
+}
+
+function tableSnapshotToTsv(snapshot: TableSnapshot): string {
+  const sanitize = (value: string) => value.replace(/\t/g, " ").replace(/\r?\n/g, " ");
+  return [snapshot.headers, ...snapshot.rows]
+    .filter((row) => row.length > 0)
+    .map((row) => row.map(sanitize).join("\t"))
+    .join("\n");
+}
+
+async function waitForTableExportReady(node: HTMLElement): Promise<void> {
+  const imgs = Array.from(node.querySelectorAll("img"));
+  await Promise.all(imgs.map((img) => {
+    if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      img.addEventListener("load", () => resolve(), { once: true });
+      img.addEventListener("error", () => resolve(), { once: true });
+    });
+  }));
+  try { await document.fonts?.ready; } catch { /* ignore font readiness failures */ }
+}
+
+function getTableExportOptions(node: HTMLElement) {
+  const rect = node.getBoundingClientRect();
+  const scroll = node.querySelector<HTMLElement>("[data-ai-table-scroll]");
+  const content = node.querySelector<HTMLElement>("[data-ai-table-content]");
+  const width = Math.ceil(Math.max(rect.width, node.scrollWidth, scroll?.scrollWidth ?? 0, content?.scrollWidth ?? 0));
+  const height = Math.ceil(Math.max(rect.height, node.scrollHeight, scroll?.scrollHeight ?? 0, content?.scrollHeight ?? 0));
+  const background = window.getComputedStyle(node).backgroundColor || "#ffffff";
+
+  return {
+    bgcolor: background,
+    filter: (target: Node) => !(target instanceof HTMLElement && target.dataset.aiTableActions != null),
+    height,
+    scale: 2,
+    width,
+    style: {
+      height: `${height}px`,
+      margin: "0",
+      maxWidth: `${width}px`,
+      minWidth: `${width}px`,
+      overflow: "visible",
+      width: `${width}px`,
+    },
+    onclone: (clone: HTMLElement) => {
+      clone.style.height = `${height}px`;
+      clone.style.maxWidth = `${width}px`;
+      clone.style.minWidth = `${width}px`;
+      clone.style.overflow = "visible";
+      clone.style.width = `${width}px`;
+      clone.querySelectorAll<HTMLElement>("[data-ai-table-scroll], [data-ai-table-export]")
+        .forEach((element) => {
+          element.style.height = "auto";
+          element.style.maxHeight = "none";
+          element.style.maxWidth = `${width}px`;
+          element.style.overflow = "visible";
+          element.style.width = `${width}px`;
+        });
+      clone.querySelectorAll<HTMLElement>("[data-ai-table-content]")
+        .forEach((element) => {
+          element.style.minWidth = "max-content";
+          element.style.width = "max-content";
+        });
+    },
+  };
+}
+
 const MessageTable = ({ children, className, node: _node, ..._props }: MessageTableProps) => {
   const { isStreaming } = useContext(MessageRenderContext);
+  const exportRef = useRef<HTMLDivElement>(null);
+  const [isCopied, setIsCopied] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const snapshot = useMemo(() => getTableSnapshot(children), [children]);
+  const hasTableData = snapshot.headers.length > 0 || snapshot.rows.length > 0;
+
+  const handleCopy = async () => {
+    if (!hasTableData || typeof window === "undefined" || !navigator?.clipboard?.writeText) return;
+    await navigator.clipboard.writeText(tableSnapshotToTsv(snapshot));
+    setIsCopied(true);
+    window.setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  const handleDownload = async () => {
+    const node = exportRef.current;
+    if (!node || isExporting) return;
+    setIsExporting(true);
+    try {
+      await waitForTableExportReady(node);
+      const domtoimage = (await import("dom-to-image-more")).default;
+      const dataUrl = await (domtoimage as any).toPng(node, getTableExportOptions(node));
+      const link = document.createElement("a");
+      link.download = `ai-table-${Date.now()}.png`;
+      link.href = dataUrl;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error("[MessageTable] 下载表格图片失败", error);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   return (
     <div className="my-4 min-w-0 max-w-full">
-      <HeroTable className={cn("max-w-full", className)}>
-        <HeroTable.ScrollContainer>
-          <HeroTable.Content
-            aria-label="AI 生成表格"
-            className="min-w-max text-sm"
-          >
-            {children}
-          </HeroTable.Content>
-        </HeroTable.ScrollContainer>
-      </HeroTable>
+      <div className="relative" ref={exportRef} data-ai-table-export>
+        <div className="absolute top-2 right-3 z-10 flex items-center gap-0.5" data-ai-table-actions>
+          <HeroTooltip delay={0}>
+            <HeroButton
+              aria-label={isCopied ? "表格已复制" : "复制表格"}
+              className="h-6 w-6 min-w-0 rounded-md bg-transparent p-0 text-muted-foreground shadow-none hover:bg-muted/70 hover:text-foreground data-[hovered=true]:bg-muted/70 data-[hovered=true]:text-foreground data-[pressed=true]:scale-95 [&_svg]:size-3.5"
+              isDisabled={!hasTableData}
+              isIconOnly
+              onPress={() => void handleCopy()}
+              size="sm"
+              variant="ghost"
+            >
+              {isCopied ? <CheckIcon /> : <CopyIcon />}
+            </HeroButton>
+            <HeroTooltip.Content>
+              <p>{isCopied ? "已复制" : "复制表格"}</p>
+            </HeroTooltip.Content>
+          </HeroTooltip>
+          <HeroTooltip delay={0}>
+            <HeroButton
+              aria-label="下载表格图片"
+              className="h-6 w-6 min-w-0 rounded-md bg-transparent p-0 text-muted-foreground shadow-none hover:bg-muted/70 hover:text-foreground data-[hovered=true]:bg-muted/70 data-[hovered=true]:text-foreground data-[pressed=true]:scale-95 [&_svg]:size-3.5"
+              isDisabled={isExporting}
+              isIconOnly
+              onPress={() => void handleDownload()}
+              size="sm"
+              variant="ghost"
+            >
+              {isExporting ? <Loader2Icon className="animate-spin" /> : <DownloadIcon />}
+            </HeroButton>
+            <HeroTooltip.Content>
+              <p>{isExporting ? "正在生成" : "下载图片"}</p>
+            </HeroTooltip.Content>
+          </HeroTooltip>
+        </div>
+        <HeroTable className={cn("max-w-full", className)}>
+          <HeroTable.ScrollContainer data-ai-table-scroll>
+            <HeroTable.Content
+              aria-label="AI 生成表格"
+              className="min-w-max text-sm"
+              data-ai-table-content
+            >
+              {children}
+            </HeroTable.Content>
+          </HeroTable.ScrollContainer>
+        </HeroTable>
+      </div>
       {isStreaming && (
         <div className="mt-2 flex items-center gap-2 rounded-(--agent-radius,12px) border border-border bg-muted/30 px-3 py-2 text-muted-foreground text-xs">
           <Table2Icon className="size-3.5" />
@@ -736,7 +970,7 @@ const MessageTableHead = ({ children, node: _node, ..._props }: MessageTableHead
     <HeroTable.Header>
       {(headers.length > 0 ? headers : Children.toArray(children)).map((header, index) => (
         <HeroTable.Column
-          className={cn("whitespace-nowrap", getElementClassName(header))}
+          className={cn("whitespace-nowrap last:pr-18", getElementClassName(header))}
           id={`col-${index}`}
           isRowHeader={index === 0}
           key={`col-${index}`}
