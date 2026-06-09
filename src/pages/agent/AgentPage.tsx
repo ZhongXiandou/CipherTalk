@@ -6,7 +6,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProper
 import { useChat } from '@ai-sdk/react'
 import { isToolUIPart, type ChatStatus, type UIMessage } from 'ai'
 import { Button as HeroButton, ButtonGroup, Dropdown, Label, Modal, Separator, Surface, Switch, Table } from '@heroui/react'
-import { AtSign, BarChart3, Braces, Brain, CheckIcon, ChevronDown, Clock3, Code2, Copy, FileText, History, Image as ImageIcon, Info, Link2, ListChecks, PenLine, Play, Quote, RefreshCcw, Search, Slash, SquarePen, Table2, Trash2, Users, Volume2, Wrench, X, Sparkles } from 'lucide-react'
+import { AtSign, BarChart3, Braces, Brain, CheckIcon, ChevronDown, Clock3, Code2, Copy, FileText, Globe, History, Image as ImageIcon, Info, Link2, ListChecks, PenLine, Play, Quote, RefreshCcw, Search, Slash, SquarePen, Table2, Trash2, Users, Volume2, Wrench, X, Sparkles } from 'lucide-react'
 import { Sources, SourcesContent, SourcesTrigger } from '@/components/ai-elements/sources'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import {
@@ -240,6 +240,7 @@ const TOOL_LABELS: Record<string, string> = {
   consolidate_memory: '整理记忆',
   search_moments: '搜索朋友圈',
   moments_stats: '朋友圈统计',
+  web_search: '联网搜索',
   auto_memory: '自动记忆',
   final_review: '最终审核',
 }
@@ -1516,6 +1517,33 @@ export default function AgentPage() {
   planModeRef.current = planMode
   // 标记当前在途的这次运行是否为计划模式（finish 前 metadata 还没回来，流式期间靠它判定计划卡片）
   const runIsPlanRef = useRef(false)
+  // 联网搜索（Tavily）：全局开关，存在 config，模型自己决定何时联网；+ 菜单里快捷开关
+  const [webSearchOn, setWebSearchOn] = useState(false)
+  const [webSearchHasKey, setWebSearchHasKey] = useState(false)
+  useEffect(() => {
+    void window.electronAPI.webSearch?.getConfig().then((res) => {
+      if (res.success && res.config) {
+        const cfg = res.config as { enabled?: boolean; apiKey?: string }
+        setWebSearchOn(Boolean(cfg.enabled))
+        setWebSearchHasKey(Boolean(cfg.apiKey))
+      }
+    })
+  }, [])
+  const toggleWebSearch = useCallback(async () => {
+    const next = !webSearchOn
+    if (next) {
+      // 重新读一遍配置，避免本次会话内刚在设置里填了 key 但缓存还是“无 key”
+      const res = await window.electronAPI.webSearch?.getConfig()
+      const hasKey = res?.success ? Boolean((res.config as { apiKey?: string } | undefined)?.apiKey) : webSearchHasKey
+      setWebSearchHasKey(hasKey)
+      if (!hasKey) {
+        setAgentNotice('请先在 设置 → AI 接入 → 联网 里填写 Tavily API Key，再开启联网搜索。')
+        return
+      }
+    }
+    setWebSearchOn(next)
+    void window.electronAPI.webSearch?.setConfig({ enabled: next })
+  }, [webSearchOn, webSearchHasKey])
   const [currentProviderId, setCurrentProviderId] = useState('')
   const [currentModelId, setCurrentModelId] = useState('')
   const [toolElapsedByKey, setToolElapsedByKey] = useState<Record<string, number>>({})
@@ -2539,6 +2567,21 @@ export default function AgentPage() {
                           </Switch>
                         </span>
                       </Dropdown.Item>
+                      <Dropdown.Item
+                        id="web-search"
+                        textValue="联网搜索"
+                        onAction={toggleWebSearch}
+                      >
+                        <Globe className="size-4 shrink-0 text-muted" />
+                        <Label>联网搜索</Label>
+                        <span className="ml-auto inline-flex pointer-events-none">
+                          <Switch aria-label="联网搜索" isSelected={webSearchOn}>
+                            <Switch.Control>
+                              <Switch.Thumb />
+                            </Switch.Control>
+                          </Switch>
+                        </span>
+                      </Dropdown.Item>
                     </PromptInputActionMenuContent>
                   </PromptInputActionMenu>
                   <SlashPresetButton showGroupSeparator />
@@ -2556,6 +2599,20 @@ export default function AgentPage() {
                   >
                     <ListChecks className="size-3.5" />
                     计划模式
+                    <X className="size-3" />
+                  </HeroButton>
+                )}
+
+                {webSearchOn && (
+                  <HeroButton
+                    aria-label="关闭联网搜索"
+                    className="gap-1"
+                    onPress={toggleWebSearch}
+                    size="sm"
+                    variant="secondary"
+                  >
+                    <Globe className="size-3.5" />
+                    联网搜索
                     <X className="size-3" />
                   </HeroButton>
                 )}

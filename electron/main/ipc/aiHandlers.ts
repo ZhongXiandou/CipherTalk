@@ -7,6 +7,25 @@ import type { AgentProviderConfig, AgentProviderConfigOverride, AgentScope } fro
 
 /** 进行中的 agent 运行：runId → AbortController，用于取消。 */
 const agentAborters = new Map<string, AbortController>()
+const AGENT_RUN_PROXY_CACHE_TTL_MS = 5 * 60 * 1000
+const AGENT_PREP_RERANK_TIMEOUT_MS = 1500
+
+let agentRunProxyRefreshedAt = 0
+let agentRunProxyRefreshPromise: Promise<string | null> | null = null
+
+async function refreshAgentRunProxyCached(refreshResolvedProxyUrl: () => Promise<string | null>): Promise<string | null> {
+  const now = Date.now()
+  if (agentRunProxyRefreshPromise) return agentRunProxyRefreshPromise
+  if (now - agentRunProxyRefreshedAt < AGENT_RUN_PROXY_CACHE_TTL_MS) return null
+
+  agentRunProxyRefreshPromise = refreshResolvedProxyUrl()
+    .finally(() => {
+      agentRunProxyRefreshedAt = Date.now()
+      agentRunProxyRefreshPromise = null
+    })
+
+  return agentRunProxyRefreshPromise
+}
 
 function textFromUiMessage(message: UIMessage): string {
   const anyMessage = message as any
@@ -142,25 +161,43 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     let idleWarningCount = 0
     let watchdog: NodeJS.Timeout | null = null
     agentAborters.set(runId, aborter)
+    const sendPrepProgress = (title: string, detail?: string) => {
+      progressCount += 1
+      lastActivityAt = Date.now()
+      lastActivityKind = 'progress'
+      idleWarningCount = 0
+      sendProgress({
+        stage: 'run_started',
+        title,
+        detail,
+        elapsedMs: Date.now() - startedAt,
+        at: Date.now(),
+      })
+    }
     logger?.warn('AIAgent', 'AI Agent 请求开始', baseRunData)
     try {
       stage = 'import_services'
+      sendPrepProgress('正在读取 Agent 服务')
       const { agentProcessService } = await import('../../services/agent/agentProcessService')
       agentProcessService.setLogger(logger)
       const { resolveProviderConfig } = await import('../../services/agent/resolveProviderConfig')
       const { refreshResolvedProxyUrl } = await import('../../services/ai/proxyFetch')
       const { convertToModelMessages } = await import('ai')
       stage = 'refresh_proxy'
-      await refreshResolvedProxyUrl() // 主进程探测系统代理并持久化，供子进程 agent/嵌入读取
+      sendPrepProgress('正在检测代理')
+      await refreshAgentRunProxyCached(refreshResolvedProxyUrl) // 主进程探测系统代理并持久化，供子进程 agent/嵌入读取
       stage = 'resolve_provider'
+      sendPrepProgress('正在准备模型配置')
       const providerConfig = resolveProviderConfig(payload.modelConfig)
       stage = 'convert_messages'
+      sendPrepProgress('正在整理消息')
       const uiMessages = shouldStripProviderMetadata(providerConfig)
         ? stripUiMessageProviderMetadata(payload.messages)
         : payload.messages
       const messages = await convertToModelMessages(uiMessages)
       const lastUserText = lastUserTextFromUiMessages(payload.messages)
       stage = 'load_context_services'
+      sendPrepProgress('正在加载上下文服务')
       const { mcpClientService } = await import('../../services/mcpClientService')
       const { buildReadOnlyMcpToolDescriptors } = await import('../../services/agent/mcpToolPolicy')
       const { skillManagerService } = await import('../../services/skillManagerService')
@@ -169,10 +206,31 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
       const readOnlyMcpTools = buildReadOnlyMcpToolDescriptors(mcpClientService.getConnectedToolSchemas())
       let mcpCandidates = readOnlyMcpTools
       stage = 'select_mcp_candidates'
+      sendPrepProgress('正在筛选 MCP 工具', `只读工具 ${readOnlyMcpTools.length} 个`)
       if (agentResourceVectorService.isReady()) {
         try {
-          const vectorMcpTools = await agentResourceVectorService.searchMcpTools(lastUserText, readOnlyMcpTools, 24)
-          if (vectorMcpTools.length > 0) mcpCandidates = vectorMcpTools
+          const mcpVectorStatus = agentResourceVectorService.getMcpStatus(readOnlyMcpTools)
+          const canUseMcpVector = mcpVectorStatus.enabled
+            && mcpVectorStatus.currentCount > 0
+            && mcpVectorStatus.count === mcpVectorStatus.currentCount
+            && mcpVectorStatus.staleCount === 0
+          if (canUseMcpVector) {
+            const vectorMcpTools = await agentResourceVectorService.searchMcpTools(
+              lastUserText,
+              readOnlyMcpTools,
+              24,
+              undefined,
+              { requireCurrent: true },
+            )
+            if (vectorMcpTools.length > 0) mcpCandidates = vectorMcpTools
+          } else if (mcpVectorStatus.currentCount > 0) {
+            logger?.warn('AIAgent', 'MCP 工具向量未就绪，跳过请求期向量补建', {
+              ...baseRunData,
+              currentCount: mcpVectorStatus.currentCount,
+              indexedCount: mcpVectorStatus.count,
+              staleCount: mcpVectorStatus.staleCount,
+            })
+          }
         } catch (error) {
           console.warn('[agent:run] MCP vector candidate selection failed, fallback to all read-only tools:', error)
           logger?.warn('AIAgent', 'MCP 工具向量候选选择失败，回退到全部只读工具', {
@@ -182,7 +240,8 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
         }
       }
       stage = 'rerank_mcp_tools'
-      const mcpTools = (await rerankCandidates(
+      sendPrepProgress('正在重排 MCP 工具', `候选 ${mcpCandidates.length} 个`)
+      const { items: mcpTools, meta: mcpRerankMeta } = await rerankCandidates(
         lastUserText,
         mcpCandidates.map((tool) => ({
           item: tool,
@@ -193,9 +252,10 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
             tool.inputSchema ? JSON.stringify(tool.inputSchema).slice(0, 1000) : '',
           ].filter(Boolean).join('\n'),
         })),
-        { topN: 8 },
-      )).items
+        { topN: 8, timeoutMsOverride: AGENT_PREP_RERANK_TIMEOUT_MS },
+      )
       stage = 'select_skills'
+      sendPrepProgress('正在选择技能')
       const skills = await skillManagerService.selectSkillsForAgent(lastUserText)
       if (mcpTools.length > 0 || skills.length > 0) {
         console.info('[agent:run] injected context', {
@@ -212,10 +272,13 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
         mcpCandidateCount: mcpCandidates.length,
         selectedMcpToolCount: mcpTools.length,
         selectedMcpTools: mcpTools.map((tool) => `${tool.serverName}/${tool.toolName}`),
+        mcpRerankApplied: mcpRerankMeta.applied,
+        mcpRerankError: mcpRerankMeta.error || null,
         selectedSkillCount: skills.length,
         selectedSkills: skills.map((skill) => skill.name),
       })
       stage = 'run_agent_process'
+      sendPrepProgress('正在交给 Agent 进程')
       watchdog = setInterval(() => {
         const idleMs = Date.now() - lastActivityAt
         if (idleMs < 10000) return
@@ -399,6 +462,35 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
       const { refreshResolvedProxyUrl } = await import('../../services/ai/proxyFetch')
       await refreshResolvedProxyUrl() // 测试也走代理，保证"测试通过=实际可用"
       return await testEmbeddingConfig(cfg)
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('webSearch:getConfig', async () => {
+    try {
+      const { getWebSearchConfig } = await import('../../services/ai/webSearchService')
+      return { success: true, config: getWebSearchConfig() }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('webSearch:setConfig', async (_e, patch: Record<string, unknown>) => {
+    try {
+      const { saveWebSearchConfig } = await import('../../services/ai/webSearchService')
+      return { success: true, config: saveWebSearchConfig(patch as any) }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('webSearch:test', async (_e, cfg: any) => {
+    try {
+      const { testWebSearchConfig } = await import('../../services/ai/webSearchService')
+      const { refreshResolvedProxyUrl } = await import('../../services/ai/proxyFetch')
+      await refreshResolvedProxyUrl() // 测试也走代理，保证"测试通过=实际可用"
+      return await testWebSearchConfig(cfg)
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) }
     }
