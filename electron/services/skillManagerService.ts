@@ -22,6 +22,7 @@ const BUILTIN_SKILLS = new Set(['ct-mcp-copilot'])
 const DEFAULT_AGENT_SKILL_LIMIT = 3
 const DEFAULT_AGENT_SKILL_BUDGET = 9000
 const DEFAULT_AGENT_SKILL_CANDIDATES = 20
+const AGENT_PREP_RERANK_TIMEOUT_MS = 1500
 
 function parseSkillFrontmatter(content: string): { name: string; version: string; description: string } {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
@@ -373,7 +374,13 @@ export class SkillManagerService {
     let vectorDocuments: SkillResourceDocument[] = []
     if (agentResourceVectorService.isReady()) {
       try {
-        vectorDocuments = await agentResourceVectorService.searchSkills(query, documents, DEFAULT_AGENT_SKILL_CANDIDATES)
+        vectorDocuments = await agentResourceVectorService.searchSkills(
+          query,
+          documents,
+          DEFAULT_AGENT_SKILL_CANDIDATES,
+          undefined,
+          { requireCurrent: true },
+        )
       } catch (error) {
         console.warn('[skills] vector candidate selection failed, fallback to token scoring:', error)
       }
@@ -415,6 +422,7 @@ export class SkillManagerService {
       ].filter(Boolean).join('\n'),
     })), {
       topN: safeLimit,
+      timeoutMsOverride: AGENT_PREP_RERANK_TIMEOUT_MS,
     })
 
     const selected: AgentSkillContextItem[] = []

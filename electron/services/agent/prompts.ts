@@ -67,6 +67,14 @@ const MEMORY_PROMPT = `
 
 const BASE_PROMPT = [ROLE_PROMPT, TOOL_PROMPT, ROUTING_PROMPT, EVIDENCE_PROMPT, MEMORY_PROMPT].join('\n')
 
+/** 联网搜索提示：用户开启「联网搜索」且配了 key 时追加，告诉模型 web_search 工具可用（见 engine.ts）。 */
+export const WEB_SEARCH_PROMPT = `
+# 联网搜索（已开启）
+本轮额外提供 web_search 工具，可联网获取聊天记录之外的外部/实时信息：
+- 仅当问题需要本地聊天记录之外的信息（新闻、公开数据、百科、行情、某个事实的核对等）才用 web_search；能用本地工具回答的一律别联网。
+- 联网得到的结论必须标注来源链接（结果里的 url），不要把搜索摘要当定论，必要时多搜一次或交叉验证。
+- 区分清楚：涉及"用户自己的聊天/联系人/朋友圈"用本地工具；涉及"外部世界的客观信息"才用 web_search。`
+
 /** 计划模式系统提示：开启时追加到 dynamicSystem，让本轮只产出计划、不下结论（见 engine.ts）。 */
 export const PLAN_MODE_PROMPT = `
 # 计划模式（已开启）

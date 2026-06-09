@@ -36,6 +36,7 @@ import { useSettingsStore } from '../settings/settingsStore'
 import AIProviderLogo from './AIProviderLogo'
 import EmbeddingTab from '../settings/tabs/EmbeddingTab'
 import RerankTab from '../settings/tabs/RerankTab'
+import WebSearchTab from '../settings/tabs/WebSearchTab'
 
 type AiProviderProtocol = configService.AiProviderProtocol
 type PresetTab = 'name' | 'provider' | 'config'
@@ -315,7 +316,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
   const [remoteModelDetails, setRemoteModelDetails] = useState<AIModelInfo[]>([])
   const [modelListError, setModelListError] = useState('')
   const [presets, setPresets] = useState<configService.AiConfigPreset[]>([])
-  const [configMode, setConfigMode] = useState<'llm' | 'vector' | 'rerank'>('llm')
+  const [configMode, setConfigMode] = useState<'llm' | 'vector' | 'rerank' | 'webSearch'>('llm')
   const [showPresetDrawer, setShowPresetDrawer] = useState(false)
   const [showSavePresetDialog, setShowSavePresetDialog] = useState(false)
   const [presetName, setPresetName] = useState('')
@@ -760,12 +761,13 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
               </>
             )}
             {/* 大模型 / 向量 / 重排 切换：同一套 UI 配置不同对象 */}
-            <Tabs className="shrink-0" selectedKey={configMode} onSelectionChange={(key) => setConfigMode(key as 'llm' | 'vector' | 'rerank')}>
+            <Tabs className="shrink-0" selectedKey={configMode} onSelectionChange={(key) => setConfigMode(key as 'llm' | 'vector' | 'rerank' | 'webSearch')}>
               <Tabs.ListContainer>
                 <Tabs.List aria-label="配置类型">
                   <Tabs.Tab className="whitespace-nowrap" id="llm">大模型<Tabs.Indicator /></Tabs.Tab>
                   <Tabs.Tab className="whitespace-nowrap" id="vector">向量<Tabs.Indicator /></Tabs.Tab>
                   <Tabs.Tab className="whitespace-nowrap" id="rerank">重排<Tabs.Indicator /></Tabs.Tab>
+                  <Tabs.Tab className="whitespace-nowrap" id="webSearch">联网<Tabs.Indicator /></Tabs.Tab>
                 </Tabs.List>
               </Tabs.ListContainer>
             </Tabs>
@@ -1014,12 +1016,13 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
         </div>
         {configMode === 'vector' && <EmbeddingTab />}
         {configMode === 'rerank' && <RerankTab />}
+        {configMode === 'webSearch' && <WebSearchTab />}
       </div>
 
       {settingsPagePortalHost && createPortal(
         <Drawer state={presetDrawerState}>
           {showPresetDrawer && (
-            <div className="absolute inset-0 z-[160] overflow-hidden">
+            <div className="absolute inset-0 z-160 overflow-hidden">
               <button
                 aria-label="关闭预设管理"
                 className="absolute inset-0 bg-backdrop/40 backdrop-blur-sm"

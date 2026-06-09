@@ -187,9 +187,13 @@ export async function testRerankConfig(cfg: RerankConfig): Promise<{ success: bo
 export async function rerankCandidates<T>(
   query: string,
   candidates: Array<RerankCandidate<T>>,
-  opts: { topN?: number; cfg?: RerankConfig } = {},
+  opts: { topN?: number; cfg?: RerankConfig; timeoutMsOverride?: number } = {},
 ): Promise<{ items: T[]; meta: RerankMeta }> {
-  const cfg = opts.cfg || getRerankConfig()
+  const baseCfg = opts.cfg || getRerankConfig()
+  const timeoutMsOverride = Math.floor(Number(opts.timeoutMsOverride) || 0)
+  const cfg = timeoutMsOverride > 0
+    ? { ...baseCfg, timeoutMs: Math.max(100, timeoutMsOverride) }
+    : baseCfg
   const topN = Math.max(1, Math.floor(opts.topN || candidates.length))
   const fallbackItems = candidates.slice(0, topN).map((candidate) => candidate.item)
   const baseMeta = {

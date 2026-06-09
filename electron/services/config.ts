@@ -140,6 +140,12 @@ interface ConfigSchema {
     model: string
     timeoutMs: number
   }
+  // 联网搜索（Tavily）—— AI Agent 的 web_search 工具用，独立于聊天/嵌入模型
+  webSearchConfig: {
+    enabled: boolean
+    apiKey: string
+    maxResults: number
+  }
   // 主进程探测到的系统代理 URL（写入后供 AI 子进程/嵌入跨进程读取；子进程无 session API 探测不了）
   aiResolvedProxyUrl: string
   mcpEnabled: boolean
@@ -222,6 +228,11 @@ const defaults: ConfigSchema = {
     baseURL: 'https://api.siliconflow.cn/v1',
     model: 'BAAI/bge-reranker-v2-m3',
     timeoutMs: 15000,
+  },
+  webSearchConfig: {
+    enabled: false,
+    apiKey: '',
+    maxResults: 5,
   },
   aiResolvedProxyUrl: '',
   mcpEnabled: false,

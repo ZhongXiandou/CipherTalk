@@ -5,7 +5,8 @@
 import { generateText, ToolLoopAgent, stepCountIs, type ModelMessage, type UIMessageChunk } from 'ai'
 import type { SystemModelMessage } from '@ai-sdk/provider-utils'
 import { createLanguageModel } from './provider'
-import { buildAgentPromptParts, PLAN_MODE_PROMPT } from './prompts'
+import { buildAgentPromptParts, PLAN_MODE_PROMPT, WEB_SEARCH_PROMPT } from './prompts'
+import { isWebSearchAvailable } from '../ai/webSearchService'
 import { applyAnthropicCacheControl, buildPromptCacheKey, buildProviderOptions } from './cache'
 import { buildTools } from './tools'
 import { buildMemoryContext, extractMemories, preloadRelevantMemories } from './tools/memory'
@@ -24,11 +25,13 @@ export function buildAgentInstructions(
   memoryContext: string,
   relevantMemoryContext: string,
   tools: ReturnType<typeof buildTools>,
+  webSearchOn = false,
 ): { instructions: SystemModelMessage[]; tools: ReturnType<typeof buildTools>; promptCacheKey: string } {
   const promptParts = buildAgentPromptParts(input.scope, input.skills)
   const dynamicSystem = [
     promptParts.dynamicSystem,
     input.planMode ? PLAN_MODE_PROMPT : '',
+    webSearchOn ? WEB_SEARCH_PROMPT : '',
     memoryContext,
     relevantMemoryContext,
   ].filter(Boolean).join('\n')
@@ -188,8 +191,9 @@ export async function runAgent(
     reportAgentProgress({ stage: 'run_started', title: '正在召回相关记忆' })
     const relevantMemoryContext = await preloadRelevantMemories(userText, input.scope)
     reportAgentProgress({ stage: 'run_started', title: '正在准备工具' })
-    const baseTools = withToolTimeouts(buildTools(input.scope, input.providerConfig, input.mcpTools))
-    const prepared = buildAgentInstructions(input, memoryContext, relevantMemoryContext, baseTools)
+    const webSearchOn = isWebSearchAvailable()
+    const baseTools = withToolTimeouts(buildTools(input.scope, input.providerConfig, input.mcpTools, webSearchOn))
+    const prepared = buildAgentInstructions(input, memoryContext, relevantMemoryContext, baseTools, webSearchOn)
     const agent = new ToolLoopAgent({
       model: createLanguageModel(input.providerConfig),
       instructions: prepared.instructions,

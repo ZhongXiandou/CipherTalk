@@ -440,9 +440,15 @@ export class AgentResourceVectorService {
     query: string,
     limit: number,
     parseFallback: TPayload,
+    opts: { requireCurrent?: boolean } = {},
   ): Promise<TPayload[]> {
     if (!query.trim() || resources.length === 0 || limit <= 0) return []
-    await this.ensureResources(kind, resources, cfg)
+    if (opts.requireCurrent) {
+      const status = this.getStatus(kind, resources, cfg)
+      if (!status.enabled || status.count === 0 || status.staleCount > 0 || status.count < resources.length) return []
+    } else {
+      await this.ensureResources(kind, resources, cfg)
+    }
     const db = this.getDb()
     const key = modelKey(cfg)
     const queryVec = await embedQuery(query, cfg)
@@ -465,23 +471,23 @@ export class AgentResourceVectorService {
       .map(({ row }) => parsePayload<TPayload>(row.payload_json, parseFallback))
   }
 
-  async searchSkills(query: string, documents: SkillResourceDocument[], limit = 20, cfg = getEmbeddingConfig()): Promise<SkillResourceDocument[]> {
+  async searchSkills(query: string, documents: SkillResourceDocument[], limit = 20, cfg = getEmbeddingConfig(), opts: { requireCurrent?: boolean } = {}): Promise<SkillResourceDocument[]> {
     return this.search('skill', documents.map(toSkillResource), cfg, query, limit, {
       name: '',
       version: '0.0.0',
       description: '',
       content: '',
-    })
+    }, opts)
   }
 
-  async searchMcpTools(query: string, tools: AgentMcpToolDescriptor[], limit = 24, cfg = getEmbeddingConfig()): Promise<AgentMcpToolDescriptor[]> {
+  async searchMcpTools(query: string, tools: AgentMcpToolDescriptor[], limit = 24, cfg = getEmbeddingConfig(), opts: { requireCurrent?: boolean } = {}): Promise<AgentMcpToolDescriptor[]> {
     return this.search('mcp_tool', tools.map(toMcpResource), cfg, query, limit, {
       name: '',
       serverName: '',
       toolName: '',
       description: '',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    })
+    }, opts)
   }
 }
 
