@@ -44,6 +44,7 @@ export interface WindowManager {
   openPetWindow(): BrowserWindow
   closePetWindow(): void
   isPetWindowOpen(): boolean
+  setPetBubbleExpanded(expanded: boolean): void
 }
 
 export interface MainProcessContext {

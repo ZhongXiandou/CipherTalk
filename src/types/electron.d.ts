@@ -193,8 +193,17 @@ export interface ElectronAPI {
     getSprite: (slug: string) => Promise<{ success: boolean; dataUrl?: string; error?: string }>
     setAgentState: (state: string) => void
     toggleDesktopWindow: (enabled: boolean) => Promise<{ success: boolean }>
+    setBubble: (expanded: boolean) => void
     onAgentState: (callback: (state: string) => void) => () => void
     onWindowMove: (callback: (x: number) => void) => () => void
+    onBubbleFrame: (callback: (frame: { expanded: boolean; baseLeft: number; baseTop: number; baseWidth: number; baseHeight: number }) => void) => () => void
+    onNotify: (callback: (payload: { username: string; displayName: string; avatarUrl?: string; preview: string; timestamp: number }) => void) => () => void
+  }
+  notify: {
+    getEnabledSessions: () => Promise<string[]>
+    setSessionEnabled: (username: string, enabled: boolean) => Promise<{ success: boolean }>
+    setActiveSession: (sessionId: string | null) => void
+    activate: () => void
   }
   accounts: {
     list: () => Promise<AccountProfile[]>

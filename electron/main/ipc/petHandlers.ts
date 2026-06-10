@@ -74,6 +74,11 @@ export function registerPetHandlers(ctx: MainProcessContext): void {
     ctx.broadcastToWindows('pet:agentState', state)
   })
 
+  // 桌宠窗口请求扩窗/还原以容纳消息提醒气泡
+  ipcMain.on('pet:setBubble', (_, expanded: boolean) => {
+    ctx.getWindowManager().setPetBubbleExpanded(Boolean(expanded))
+  })
+
   ipcMain.handle('pet:toggleDesktopWindow', async (_, enabled: boolean) => {
     const manager = ctx.getWindowManager()
     if (enabled) manager.openPetWindow()

@@ -550,6 +550,12 @@ function ChatPage(_props: ChatPageProps) {
     }
   }, [currentSessionId])
 
+  // 上报当前正在查看的会话给消息提醒（"正在看的不提醒"）；离开聊天页时清空
+  useEffect(() => {
+    window.electronAPI.notify.setActiveSession(currentSessionId)
+    return () => window.electronAPI.notify.setActiveSession(null)
+  }, [currentSessionId])
+
   const syncCachedSessionMessages = useCallback(async (sessionId: string, loadSeq: number) => {
     const cachedMessages = useChatStore.getState().messages || []
     const lastMsg = cachedMessages[cachedMessages.length - 1]

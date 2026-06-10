@@ -151,6 +151,8 @@ interface ConfigSchema {
   // AI 宠物（petdex 宠物包格式，宠物包存放在 userData/pets/<slug>/）
   petCurrent: string         // 当前宠物 slug，空 = 不展示
   petDesktopEnabled: boolean  // 桌面悬浮桌宠开关
+  // 消息提醒：开启了"新消息提醒"的私聊会话用户名列表（默认全关，空数组）
+  notifySessions: string[]
   mcpEnabled: boolean
   mcpExposeMediaPaths: boolean
   mcpProxyPort: number
@@ -240,6 +242,7 @@ const defaults: ConfigSchema = {
   aiResolvedProxyUrl: '',
   petCurrent: '',
   petDesktopEnabled: false,
+  notifySessions: [],
   mcpEnabled: false,
   mcpExposeMediaPaths: true,
   mcpProxyPort: 5032,

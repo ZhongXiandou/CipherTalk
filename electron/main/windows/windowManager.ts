@@ -223,6 +223,41 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
   let welcomeWindow: BrowserWindow | null = null
   let chatHistoryWindow: BrowserWindow | null = null
   let petWindow: BrowserWindow | null = null
+  let petBaseBounds: { x: number; y: number; width: number; height: number } | null = null
+  // 桌宠基础尺寸（与 openPetWindow 一致）；显示消息气泡时临时向上/左扩窗腾出空间
+  const PET_BASE_WIDTH = 150
+  const PET_BASE_HEIGHT = 170
+  const PET_BUBBLE_WIDTH = 300
+  const PET_BUBBLE_HEIGHT = 320
+  let petBubbleExpanded = false
+  // 程序化 setBounds 会触发 'move'，用时间窗抑制，避免桌宠误判成拖动而播跑动画
+  let petSuppressMoveUntil = 0
+
+  const closePetWindowInternal = (): void => {
+    if (petWindow && !petWindow.isDestroyed()) {
+      petWindow.close()
+    }
+    petWindow = null
+    petBaseBounds = null
+    petBubbleExpanded = false
+  }
+
+  const disablePetDesktopWindow = (): void => {
+    closePetWindowInternal()
+    ctx.getConfigService()?.set('petDesktopEnabled', false)
+    ctx.broadcastToWindows('config:changed', { key: 'petDesktopEnabled', value: false })
+  }
+
+  const showPetContextMenu = (): void => {
+    if (!petWindow || petWindow.isDestroyed()) return
+    const menu = Menu.buildFromTemplate([
+      {
+        label: '退出宠物',
+        click: disablePetDesktopWindow
+      }
+    ])
+    menu.popup({ window: petWindow })
+  }
 
   const createTray = (): Tray | null => {
     const existingTray = ctx.getTray()
@@ -927,9 +962,20 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
       petWindow.once('ready-to-show', () => petWindow?.show())
       loadWindowRoute(ctx, petWindow, '/pet-window')
 
+      petWindow.on('system-context-menu', (event) => {
+        event.preventDefault()
+        showPetContextMenu()
+      })
+
+      petWindow.webContents.on('context-menu', (event) => {
+        event.preventDefault()
+        showPetContextMenu()
+      })
+
       // 拖动时把窗口横坐标转发给渲染端，宠物按移动方向播跑/跳动画
       petWindow.on('move', () => {
         if (!petWindow || petWindow.isDestroyed()) return
+        if (Date.now() < petSuppressMoveUntil) return // 程序化扩窗，非用户拖动
         petWindow.webContents.send('pet:windowMove', petWindow.getPosition()[0])
       })
 
@@ -940,14 +986,58 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
     },
 
     closePetWindow() {
-      if (petWindow && !petWindow.isDestroyed()) {
-        petWindow.close()
-      }
-      petWindow = null
+      closePetWindowInternal()
     },
 
     isPetWindowOpen() {
       return petWindow !== null && !petWindow.isDestroyed()
+    },
+
+    // 显示消息气泡时向右下角锚点扩窗腾出气泡空间，气泡消失后还原。仅尺寸变化，桌宠仍停在原处。
+    setPetBubbleExpanded(expanded: boolean) {
+      if (!petWindow || petWindow.isDestroyed()) return
+      if (expanded === petBubbleExpanded) return
+      petBubbleExpanded = expanded
+
+      const b = petWindow.getBounds()
+      const display = screen.getDisplayMatching(b)
+      const { workArea } = display
+      if (expanded) {
+        petBaseBounds = { x: b.x, y: b.y, width: PET_BASE_WIDTH, height: PET_BASE_HEIGHT }
+      }
+      const base = petBaseBounds ?? { x: b.x, y: b.y, width: PET_BASE_WIDTH, height: PET_BASE_HEIGHT }
+      const baseX = base.x
+      const baseY = base.y
+      const baseRight = baseX + PET_BASE_WIDTH
+      const baseBottom = baseY + PET_BASE_HEIGHT
+      const width = expanded ? PET_BUBBLE_WIDTH : PET_BASE_WIDTH
+      const height = expanded ? PET_BUBBLE_HEIGHT : PET_BASE_HEIGHT
+      const minX = workArea.x
+      const minY = workArea.y
+      const maxX = Math.max(minX, workArea.x + workArea.width - width)
+      const maxY = Math.max(minY, workArea.y + workArea.height - height)
+      const preferredX = expanded ? baseRight - width : baseX
+      const preferredY = expanded ? baseBottom - height : baseY
+      const x = Math.min(Math.max(preferredX, minX), maxX)
+      const y = Math.min(Math.max(preferredY, minY), maxY)
+
+      petSuppressMoveUntil = Date.now() + 400
+      petWindow.setBounds({
+        x,
+        y,
+        width,
+        height,
+      })
+      petWindow.webContents.send('pet:bubbleFrame', {
+        expanded,
+        baseLeft: baseX - x,
+        baseTop: baseY - y,
+        baseWidth: PET_BASE_WIDTH,
+        baseHeight: PET_BASE_HEIGHT,
+      })
+      if (!expanded) {
+        petBaseBounds = null
+      }
     }
   }
 

@@ -1,4 +1,4 @@
-import { Aperture, Image as ImageIcon, Info, Loader2, Mic, RefreshCw, Sparkles } from 'lucide-react'
+import { Aperture, Bell, BellOff, Image as ImageIcon, Info, Loader2, Mic, RefreshCw, Sparkles } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Drawer, Tooltip } from '@heroui/react'
 import { DateJumpPicker } from './DateJumpPicker'
@@ -126,6 +126,7 @@ export function ChatHeader({
   const [vecProgress, setVecProgress] = useState<EmbeddingBuildProgress | null>(null)
   const [vecStore, setVecStore] = useState<EmbeddingVectorStoreInfo | null>(null)
   const [isDetailOpen, setIsDetailOpen] = useState(false)
+  const [notifyEnabled, setNotifyEnabled] = useState(false)
   const [contactNickName, setContactNickName] = useState('')
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null)
   const [sessionDetailLoading, setSessionDetailLoading] = useState(false)
@@ -166,6 +167,28 @@ export function ChatHeader({
       })
 
     return () => { cancelled = true }
+  }, [currentSession.username])
+
+  // 消息提醒开关：回显当前会话是否开启，并随 config 变更同步
+  useEffect(() => {
+    let cancelled = false
+    void window.electronAPI.notify.getEnabledSessions().then((list) => {
+      if (!cancelled) setNotifyEnabled(list.includes(currentSession.username))
+    })
+    const off = window.electronAPI.config.onChanged(({ key, value }) => {
+      if (key === 'notifySessions' && Array.isArray(value)) {
+        setNotifyEnabled((value as string[]).includes(currentSession.username))
+      }
+    })
+    return () => { cancelled = true; off() }
+  }, [currentSession.username])
+
+  const handleToggleNotify = useCallback(() => {
+    setNotifyEnabled((prev) => {
+      const next = !prev
+      void window.electronAPI.notify.setSessionEnabled(currentSession.username, next)
+      return next
+    })
   }, [currentSession.username])
 
   const syncDetailDrawerBounds = useCallback(() => {
@@ -271,6 +294,11 @@ export function ChatHeader({
       ]
     : []
   const sessionDisplayName = contactNickName || currentSession.username
+  // 仅私聊可开消息提醒（排除群聊/公众号）
+  const isPrivateSession = !isGroupChat(currentSession.username)
+    && !currentSession.username.startsWith('gh_')
+    && !currentSession.isOfficialAccount
+    && !currentSession.isOfficialFolder
   const lastActivity = currentSession.lastTimestamp || currentSession.sortTimestamp
   const summary = currentSession.summary?.split('\n')[0]?.trim() || '暂无消息'
   const messageTables = sessionDetail?.messageTables ?? []
@@ -429,6 +457,23 @@ export function ChatHeader({
             </div>
           </Tooltip.Content>
         </Tooltip>
+
+        {isPrivateSession && (
+          <Tooltip delay={0}>
+            <Tooltip.Trigger>
+              <Button
+                isIconOnly
+                size="sm"
+                variant="ghost"
+                aria-label={notifyEnabled ? '关闭新消息提醒' : '开启新消息提醒'}
+                onPress={handleToggleNotify}
+              >
+                {notifyEnabled ? <Bell size={18} className="text-primary" /> : <BellOff size={18} />}
+              </Button>
+            </Tooltip.Trigger>
+            <Tooltip.Content>{notifyEnabled ? '新消息提醒已开启 · 点击关闭' : '开启新消息提醒（桌宠气泡）'}</Tooltip.Content>
+          </Tooltip>
+        )}
 
         {!isGroupChat(currentSession.username) && (
           <Tooltip delay={0}>

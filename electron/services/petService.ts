@@ -124,6 +124,7 @@ export async function installPet(slug: string): Promise<InstalledPet> {
   ])
 
   const dir = path.join(petsDir(), slug)
+  if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true })
   fs.mkdirSync(dir, { recursive: true })
   const ext = pet.spritesheetUrl.endsWith('.png') ? 'png' : 'webp'
   fs.writeFileSync(path.join(dir, 'pet.json'), petJson)
@@ -194,6 +195,7 @@ export function importPetZip(zipPath: string): InstalledPet {
   const ext = baseName(spriteEntry).toLowerCase().endsWith('.png') ? 'png' : 'webp'
 
   const dir = path.join(petsDir(), slug)
+  if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true })
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, 'pet.json'), petJson)
   fs.writeFileSync(path.join(dir, `spritesheet.${ext}`), spritesheet)

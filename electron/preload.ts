@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getSprite: (slug: string) => ipcRenderer.invoke('pet:getSprite', slug) as Promise<{ success: boolean; dataUrl?: string; error?: string }>,
     setAgentState: (state: string) => ipcRenderer.send('pet:agentState', state),
     toggleDesktopWindow: (enabled: boolean) => ipcRenderer.invoke('pet:toggleDesktopWindow', enabled) as Promise<{ success: boolean }>,
+    setBubble: (expanded: boolean) => ipcRenderer.send('pet:setBubble', expanded),
     onAgentState: (callback: (state: string) => void) => {
       const listener = (_: any, state: string) => callback(state)
       ipcRenderer.on('pet:agentState', listener)
@@ -58,7 +59,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const listener = (_: any, x: number) => callback(x)
       ipcRenderer.on('pet:windowMove', listener)
       return () => { ipcRenderer.removeListener('pet:windowMove', listener) }
+    },
+    onBubbleFrame: (callback: (frame: { expanded: boolean; baseLeft: number; baseTop: number; baseWidth: number; baseHeight: number }) => void) => {
+      const listener = (_: any, frame: any) => callback(frame)
+      ipcRenderer.on('pet:bubbleFrame', listener)
+      return () => { ipcRenderer.removeListener('pet:bubbleFrame', listener) }
+    },
+    onNotify: (callback: (payload: { username: string; displayName: string; avatarUrl?: string; preview: string; timestamp: number }) => void) => {
+      const listener = (_: any, payload: any) => callback(payload)
+      ipcRenderer.on('pet:notify', listener)
+      return () => { ipcRenderer.removeListener('pet:notify', listener) }
     }
+  },
+
+  // 消息提醒（会话级开关，默认全关）
+  notify: {
+    getEnabledSessions: () => ipcRenderer.invoke('notify:getEnabledSessions') as Promise<string[]>,
+    setSessionEnabled: (username: string, enabled: boolean) => ipcRenderer.invoke('notify:setSessionEnabled', username, enabled) as Promise<{ success: boolean }>,
+    setActiveSession: (sessionId: string | null) => ipcRenderer.send('notify:setActiveSession', sessionId),
+    activate: () => ipcRenderer.send('notify:activate'),
   },
 
   accounts: {

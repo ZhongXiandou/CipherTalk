@@ -16,6 +16,7 @@ import { registerHttpApiHandlers } from './httpApiHandlers'
 import { registerLogHandlers } from './logHandlers'
 import { registerMediaHandlers } from './mediaHandlers'
 import { registerMcpHandlers } from './mcpHandlers'
+import { registerNotifyHandlers } from './notifyHandlers'
 import { registerPetHandlers } from './petHandlers'
 import { registerSnsHandlers } from './snsHandlers'
 import { registerSkillHandlers } from './skillHandlers'
@@ -51,4 +52,5 @@ export function registerModularIpcHandlers(ctx: MainProcessContext): void {
   registerSttHandlers(ctx)
   registerAiHandlers(ctx)
   registerPetHandlers(ctx)
+  registerNotifyHandlers(ctx)
 }
