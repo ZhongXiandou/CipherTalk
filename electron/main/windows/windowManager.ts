@@ -243,6 +243,19 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
     petBubbleExpanded = false
   }
 
+  const setPetWindowMaterial = (expanded: boolean): void => {
+    if (!petWindow || petWindow.isDestroyed()) return
+    try {
+      if (process.platform === 'win32') {
+        petWindow.setBackgroundMaterial(expanded ? 'acrylic' : 'none')
+      } else if (process.platform === 'darwin') {
+        petWindow.setVibrancy(expanded ? 'hud' : null)
+      }
+    } catch {
+      // 平台材质是通知气泡的增强项，失败时保持普通透明桌宠窗口。
+    }
+  }
+
   const disablePetDesktopWindow = (): void => {
     closePetWindowInternal()
     ctx.getConfigService()?.set('petDesktopEnabled', false)
@@ -1014,6 +1027,7 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
       if (expanded) {
         petBaseBounds = { x: b.x, y: b.y, width: PET_BASE_WIDTH, height: PET_BASE_HEIGHT }
       }
+      setPetWindowMaterial(expanded)
       const base = petBaseBounds ?? { x: b.x, y: b.y, width: PET_BASE_WIDTH, height: PET_BASE_HEIGHT }
       const baseX = base.x
       const baseY = base.y

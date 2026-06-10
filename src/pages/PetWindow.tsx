@@ -48,7 +48,7 @@ function PetNotice({ notice, onClose }: { notice: NotifyPayload; onClose: () => 
 
   return (
     <div
-      className="pet-notice mb-1 flex max-w-70 cursor-pointer items-center gap-2 rounded-2xl bg-black/72 px-2.5 py-1.5 text-left shadow-lg backdrop-blur-sm"
+      className="pet-notice mb-1 flex max-w-70 cursor-pointer items-center gap-2 rounded-2xl px-2.5 py-1.5 text-left"
       style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       onClick={() => window.electronAPI.notify.activate()}
       role="button"
@@ -297,11 +297,17 @@ export default function PetWindow() {
     WebkitAppRegion: 'drag',
     background: 'transparent',
     height: bubbleFrame.baseHeight,
-    left: bubbleFrame.baseLeft,
     position: 'absolute',
-    top: bubbleFrame.baseTop,
     width: bubbleFrame.baseWidth,
   } as React.CSSProperties
+
+  if (bubbleFrame.expanded) {
+    petStageStyle.left = bubbleFrame.baseLeft
+    petStageStyle.top = bubbleFrame.baseTop
+  } else {
+    petStageStyle.right = 0
+    petStageStyle.bottom = 0
+  }
 
   const noticeLayerStyle: React.CSSProperties = {
     WebkitAppRegion: 'no-drag',
