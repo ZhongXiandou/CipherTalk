@@ -15,10 +15,56 @@ export type ChartBlockHandle = {
   getDataURL: () => string | null;
 };
 
+type ChartRecord = Record<string, unknown>;
+
 function isUsableChartOption(option: unknown): option is EChartsOption {
   if (!option || typeof option !== "object" || Array.isArray(option)) return false;
   const value = option as Record<string, unknown>;
   return Boolean(value.series || value.dataset);
+}
+
+function isRecord(value: unknown): value is ChartRecord {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function hasChartTitle(option: EChartsOption): boolean {
+  const titles = Array.isArray(option.title) ? option.title : [option.title];
+  return titles.some((title) => {
+    if (!isRecord(title)) return false;
+    return Boolean(title.text || title.subtext);
+  });
+}
+
+function hasChartSubtext(option: EChartsOption): boolean {
+  const titles = Array.isArray(option.title) ? option.title : [option.title];
+  return titles.some((title) => isRecord(title) && Boolean(title.subtext));
+}
+
+function parsePixelValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)px?$/);
+  return match ? Number(match[1]) : null;
+}
+
+function withMinimumGridTop(grid: unknown, minTop: number): ChartRecord {
+  const next = isRecord(grid) ? { ...grid } : {};
+  const currentTop = parsePixelValue(next.top);
+  if (currentTop === null || currentTop < minTop) next.top = minTop;
+  if (next.containLabel === undefined) next.containLabel = true;
+  return next;
+}
+
+function normalizeChartLayout(option: EChartsOption): EChartsOption {
+  if (!hasChartTitle(option)) return option;
+
+  const minTop = hasChartSubtext(option) ? 144 : 112;
+  return {
+    ...option,
+    grid: Array.isArray(option.grid)
+      ? option.grid.map((grid) => withMinimumGridTop(grid, minTop))
+      : withMinimumGridTop(option.grid, minTop),
+  };
 }
 
 function stripJsonComments(value: string): string {
@@ -144,7 +190,8 @@ export const ChartBlock = forwardRef<ChartBlockHandle, ChartBlockProps>(function
 ) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ECharts | null>(null);
-  const optionKey = useMemo(() => JSON.stringify(option), [option]);
+  const normalizedOption = useMemo(() => normalizeChartLayout(option), [option]);
+  const optionKey = useMemo(() => JSON.stringify(normalizedOption), [normalizedOption]);
 
   useImperativeHandle(ref, () => ({
     getDataURL: () => {
@@ -165,7 +212,7 @@ export const ChartBlock = forwardRef<ChartBlockHandle, ChartBlockProps>(function
 
     const chart = echarts.init(root, undefined, { renderer: "canvas" });
     chartRef.current = chart;
-    chart.setOption(option, true);
+    chart.setOption(normalizedOption, true);
 
     const resize = () => chart.resize();
     const frame = window.requestAnimationFrame(resize);
@@ -180,11 +227,11 @@ export const ChartBlock = forwardRef<ChartBlockHandle, ChartBlockProps>(function
       chart.dispose();
       if (chartRef.current === chart) chartRef.current = null;
     };
-  }, [optionKey, option]);
+  }, [optionKey, normalizedOption]);
 
   useEffect(() => {
-    chartRef.current?.setOption(option, true);
-  }, [option]);
+    chartRef.current?.setOption(normalizedOption, true);
+  }, [normalizedOption]);
 
   if (!isUsableChartOption(option)) {
     return (

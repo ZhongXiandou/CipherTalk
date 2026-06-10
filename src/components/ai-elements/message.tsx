@@ -877,9 +877,10 @@ async function waitForTableExportReady(node: HTMLElement): Promise<void> {
 function getTableExportOptions(node: HTMLElement) {
   const rect = node.getBoundingClientRect();
   const scroll = node.querySelector<HTMLElement>("[data-ai-table-scroll]");
-  const content = node.querySelector<HTMLElement>("[data-ai-table-content]");
-  const width = Math.ceil(Math.max(rect.width, node.scrollWidth, scroll?.scrollWidth ?? 0, content?.scrollWidth ?? 0));
-  const height = Math.ceil(Math.max(rect.height, node.scrollHeight, scroll?.scrollHeight ?? 0, content?.scrollHeight ?? 0));
+  const scrollLeft = scroll?.scrollLeft ?? 0;
+  const scrollTop = scroll?.scrollTop ?? 0;
+  const width = Math.ceil(Math.max(rect.width, node.offsetWidth, 1));
+  const height = Math.ceil(Math.max(rect.height, node.offsetHeight, 1));
   const background = window.getComputedStyle(node).backgroundColor || "#ffffff";
 
   return {
@@ -897,35 +898,28 @@ function getTableExportOptions(node: HTMLElement) {
       width: `${width}px`,
     },
     onclone: (clone: HTMLElement) => {
-      clone.style.height = `${height}px`;
-      clone.style.maxWidth = `${width}px`;
-      clone.style.minWidth = `${width}px`;
-      clone.style.overflow = "visible";
-      clone.style.width = `${width}px`;
-      clone.querySelectorAll<HTMLElement>("[data-ai-table-scroll], [data-ai-table-export]")
-        .forEach((element) => {
-          element.style.height = "auto";
-          element.style.maxHeight = "none";
-          element.style.maxWidth = `${width}px`;
-          element.style.overflow = "visible";
-          element.style.width = `${width}px`;
-        });
-      clone.querySelectorAll<HTMLElement>("[data-ai-table-content]")
-        .forEach((element) => {
-          element.style.minWidth = "max-content";
-          element.style.width = "max-content";
-        });
+      const clonedScroll = clone.querySelector<HTMLElement>("[data-ai-table-scroll]");
+      if (clonedScroll) {
+        clonedScroll.scrollLeft = scrollLeft;
+        clonedScroll.scrollTop = scrollTop;
+      }
     },
   };
 }
 
 const MessageTable = ({ children, className, node: _node, ..._props }: MessageTableProps) => {
   const { isStreaming } = useContext(MessageRenderContext);
-  const exportRef = useRef<HTMLDivElement>(null);
+  const tableExportRef = useRef<HTMLDivElement>(null);
   const [isCopied, setIsCopied] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const snapshot = useMemo(() => getTableSnapshot(children), [children]);
   const hasTableData = snapshot.headers.length > 0 || snapshot.rows.length > 0;
+  const head = getChildElements(children, "thead")[0];
+  const body = getChildElements(children, "tbody")[0];
+  const headerRow = head ? getTableRows(getElementChildren(head))[0] : undefined;
+  const headerCells = headerRow ? getTableCells(headerRow, "th") : [];
+  const bodyRows = body ? getTableRows(getElementChildren(body)) : getTableRows(children);
+  const canUseHeroTable = !isStreaming && headerCells.length > 0 && bodyRows.length > 0;
 
   const handleCopy = async () => {
     if (!hasTableData || typeof window === "undefined" || !navigator?.clipboard?.writeText) return;
@@ -935,7 +929,7 @@ const MessageTable = ({ children, className, node: _node, ..._props }: MessageTa
   };
 
   const handleDownload = async () => {
-    const node = exportRef.current;
+    const node = tableExportRef.current;
     if (!node || isExporting) return;
     setIsExporting(true);
     try {
@@ -957,7 +951,7 @@ const MessageTable = ({ children, className, node: _node, ..._props }: MessageTa
 
   return (
     <div className="my-4 min-w-0 max-w-full">
-      <div className="relative" ref={exportRef} data-ai-table-export>
+      <div className="relative" data-ai-table-export>
         <MessageFloatingToolbar
           actions={[
             {
@@ -969,24 +963,62 @@ const MessageTable = ({ children, className, node: _node, ..._props }: MessageTa
             {
               ariaLabel: "下载表格图片",
               icon: isExporting ? <Loader2Icon className="animate-spin" /> : <DownloadIcon />,
-              isDisabled: isExporting,
+              isDisabled: !canUseHeroTable || isExporting,
               onPress: () => void handleDownload(),
             },
           ]}
           aria-label="表格操作"
           excludeFromTableExport
         />
-        <HeroTable className={cn("max-w-full", className)}>
-          <HeroTable.ScrollContainer data-ai-table-scroll>
-            <HeroTable.Content
-              aria-label="AI 生成表格"
-              className="min-w-max text-sm"
-              data-ai-table-content
-            >
-              {children}
-            </HeroTable.Content>
-          </HeroTable.ScrollContainer>
-        </HeroTable>
+        {canUseHeroTable ? (
+          <div ref={tableExportRef} data-ai-table-export-target>
+            <HeroTable className={cn("max-w-full", className)}>
+              <HeroTable.ScrollContainer data-ai-table-scroll>
+                <HeroTable.Content
+                  aria-label="AI 生成表格"
+                  className="min-w-max text-sm"
+                  data-ai-table-content
+                >
+                  <HeroTable.Header>
+                    {headerCells.map((header, index) => (
+                      <HeroTable.Column
+                        className={cn("whitespace-nowrap last:pr-18", getElementClassName(header))}
+                        id={`col-${index}`}
+                        isRowHeader={index === 0}
+                        key={`col-${index}`}
+                      >
+                        {getElementChildren(header)}
+                      </HeroTable.Column>
+                    ))}
+                  </HeroTable.Header>
+                  <HeroTable.Body>
+                    {bodyRows.map((row, rowIndex) => {
+                      const cells = getTableCells(row, "td");
+                      return (
+                        <HeroTable.Row
+                          className={getElementClassName(row)}
+                          id={`row-${rowIndex}`}
+                          key={`row-${rowIndex}`}
+                        >
+                          {cells.map((cell, cellIndex) => (
+                            <HeroTable.Cell
+                              className={cn("align-top wrap-break-word", getElementClassName(cell))}
+                              key={`cell-${rowIndex}-${cellIndex}`}
+                            >
+                              {getElementChildren(cell)}
+                            </HeroTable.Cell>
+                          ))}
+                        </HeroTable.Row>
+                      );
+                    })}
+                  </HeroTable.Body>
+                </HeroTable.Content>
+              </HeroTable.ScrollContainer>
+            </HeroTable>
+          </div>
+        ) : isStreaming ? (
+          <StreamingTablePlaceholder />
+        ) : null}
       </div>
       {isStreaming && (
         <div className="mt-2 flex items-center gap-2 rounded-(--agent-radius,12px) border border-border bg-muted/30 px-3 py-2 text-muted-foreground text-xs">
@@ -1002,57 +1034,13 @@ type MessageTableHeadProps = ComponentProps<"thead"> & {
   node?: unknown;
 };
 
-const MessageTableHead = ({ children, node: _node, ..._props }: MessageTableHeadProps) => {
-  const headerRow = getTableRows(children)[0];
-  const headers = getTableCells(headerRow, "th");
-
-  return (
-    <HeroTable.Header>
-      {(headers.length > 0 ? headers : Children.toArray(children)).map((header, index) => (
-        <HeroTable.Column
-          className={cn("whitespace-nowrap last:pr-18", getElementClassName(header))}
-          id={`col-${index}`}
-          isRowHeader={index === 0}
-          key={`col-${index}`}
-        >
-          {getElementChildren(header) || header}
-        </HeroTable.Column>
-      ))}
-    </HeroTable.Header>
-  );
-};
+const MessageTableHead = ({ children: _children, node: _node, ..._props }: MessageTableHeadProps) => null;
 
 type MessageTableBodyProps = ComponentProps<"tbody"> & {
   node?: unknown;
 };
 
-const MessageTableBody = ({ children, node: _node, ..._props }: MessageTableBodyProps) => {
-  const rows = getTableRows(children);
-
-  return (
-    <HeroTable.Body>
-      {rows.map((row, rowIndex) => {
-        const cells = getTableCells(row, "td");
-        return (
-          <HeroTable.Row
-            className={getElementClassName(row)}
-            id={`row-${rowIndex}`}
-            key={`row-${rowIndex}`}
-          >
-            {cells.map((cell, cellIndex) => (
-              <HeroTable.Cell
-                className={cn("align-top wrap-break-word", getElementClassName(cell))}
-                key={`cell-${rowIndex}-${cellIndex}`}
-              >
-                {getElementChildren(cell)}
-              </HeroTable.Cell>
-            ))}
-          </HeroTable.Row>
-        );
-      })}
-    </HeroTable.Body>
-  );
-};
+const MessageTableBody = ({ children: _children, node: _node, ..._props }: MessageTableBodyProps) => null;
 
 function StreamingTablePlaceholder() {
   return (
