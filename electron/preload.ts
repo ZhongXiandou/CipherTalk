@@ -167,6 +167,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('persona:build', payload) as Promise<{ success: boolean; persona?: unknown; error?: string }>,
     delete: (sessionId: string) =>
       ipcRenderer.invoke('persona:delete', sessionId) as Promise<{ success: boolean; error?: string }>,
+    refreshIfStale: (sessionId: string) =>
+      ipcRenderer.invoke('persona:refreshIfStale', { sessionId }) as Promise<{ success: boolean; refreshed?: boolean; persona?: unknown | null; error?: string }>,
+    reflect: (payload: { sessionId: string; conversationId: number }) =>
+      ipcRenderer.invoke('persona:reflect', payload) as Promise<{ success: boolean; reflected?: boolean; error?: string }>,
     onBuildProgress: (callback: (progress: unknown) => void): (() => void) => {
       const listener = (_e: unknown, progress: unknown) => callback(progress)
       ipcRenderer.on('persona:buildProgress', listener)

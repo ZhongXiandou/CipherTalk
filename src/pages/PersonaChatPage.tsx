@@ -8,9 +8,10 @@ import { AlertCircle, Bot, Loader2, MessageSquareX, RefreshCw, Send, Square, Tra
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useChat } from '@ai-sdk/react'
-import { Button, ProgressBar, Label, Tooltip } from '@heroui/react'
+import { AlertDialog, Button, ProgressBar, Label, Tooltip } from '@heroui/react'
 import type { UIMessage } from 'ai'
 import { PersonaChatTransport } from '../features/aiagent/transport/personaChatTransport'
+import { parseWechatEmoji } from '../utils/wechatEmoji'
 import type { PersonaBuildProgressInfo, PersonaRecordInfo } from '../types/electron'
 
 type Phase = 'loading' | 'confirm' | 'building' | 'chat'
@@ -68,13 +69,63 @@ export default function PersonaChatPage() {
   const [conversationId, setConversationId] = useState<number | null>(null)
   const [input, setInput] = useState('')
   const [clearingConversations, setClearingConversations] = useState(false)
+  /** 删除确认弹窗：删除分身画像 / 删除对话记录 */
+  const [confirmAction, setConfirmAction] = useState<'deletePersona' | 'clearConversations' | null>(null)
+  /** 待发缓冲：真人不会秒回——发出的消息先挂着，停顿几秒没有新消息了才一起交给 AI 回一轮 */
+  const [pendingTexts, setPendingTexts] = useState<string[]>([])
+  const pendingRef = useRef<string[]>([])
+  const inputValueRef = useRef('')
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const lastSavedCountRef = useRef(0)
 
   const transport = useMemo(() => new PersonaChatTransport(() => sessionId), [sessionId])
   const { messages, sendMessage, setMessages, status, stop, error } = useChat({ transport, experimental_throttle: 50 })
   const busy = status === 'submitted' || status === 'streaming'
+  // AI 已经开始逐条吐气泡后就不再显示"正在输入"指示器，否则像凭空多了一条带头像的消息
+  const lastMessage = messages[messages.length - 1]
+  const showTypingIndicator = busy && !(lastMessage?.role === 'assistant' && messageText(lastMessage).trim().length > 0)
   const headerTitle = busy ? '对方正在输入…' : (displayName || sessionId)
+
+  // 待发缓冲计时：发完一条等 2-4 秒，期间继续发会重新计时；输入框里还有字也再等等
+  const PENDING_FLUSH_MIN_MS = 2000
+  const PENDING_FLUSH_MAX_MS = 4000
+  const PENDING_TYPING_POSTPONE_MS = 2000
+
+  const flushPending = () => {
+    const texts = pendingRef.current
+    if (texts.length === 0) return
+    pendingRef.current = []
+    setPendingTexts([])
+    // 多条连发合成一条多行消息：渲染端按行拆气泡，和逐条发出的观感一致
+    void sendMessage({ text: texts.join('\n') })
+  }
+
+  const armFlushTimer = (delayMs?: number) => {
+    if (flushTimerRef.current) clearTimeout(flushTimerRef.current)
+    flushTimerRef.current = setTimeout(() => {
+      flushTimerRef.current = null
+      if (inputValueRef.current.trim()) {
+        armFlushTimer(PENDING_TYPING_POSTPONE_MS)
+        return
+      }
+      flushPending()
+    }, delayMs ?? PENDING_FLUSH_MIN_MS + Math.random() * (PENDING_FLUSH_MAX_MS - PENDING_FLUSH_MIN_MS))
+  }
+
+  const clearPending = () => {
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current)
+      flushTimerRef.current = null
+    }
+    pendingRef.current = []
+    setPendingTexts([])
+  }
+
+  // 卸载时清掉待发计时器
+  useEffect(() => () => {
+    if (flushTimerRef.current) clearTimeout(flushTimerRef.current)
+  }, [])
 
   // 窗口标题同步（任务栏/系统标题栏）
   useEffect(() => {
@@ -114,6 +165,10 @@ export default function PersonaChatPage() {
       if (res.success && res.persona) {
         setPersona(res.persona)
         setPhase('chat')
+        // 后台自动进化：和 TA 的真实聊天新增够多时增量重蒸馏画像（静默，失败不影响聊天）
+        void window.electronAPI.persona.refreshIfStale(sessionId).then((evolved) => {
+          if (!cancelled && evolved.success && evolved.refreshed && evolved.persona) setPersona(evolved.persona)
+        }).catch(() => { /* 静默 */ })
         try {
           const last = await window.electronAPI.agent.getLastConversation({ kind: 'persona', sessionId })
           const meta = last.success && last.conversation ? (last.conversation as { id: number }) : null
@@ -146,15 +201,17 @@ export default function PersonaChatPage() {
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [messages, busy, phase])
+  }, [messages, pendingTexts, busy, phase])
 
-  // 每轮结束保存对话
+  // 每轮结束保存对话；保存后触发对话反思（主进程攒够未反思消息才真正跑，提炼导演笔记）
   useEffect(() => {
     if (status !== 'ready' || !conversationId || messages.length === 0) return
     if (messages.length === lastSavedCountRef.current) return
     lastSavedCountRef.current = messages.length
     void window.electronAPI.agent.saveConversationMessages({ id: conversationId, messages })
-  }, [status, conversationId, messages])
+      .then(() => window.electronAPI.persona.reflect({ sessionId, conversationId }))
+      .catch(() => { /* 反思失败不影响聊天 */ })
+  }, [status, conversationId, messages, sessionId])
 
   const handleBuild = async () => {
     setPhase('building')
@@ -172,6 +229,7 @@ export default function PersonaChatPage() {
 
   const handleDelete = async () => {
     if (busy) stop()
+    clearPending()
     await window.electronAPI.persona.delete(sessionId)
     setPersona(null)
     setMessages([])
@@ -182,9 +240,7 @@ export default function PersonaChatPage() {
 
   const handleClearConversations = async () => {
     if (busy || clearingConversations) return
-    const confirmed = window.confirm(`删除和「${displayName || sessionId}」分身的所有对话记录？画像会保留。`)
-    if (!confirmed) return
-
+    clearPending()
     setClearingConversations(true)
     try {
       const scope = { kind: 'persona', sessionId }
@@ -227,6 +283,7 @@ export default function PersonaChatPage() {
     const text = input.trim()
     if (!text || busy) return
     setInput('')
+    inputValueRef.current = ''
     if (!conversationId) {
       try {
         const created = await window.electronAPI.agent.createConversation({
@@ -238,7 +295,10 @@ export default function PersonaChatPage() {
         }
       } catch { /* 创建失败不阻塞发送，本轮不持久化 */ }
     }
-    void sendMessage({ text })
+    // 不直接触发 AI：先进待发缓冲，停顿几秒后这一串一起交给对方回
+    pendingRef.current = [...pendingRef.current, text]
+    setPendingTexts(pendingRef.current)
+    armFlushTimer()
   }
 
   if (!sessionId) {
@@ -288,14 +348,24 @@ export default function PersonaChatPage() {
   if (phase === 'building') {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8">
-        <PersonaAvatar name={displayName} avatarUrl={avatarUrl} size={64} />
+        {/* 呼吸光环：AI 单次调用期间百分比不动，靠动画表明没卡死 */}
+        <div className="relative flex size-20 items-center justify-center">
+          <span className="absolute inset-0 animate-ping rounded-full bg-accent/20 [animation-duration:2.4s]" />
+          <span className="absolute inset-1 animate-pulse rounded-full bg-accent/15" />
+          <PersonaAvatar name={displayName} avatarUrl={avatarUrl} size={64} />
+        </div>
         <h2 className="text-base font-semibold text-foreground">正在克隆「{displayName}」</h2>
         <ProgressBar aria-label="克隆进度" className="w-full" value={buildProgress?.percent ?? 0} maxValue={100}>
           <Label>{buildProgress?.title || '准备中…'}</Label>
           <ProgressBar.Output />
           <ProgressBar.Track><ProgressBar.Fill /></ProgressBar.Track>
         </ProgressBar>
-        <p className="text-center text-xs text-muted">分析聊天记录并调用 AI 提炼画像，通常需要几十秒</p>
+        <div className="flex items-center gap-2 text-xs text-muted">
+          <Loader2 size={14} className="shrink-0 animate-spin" />
+          <span className="text-center">
+            {buildProgress?.detail || '分析聊天记录并调用 AI 提炼画像与真实问答，通常需要几分钟'}
+          </span>
+        </div>
       </div>
     )
   }
@@ -328,7 +398,7 @@ export default function PersonaChatPage() {
               aria-label="删除对话记录"
               isDisabled={busy || clearingConversations}
               isPending={clearingConversations}
-              onPress={handleClearConversations}
+              onPress={() => setConfirmAction('clearConversations')}
             >
               <MessageSquareX size={16} />
             </Button>
@@ -337,7 +407,7 @@ export default function PersonaChatPage() {
         </Tooltip>
         <Tooltip delay={0}>
           <Tooltip.Trigger>
-            <Button isIconOnly size="sm" variant="ghost" aria-label="删除分身" onPress={handleDelete}>
+            <Button isIconOnly size="sm" variant="ghost" aria-label="删除分身" onPress={() => setConfirmAction('deletePersona')}>
               <Trash2 size={16} />
             </Button>
           </Tooltip.Trigger>
@@ -347,7 +417,7 @@ export default function PersonaChatPage() {
 
       {/* 消息区 */}
       <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-3">
-        {messages.length === 0 && (
+        {messages.length === 0 && pendingTexts.length === 0 && !busy && (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted">
             <Bot size={32} />
             <p className="text-sm">和「{displayName}」的分身打个招呼吧</p>
@@ -370,7 +440,7 @@ export default function PersonaChatPage() {
                         : 'rounded-tl-sm bg-surface text-foreground'
                     }`}
                   >
-                    {bubble}
+                    {parseWechatEmoji(bubble)}
                   </div>
                 ))}
               </div>
@@ -378,8 +448,25 @@ export default function PersonaChatPage() {
             </div>
           )
         })}
-        {busy && (
-          <div className="flex items-center gap-1 pl-10">
+        {/* 待发缓冲气泡：已显示但还没交给 AI（等用户把话说完） */}
+        {pendingTexts.length > 0 && (
+          <div className="flex w-full justify-end gap-2">
+            <div className="flex max-w-[78%] flex-col items-end gap-1">
+              {pendingTexts.map((bubble, index) => (
+                <div
+                  key={`pending:${index}`}
+                  className="whitespace-pre-wrap wrap-break-word rounded-2xl rounded-tr-sm bg-success-soft px-3 py-2 text-sm text-success-soft-foreground"
+                >
+                  {parseWechatEmoji(bubble)}
+                </div>
+              ))}
+            </div>
+            <PersonaAvatar name="我" avatarUrl={myAvatarUrl} size={30} />
+          </div>
+        )}
+        {showTypingIndicator && (
+          <div className="flex w-full items-start justify-start gap-2">
+            <PersonaAvatar name={displayName} avatarUrl={avatarUrl} size={30} />
             <span className="inline-flex gap-1 rounded-2xl rounded-tl-sm bg-surface px-3 py-2.5">
               <span className="size-1.5 animate-bounce rounded-full bg-muted [animation-delay:0ms]" />
               <span className="size-1.5 animate-bounce rounded-full bg-muted [animation-delay:150ms]" />
@@ -402,7 +489,10 @@ export default function PersonaChatPage() {
           className="h-10 flex-1 rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-[3px] focus:ring-ring/30"
           placeholder={`给「${displayName}」发消息…`}
           value={input}
-          onChange={(event) => setInput(event.target.value)}
+          onChange={(event) => {
+            setInput(event.target.value)
+            inputValueRef.current = event.target.value
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
               event.preventDefault()
@@ -420,6 +510,56 @@ export default function PersonaChatPage() {
           </Button>
         )}
       </div>
+
+      {/* 删除分身画像确认 */}
+      <AlertDialog.Backdrop
+        isOpen={confirmAction === 'deletePersona'}
+        onOpenChange={(open) => { if (!open) setConfirmAction(null) }}
+      >
+        <AlertDialog.Container>
+          <AlertDialog.Dialog className="sm:max-w-[400px]">
+            <AlertDialog.CloseTrigger />
+            <AlertDialog.Header>
+              <AlertDialog.Icon status="danger" />
+              <AlertDialog.Heading>删除「{displayName || sessionId}」的分身？</AlertDialog.Heading>
+            </AlertDialog.Header>
+            <AlertDialog.Body>
+              <p className="text-sm text-muted">
+                画像、真实问答索引和导演笔记都会删除，需要时可重新克隆。对话记录会保留。
+              </p>
+            </AlertDialog.Body>
+            <AlertDialog.Footer>
+              <Button slot="close" variant="tertiary">取消</Button>
+              <Button slot="close" variant="danger" onPress={() => void handleDelete()}>删除分身</Button>
+            </AlertDialog.Footer>
+          </AlertDialog.Dialog>
+        </AlertDialog.Container>
+      </AlertDialog.Backdrop>
+
+      {/* 删除对话记录确认 */}
+      <AlertDialog.Backdrop
+        isOpen={confirmAction === 'clearConversations'}
+        onOpenChange={(open) => { if (!open) setConfirmAction(null) }}
+      >
+        <AlertDialog.Container>
+          <AlertDialog.Dialog className="sm:max-w-[400px]">
+            <AlertDialog.CloseTrigger />
+            <AlertDialog.Header>
+              <AlertDialog.Icon status="danger" />
+              <AlertDialog.Heading>删除所有对话记录？</AlertDialog.Heading>
+            </AlertDialog.Header>
+            <AlertDialog.Body>
+              <p className="text-sm text-muted">
+                和「{displayName || sessionId}」分身的全部对话记录将被删除，画像会保留。此操作不可撤销。
+              </p>
+            </AlertDialog.Body>
+            <AlertDialog.Footer>
+              <Button slot="close" variant="tertiary">取消</Button>
+              <Button slot="close" variant="danger" onPress={() => void handleClearConversations()}>删除记录</Button>
+            </AlertDialog.Footer>
+          </AlertDialog.Dialog>
+        </AlertDialog.Container>
+      </AlertDialog.Backdrop>
     </div>
   )
 }

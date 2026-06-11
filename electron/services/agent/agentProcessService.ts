@@ -94,6 +94,26 @@ export class AgentProcessService {
     return this.call('extractPersona', input)
   }
 
+  /** 深层画像 map 阶段：单块历史 → 部分画像。 */
+  async extractProfileChunk(input: import('./persona/personaTypes').PersonaProfileChunkInput): Promise<import('./persona/personaTypes').PersonaProfile> {
+    return this.call('extractProfileChunk', input)
+  }
+
+  /** 深层画像 reduce 阶段：多块部分画像 → 合并画像。 */
+  async mergeProfile(input: import('./persona/personaTypes').PersonaProfileMergeInput): Promise<import('./persona/personaTypes').PersonaProfile> {
+    return this.call('mergeProfile', input)
+  }
+
+  /** 增量进化：旧画像 + 新增聊天 → 修订后的画像。 */
+  async revisePersona(input: import('./persona/personaTypes').PersonaReviseInput): Promise<import('./persona/personaTypes').PersonaReviseResult> {
+    return this.call('revisePersona', input)
+  }
+
+  /** 克隆对话反思：提炼导演笔记 + 对话摘要。 */
+  async reflectPersona(input: import('./persona/personaTypes').PersonaReflectInput): Promise<import('./persona/personaTypes').PersonaReflectResult> {
+    return this.call('reflectPersona', input)
+  }
+
   /** 克隆好友聊天：预检索 + 单次 generateText，完整生成后经 onChunk 按气泡回调（复用 run 的 chunk 通道）。 */
   async personaChat(
     input: import('./persona/personaTypes').PersonaChatInput,

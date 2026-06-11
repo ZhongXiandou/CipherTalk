@@ -6,7 +6,7 @@ import Database from 'better-sqlite3'
 import { existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { ConfigService } from '../../config'
-import type { PersonaCard, PersonaFewShot, PersonaRecord, PersonaStats } from './personaTypes'
+import type { PersonaCard, PersonaFewShot, PersonaProfile, PersonaRecord, PersonaStats } from './personaTypes'
 
 const DB_NAME = 'agent_personas.db'
 
@@ -18,6 +18,8 @@ interface PersonaRow {
   card_json: string
   few_shots_json: string
   stats_json: string
+  profile_json: string | null
+  corpus_until: number
   model_provider: string
   model_id: string
   created_at: number
@@ -30,8 +32,25 @@ export interface PersonaUpsertInput {
   card: PersonaCard
   fewShots: PersonaFewShot[]
   stats: PersonaStats
+  profile?: PersonaProfile | null
+  /** 已蒸馏到的消息时间水位（createTime 秒） */
+  corpusUntil?: number
   modelProvider: string
   modelId: string
+}
+
+/** 增量进化用的局部更新（只改给到的字段，updated_at 总会刷新）。 */
+export interface PersonaPatchInput {
+  card?: PersonaCard
+  fewShots?: PersonaFewShot[]
+  stats?: PersonaStats
+  profile?: PersonaProfile | null
+  corpusUntil?: number
+}
+
+function safeParse<T>(json: string | null): T | null {
+  if (!json) return null
+  try { return JSON.parse(json) as T } catch { return null }
 }
 
 function rowToRecord(row: PersonaRow): PersonaRecord {
@@ -43,6 +62,8 @@ function rowToRecord(row: PersonaRow): PersonaRecord {
     card: JSON.parse(row.card_json) as PersonaCard,
     fewShots: JSON.parse(row.few_shots_json) as PersonaFewShot[],
     stats: JSON.parse(row.stats_json) as PersonaStats,
+    profile: safeParse<PersonaProfile>(row.profile_json),
+    corpusUntil: Number(row.corpus_until || 0),
     modelProvider: row.model_provider,
     modelId: row.model_id,
     createdAt: row.created_at,
@@ -105,6 +126,13 @@ export class PersonaStore {
         UNIQUE(account_id, session_id)
       )
     `)
+    // 旧库迁移：深层画像 + 蒸馏水位（ADD COLUMN 已存在时报错，忽略即可）
+    for (const ddl of [
+      'ALTER TABLE personas ADD COLUMN profile_json TEXT',
+      'ALTER TABLE personas ADD COLUMN corpus_until INTEGER NOT NULL DEFAULT 0',
+    ]) {
+      try { db.exec(ddl) } catch { /* 列已存在 */ }
+    }
     this.db = db
     this.dbPath = nextDbPath
     return db
@@ -128,13 +156,15 @@ export class PersonaStore {
     const now = Date.now()
     this.getDb()
       .prepare(`
-        INSERT INTO personas (account_id, session_id, display_name, card_json, few_shots_json, stats_json, model_provider, model_id, created_at, updated_at)
-        VALUES (@accountId, @sessionId, @displayName, @cardJson, @fewShotsJson, @statsJson, @modelProvider, @modelId, @now, @now)
+        INSERT INTO personas (account_id, session_id, display_name, card_json, few_shots_json, stats_json, profile_json, corpus_until, model_provider, model_id, created_at, updated_at)
+        VALUES (@accountId, @sessionId, @displayName, @cardJson, @fewShotsJson, @statsJson, @profileJson, @corpusUntil, @modelProvider, @modelId, @now, @now)
         ON CONFLICT(account_id, session_id) DO UPDATE SET
           display_name = excluded.display_name,
           card_json = excluded.card_json,
           few_shots_json = excluded.few_shots_json,
           stats_json = excluded.stats_json,
+          profile_json = excluded.profile_json,
+          corpus_until = excluded.corpus_until,
           model_provider = excluded.model_provider,
           model_id = excluded.model_id,
           updated_at = excluded.updated_at
@@ -146,6 +176,8 @@ export class PersonaStore {
         cardJson: JSON.stringify(input.card),
         fewShotsJson: JSON.stringify(input.fewShots),
         statsJson: JSON.stringify(input.stats),
+        profileJson: input.profile ? JSON.stringify(input.profile) : null,
+        corpusUntil: input.corpusUntil || 0,
         modelProvider: input.modelProvider,
         modelId: input.modelId,
         now,
@@ -153,6 +185,35 @@ export class PersonaStore {
     const record = this.get(input.sessionId)
     if (!record) throw new Error('画像写入后读取失败')
     return record
+  }
+
+  /** 增量进化：只更新给到的字段。画像不存在时返回 null。 */
+  patch(sessionId: string, input: PersonaPatchInput): PersonaRecord | null {
+    const current = this.get(sessionId)
+    if (!current) return null
+    const nextProfile = input.profile !== undefined ? input.profile : current.profile
+    this.getDb()
+      .prepare(`
+        UPDATE personas SET
+          card_json = @cardJson,
+          few_shots_json = @fewShotsJson,
+          stats_json = @statsJson,
+          profile_json = @profileJson,
+          corpus_until = @corpusUntil,
+          updated_at = @now
+        WHERE account_id = @accountId AND session_id = @sessionId
+      `)
+      .run({
+        accountId: this.getAccountId(),
+        sessionId,
+        cardJson: JSON.stringify(input.card ?? current.card),
+        fewShotsJson: JSON.stringify(input.fewShots ?? current.fewShots),
+        statsJson: JSON.stringify(input.stats ?? current.stats),
+        profileJson: nextProfile ? JSON.stringify(nextProfile) : null,
+        corpusUntil: input.corpusUntil ?? current.corpusUntil,
+        now: Date.now(),
+      })
+    return this.get(sessionId)
   }
 
   remove(sessionId: string): boolean {

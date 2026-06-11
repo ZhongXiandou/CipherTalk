@@ -43,7 +43,7 @@ function extractJson(text: string): unknown {
 }
 
 /** generateText + 宽松解析 + zod 校验；解析失败重试一次，再失败抛带原始输出片段的错误。 */
-async function generateValidated<T>(
+export async function generateValidated<T>(
   opts: { model: ReturnType<typeof createLanguageModel>; system: string; prompt: string; temperature: number; signal?: AbortSignal },
   schema: z.ZodType<T>,
   label: string,

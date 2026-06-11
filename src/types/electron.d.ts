@@ -158,6 +158,14 @@ export interface PersonaCardInfo {
   topics: string[]
 }
 
+export interface PersonaProfileInfo {
+  facts: string[]
+  relationship: string
+  reactionPatterns: string[]
+  boundaries: string[]
+  sharedEvents: string[]
+}
+
 export interface PersonaRecordInfo {
   id: number
   accountId: string
@@ -171,6 +179,8 @@ export interface PersonaRecordInfo {
     avgFriendMsgChars: number
     avgFriendBurst: number
   }
+  profile: PersonaProfileInfo | null
+  corpusUntil: number
   modelProvider: string
   modelId: string
   createdAt: number
@@ -1089,6 +1099,8 @@ export interface ElectronAPI {
     list: () => Promise<{ success: boolean; personas?: PersonaRecordInfo[]; error?: string }>
     build: (payload: { sessionId: string; displayName?: string }) => Promise<{ success: boolean; persona?: PersonaRecordInfo; error?: string }>
     delete: (sessionId: string) => Promise<{ success: boolean; error?: string }>
+    refreshIfStale: (sessionId: string) => Promise<{ success: boolean; refreshed?: boolean; persona?: PersonaRecordInfo | null; error?: string }>
+    reflect: (payload: { sessionId: string; conversationId: number }) => Promise<{ success: boolean; reflected?: boolean; error?: string }>
     onBuildProgress: (callback: (progress: PersonaBuildProgressInfo) => void) => () => void
     chat: (runId: string, sessionId: string, messages: unknown[]) => Promise<{ success: boolean; error?: string }>
     abort: (runId: string) => Promise<{ success: boolean }>

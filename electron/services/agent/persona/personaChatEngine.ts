@@ -9,20 +9,50 @@ import { createLanguageModel } from '../provider'
 import { reportAgentProgress, withAgentProgress } from '../progress'
 import { searchChat } from '../tools/shared'
 import type { AgentProgressReporter } from '../types'
-import type { PersonaChatInput, PersonaChatPersona } from './personaTypes'
+import type { PersonaChatInput, PersonaChatPersona, PersonaFewShot } from './personaTypes'
 
 const MEMORY_TOP_K = 5
+const PAIR_TOP_K = 6
 // 扮演真人要比工具 Agent 更"活"，温度调高
 const PERSONA_TEMPERATURE = 0.8
 const BURST_JOINER = '／'
-const HUMAN_TYPING_MS_PER_CHAR = 130
-const HUMAN_TYPING_MIN_DELAY_MS = 550
-const HUMAN_TYPING_MAX_DELAY_MS = 4200
-const HUMAN_BUBBLE_PAUSE_MIN_MS = 350
-const HUMAN_BUBBLE_PAUSE_MAX_MS = 1200
+const HUMAN_TYPING_MS_PER_CHAR = 260
+const HUMAN_TYPING_MIN_DELAY_MS = 1000
+const HUMAN_TYPING_MAX_DELAY_MS = 7500
+const HUMAN_BUBBLE_PAUSE_MIN_MS = 700
+const HUMAN_BUBBLE_PAUSE_MAX_MS = 2200
 
 function splitReplyBubbles(text: string): string[] {
   return text.split(/[\n／]/).map((line) => line.trim()).filter(Boolean)
+}
+
+// 兜底拆条：不分条的回复超过 max(此值, 平均字数×2.5) 才动它
+const FALLBACK_SPLIT_MIN_CHARS = 50
+const FALLBACK_MAX_BUBBLES = 5
+
+/** 模型偶尔无视分条规则直接发大段：按句子边界兜底拆成微信式短消息（已分条/不算长的原样返回）。 */
+function fallbackSplitLongReply(text: string, avgChars: number): string {
+  const trimmed = text.trim()
+  if (splitReplyBubbles(trimmed).length > 1) return text
+  if (trimmed.length <= Math.max(FALLBACK_SPLIT_MIN_CHARS, avgChars * 2.5)) return text
+
+  const sentences = trimmed.split(/(?<=[。！？!?…])/).map((s) => s.trim()).filter(Boolean)
+  if (sentences.length <= 1) return text
+
+  // 单条目标长度：贴近真人平均字数，同时保证不会拆出超过上限的条数
+  const target = Math.max(20, Math.round(avgChars * 1.8), Math.ceil(trimmed.length / FALLBACK_MAX_BUBBLES))
+  const bubbles: string[] = []
+  let current = ''
+  for (const sentence of sentences) {
+    if (current && current.length + sentence.length > target) {
+      bubbles.push(current)
+      current = sentence
+    } else {
+      current += sentence
+    }
+  }
+  if (current) bubbles.push(current)
+  return bubbles.join('\n')
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -142,8 +172,23 @@ async function retrieveMemories(sessionId: string, query: string): Promise<strin
   }
 }
 
-export function buildPersonaSystemPrompt(persona: PersonaChatPersona, memories: string[]): string {
-  const { displayName, card, fewShots, stats } = persona
+/** 检索式 few-shot：按当前输入找 TA 过去遇到类似话时的真实回复（失败静默）。 */
+async function retrieveSimilarPairs(sessionId: string, query: string): Promise<PersonaFewShot[]> {
+  try {
+    const { personaPairStore } = await import('./personaPairStore')
+    const hits = await personaPairStore.search(sessionId, query, PAIR_TOP_K)
+    return hits.map((h) => ({ user: h.user, replies: h.replies }))
+  } catch {
+    return []
+  }
+}
+
+export function buildPersonaSystemPrompt(
+  persona: PersonaChatPersona,
+  memories: string[],
+  similarPairs: PersonaFewShot[] = [],
+): string {
+  const { displayName, card, fewShots, stats, profile, notes } = persona
   const lines: string[] = [
     `你是「${displayName}」，正在微信上和老朋友聊天。你不是 AI 助手，你就是${displayName}本人，任何情况下都不要承认或暗示自己是 AI、模型或程序。`,
     '',
@@ -151,16 +196,43 @@ export function buildPersonaSystemPrompt(persona: PersonaChatPersona, memories: 
     `语气风格：${card.tone}`,
     `性格：${card.personalityTraits.join('、')}`,
   ]
-  if (card.catchphrases.length > 0) lines.push(`口头禅：${card.catchphrases.join('、')}（自然使用，别刻意堆砌）`)
+  if (card.catchphrases.length > 0) lines.push(`口头禅：${card.catchphrases.join('、')}（真人只是偶尔冒一句：大多数消息不带，绝不要每条都带）`)
   lines.push(`标点习惯：${card.punctuationStyle}`)
   if (card.addressing && card.addressing !== '无特别称呼') lines.push(`你对对方的称呼：${card.addressing}`)
   if (card.topics.length > 0) lines.push(`你们常聊：${card.topics.join('、')}`)
+
+  if (profile) {
+    if (profile.facts.length > 0) {
+      lines.push('', '【你的生活背景】（这些就是你自己的事，自然地知道，别像背资料）', ...profile.facts.map((f) => `- ${f}`))
+    }
+    if (profile.relationship) lines.push('', `【你们的关系】${profile.relationship}`)
+    if (profile.reactionPatterns.length > 0) {
+      lines.push('', '【你在不同情境下的典型反应】', ...profile.reactionPatterns.map((r) => `- ${r}`))
+    }
+    if (profile.boundaries.length > 0) {
+      lines.push('', '【你的立场与边界】（不熟的领域别装懂，回避的话题照样回避）', ...profile.boundaries.map((b) => `- ${b}`))
+    }
+    if (profile.sharedEvents.length > 0) {
+      lines.push('', '【你们的共同经历】', ...profile.sharedEvents.map((e) => `- ${e}`))
+    }
+  }
 
   if (fewShots.length > 0) {
     lines.push(
       '',
       `【你过去真实的回复方式】（「${BURST_JOINER}」分隔的是连发的多条消息）`,
       ...fewShots.map((s) => `对方: ${s.user}\n你: ${s.replies.join(BURST_JOINER)}`),
+    )
+  }
+
+  // 检索式 few-shot：和静态样本去重后注入，权重最高（这是 TA 面对类似话题的真实反应）
+  const knownUsers = new Set(fewShots.map((s) => s.user))
+  const freshPairs = similarPairs.filter((p) => !knownUsers.has(p.user))
+  if (freshPairs.length > 0) {
+    lines.push(
+      '',
+      '【你过去遇到类似话题时的真实回复】（最值得参考的范例：当时就是这么回的，语气、长度、分条都照这个感觉来）',
+      ...freshPairs.map((s) => `对方: ${s.user}\n你: ${s.replies.join(BURST_JOINER)}`),
     )
   }
 
@@ -172,11 +244,28 @@ export function buildPersonaSystemPrompt(persona: PersonaChatPersona, memories: 
     )
   }
 
+  if (notes?.episodes?.length) {
+    lines.push(
+      '',
+      '【你们最近在这里聊过】（之前的对话，记得就好，别主动复述）',
+      ...notes.episodes.map((e) => `- ${e}`),
+    )
+  }
+
+  if (notes?.corrections?.length) {
+    lines.push(
+      '',
+      '【扮演纠正】（对方之前明确指出过的问题，必须遵守）',
+      ...notes.corrections.map((c) => `- ${c}`),
+    )
+  }
+
   lines.push(
     '',
     '【聊天规则】',
-    `- 微信短消息风格：参考过去单条平均 ${Math.max(stats.avgFriendMsgChars, 4)} 字左右的习惯，别写长段落`,
-    `- 回复几条由你根据上下文自然决定；要连发多条时，每条消息之间用换行或「${BURST_JOINER}」分隔（会被拆成多条气泡发出）`,
+    `- 微信短消息风格：单条 ${Math.max(stats.avgFriendMsgChars, 4)} 字左右；超过两句话必须拆成多条连发，每条之间用换行或「${BURST_JOINER}」分隔（会被拆成多条气泡发出），绝不要一条发一大段`,
+    '- 回复几条由你根据上下文定：简单的话就一条，有内容的拆成 2-4 条，像真人打字那样一句一句发',
+    '- 上面的背景、经历、聊天片段都是你脑子里的记忆：只在话题相关时自然带一嘴，别一股脑往外倒',
     '- 禁止 markdown、列表、序号、emoji 之外的格式符号',
     '- 不知道、记不清的事就像真人一样含糊带过或反问，绝不编造具体细节',
     '- 始终保持口语化，符合上面的语气和标点习惯',
@@ -193,18 +282,24 @@ export async function runPersonaChat(
   await withAgentProgress(onProgress, async () => {
     const userText = lastUserText(input.messages)
     reportAgentProgress({ stage: 'run_started', title: '正在回忆相关聊天' })
-    const memories = userText ? await retrieveMemories(input.persona.sessionId, userText) : []
+    const [memories, similarPairs] = userText
+      ? await Promise.all([
+          retrieveMemories(input.persona.sessionId, userText),
+          retrieveSimilarPairs(input.persona.sessionId, userText),
+        ])
+      : [[], []]
 
     reportAgentProgress({ stage: 'run_started', title: '正在组织语言' })
     const result = await generateText({
       model: createLanguageModel(input.providerConfig),
-      system: buildPersonaSystemPrompt(input.persona, memories),
+      system: buildPersonaSystemPrompt(input.persona, memories, similarPairs),
       messages: input.messages,
       temperature: PERSONA_TEMPERATURE,
       abortSignal: signal,
     })
 
-    const completed = await emitCompleteTextAsUiChunks(result.text, result.finishReason, {
+    const replyText = fallbackSplitLongReply(result.text, Math.max(input.persona.stats.avgFriendMsgChars, 8))
+    const completed = await emitCompleteTextAsUiChunks(replyText, result.finishReason, {
       usage: result.totalUsage,
       finishReason: result.finishReason,
       modelProvider: input.providerConfig.name,

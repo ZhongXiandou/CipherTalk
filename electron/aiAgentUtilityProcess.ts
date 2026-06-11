@@ -9,6 +9,12 @@
 import { generateConversationTitle, runAgent } from './services/agent/engine'
 import { runPersonaChat } from './services/agent/persona/personaChatEngine'
 import { extractPersona } from './services/agent/persona/personaLlm'
+import {
+  extractProfileChunk,
+  mergeProfileParts,
+  reflectConversation,
+  revisePersona,
+} from './services/agent/persona/personaProfileLlm'
 import type { PersonaChatInput } from './services/agent/persona/personaTypes'
 import type { AgentRunInput } from './services/agent/types'
 
@@ -75,6 +81,30 @@ async function handleMessage(msg: any): Promise<void> {
 
       case 'extractPersona': {
         const result = await extractPersona(payload)
+        parentPort!.postMessage({ id, result })
+        break
+      }
+
+      case 'extractProfileChunk': {
+        const result = await extractProfileChunk(payload)
+        parentPort!.postMessage({ id, result })
+        break
+      }
+
+      case 'mergeProfile': {
+        const result = await mergeProfileParts(payload)
+        parentPort!.postMessage({ id, result })
+        break
+      }
+
+      case 'revisePersona': {
+        const result = await revisePersona(payload)
+        parentPort!.postMessage({ id, result })
+        break
+      }
+
+      case 'reflectPersona': {
+        const result = await reflectConversation(payload)
         parentPort!.postMessage({ id, result })
         break
       }
