@@ -258,8 +258,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   tts: {
     getConfig: () => ipcRenderer.invoke('tts:getConfig') as Promise<{ success: boolean; config?: unknown; available?: boolean; error?: string }>,
     setConfig: (patch: unknown) => ipcRenderer.invoke('tts:setConfig', patch) as Promise<{ success: boolean; config?: unknown; error?: string }>,
-    test: (cfg: unknown) => ipcRenderer.invoke('tts:test', cfg) as Promise<{ success: boolean; audioBase64?: string; mimeType?: string; error?: string; errorCode?: string }>,
-    speak: (text: string) => ipcRenderer.invoke('tts:speak', text) as Promise<{ success: boolean; audioBase64?: string; mimeType?: string; error?: string; errorCode?: string }>,
+    test: (cfg: unknown) => ipcRenderer.invoke('tts:test', cfg) as Promise<{ success: boolean; audioBase64?: string; mimeType?: string; cached?: boolean; error?: string; errorCode?: string }>,
+    speak: (text: string) => ipcRenderer.invoke('tts:speak', text) as Promise<{ success: boolean; audioBase64?: string; mimeType?: string; cached?: boolean; error?: string; errorCode?: string }>,
   },
 
   // AI 作图 —— AI 助手 generate_image 工具

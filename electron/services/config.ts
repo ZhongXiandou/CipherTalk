@@ -279,7 +279,7 @@ const defaults: ConfigSchema = {
   },
   aiResolvedProxyUrl: '',
   petCurrent: '',
-  petDesktopEnabled: false,
+  petDesktopEnabled: true,
   petDefaultInitialized: false,
   notifySessions: [],
   mcpEnabled: false,

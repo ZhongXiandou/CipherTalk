@@ -42,6 +42,7 @@ export interface TtsSpeakResult {
   success: boolean
   audioBase64?: string
   mimeType?: string
+  cached?: boolean
   error?: string
   errorCode?: 'NOT_CONFIGURED' | 'SYNTHESIS_FAILED'
 }

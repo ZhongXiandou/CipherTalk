@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { cosineSimilarity } from 'ai'
 import { createHash } from 'crypto'
-import { existsSync, mkdirSync, statSync } from 'fs'
+import { existsSync, mkdirSync, rmSync, statSync } from 'fs'
 import { join } from 'path'
 import { ConfigService } from '../config'
 import {
@@ -239,7 +239,25 @@ export class AgentResourceVectorService {
     if (!existsSync(base)) mkdirSync(base, { recursive: true })
     if (this.db && this.dbPath === next) return this.db
     if (this.db) this.close()
-    const db = new Database(next)
+    let db = new Database(next)
+    try {
+      this.initializeDb(db)
+    } catch (e) {
+      try { db.close() } catch { /* ignore */ }
+      if (!this.isMissingVec0ModuleError(e)) throw e
+
+      // 旧向量库可能包含 sqlite-vec 的 vec0 虚表；当前实现使用 BLOB 存储，
+      // 该库可按现有 skills/MCP 资源重建。
+      this.removeSqliteFileSet(next)
+      db = new Database(next)
+      this.initializeDb(db)
+    }
+    this.db = db
+    this.dbPath = next
+    return db
+  }
+
+  private initializeDb(db: Database.Database): void {
     db.pragma('journal_mode = WAL')
     db.pragma('synchronous = NORMAL')
     db.exec(`
@@ -258,9 +276,20 @@ export class AgentResourceVectorService {
       );
       CREATE INDEX IF NOT EXISTS idx_arv_kind_model ON agent_resource_vectors(kind, model_key);
     `)
-    this.db = db
-    this.dbPath = next
-    return db
+  }
+
+  private isMissingVec0ModuleError(e: unknown): boolean {
+    return /no such module:\s*vec0/i.test(e instanceof Error ? e.message : String(e))
+  }
+
+  private removeSqliteFileSet(dbPath: string): void {
+    for (const filePath of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`]) {
+      try {
+        if (existsSync(filePath)) rmSync(filePath, { force: true })
+      } catch {
+        // ignore best-effort cleanup
+      }
+    }
   }
 
   close(): void {

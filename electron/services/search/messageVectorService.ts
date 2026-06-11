@@ -10,7 +10,7 @@
  * - 懒构建 + 增量 + 上限：首次对某会话语义检索时切最近 N 条成片段，之后只补新增（按高水位定位）。
  */
 import Database from 'better-sqlite3'
-import { existsSync, mkdirSync, statSync } from 'fs'
+import { existsSync, mkdirSync, rmSync, statSync } from 'fs'
 import { join } from 'path'
 import { cosineSimilarity } from 'ai'
 import { ConfigService } from '../config'
@@ -155,7 +155,25 @@ class MessageVectorService {
     if (this.db) {
       try { this.db.close() } catch { /* ignore */ }
     }
-    const db = new Database(next)
+    let db = new Database(next)
+    try {
+      this.initializeDb(db)
+    } catch (e) {
+      try { db.close() } catch { /* ignore */ }
+      if (!this.isMissingVec0ModuleError(e)) throw e
+
+      // 旧版本曾用 sqlite-vec 的 vec0 虚表。新版本不再依赖原生扩展，遇到旧 schema
+      // 无法加载时直接删除可重建的向量缓存库，避免发布包缺 sqlite-vec 时向量化卡死。
+      this.removeSqliteFileSet(next)
+      db = new Database(next)
+      this.initializeDb(db)
+    }
+    this.db = db
+    this.dbPath = next
+    return db
+  }
+
+  private initializeDb(db: Database.Database): void {
     db.pragma('journal_mode = WAL')
     db.exec(`
       DROP TABLE IF EXISTS message_vectors;  -- 旧的 per-message 表已废弃（粒度改为片段）
@@ -179,9 +197,20 @@ class MessageVectorService {
       );
       CREATE INDEX IF NOT EXISTS idx_mc_session ON message_chunks(session_id);
     `)
-    this.db = db
-    this.dbPath = next
-    return db
+  }
+
+  private isMissingVec0ModuleError(e: unknown): boolean {
+    return /no such module:\s*vec0/i.test(e instanceof Error ? e.message : String(e))
+  }
+
+  private removeSqliteFileSet(dbPath: string): void {
+    for (const filePath of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`]) {
+      try {
+        if (existsSync(filePath)) rmSync(filePath, { force: true })
+      } catch {
+        // ignore best-effort cleanup
+      }
+    }
   }
 
   close(): void {
