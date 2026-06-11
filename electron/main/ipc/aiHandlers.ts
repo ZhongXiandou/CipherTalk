@@ -702,6 +702,170 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     }
   })
 
+  // ========= 克隆好友（数字分身画像，agent_personas.db）=========
+  // 克隆聊天：加载画像 → 子进程预检索 + 单次 streamText；chunk 经 persona:chunk 推回
+  ipcMain.handle('persona:chat', async (event, payload: {
+    runId: string
+    sessionId: string
+    messages: UIMessage[]
+  }) => {
+    const sender = event.sender
+    const { runId } = payload
+    const sessionId = String(payload?.sessionId || '').trim()
+    const send = (chunk: unknown) => { if (!sender.isDestroyed()) sender.send('persona:chunk', { runId, chunk }) }
+    const sendProgress = (progress: unknown) => { if (!sender.isDestroyed()) sender.send('persona:progress', { runId, progress }) }
+    const aborter = new AbortController()
+    const logger = ctx.getLogService()
+    agentAborters.set(runId, aborter)
+    try {
+      if (!sessionId) return { success: false, error: '缺少 sessionId' }
+      const { personaStore } = await import('../../services/agent/persona/personaStore')
+      const persona = personaStore.get(sessionId)
+      if (!persona) return { success: false, error: '尚未克隆该好友，请先生成画像' }
+
+      const { resolveProviderConfig } = await import('../../services/agent/resolveProviderConfig')
+      const { refreshResolvedProxyUrl } = await import('../../services/ai/proxyFetch')
+      const { convertToModelMessages } = await import('ai')
+      const providerConfig = resolveProviderConfig()
+      await refreshAgentRunProxyCached(refreshResolvedProxyUrl)
+      const messages = await convertToModelMessages(payload.messages || [])
+
+      const { agentProcessService } = await import('../../services/agent/agentProcessService')
+      agentProcessService.setLogger(logger)
+      await agentProcessService.personaChat(
+        {
+          providerConfig,
+          persona: {
+            sessionId: persona.sessionId,
+            displayName: persona.displayName,
+            card: persona.card,
+            fewShots: persona.fewShots,
+            stats: persona.stats,
+          },
+          messages,
+        },
+        send,
+        sendProgress,
+        aborter.signal,
+      )
+      send('[DONE]')
+      return { success: true }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      logger?.error('Persona', '克隆聊天失败', { runId, sessionId, ...errorToLogData(e) })
+      send({ type: 'error', errorText: message })
+      send('[DONE]')
+      return { success: false, error: message }
+    } finally {
+      agentAborters.delete(runId)
+    }
+  })
+
+  ipcMain.handle('persona:abort', (_e, runId: string) => {
+    agentAborters.get(runId)?.abort()
+    return { success: true }
+  })
+
+  ipcMain.handle('persona:get', async (_event, sessionId: string) => {
+    try {
+      const { personaStore } = await import('../../services/agent/persona/personaStore')
+      return { success: true, persona: personaStore.get(String(sessionId || '').trim()) }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('persona:list', async () => {
+    try {
+      const { personaStore } = await import('../../services/agent/persona/personaStore')
+      return { success: true, personas: personaStore.list() }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('persona:delete', async (_event, sessionId: string) => {
+    try {
+      const { personaStore } = await import('../../services/agent/persona/personaStore')
+      return { success: personaStore.remove(String(sessionId || '').trim()) }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  // 触发画像 ETL：读消息（懒索引）→ 轮次合并/统计 → 子进程 LLM 提取 → 入库；进度经 persona:buildProgress 推送
+  ipcMain.handle('persona:build', async (event, payload: { sessionId: string; displayName?: string }) => {
+    const sender = event.sender
+    const sessionId = String(payload?.sessionId || '').trim()
+    const displayName = String(payload?.displayName || '').trim() || sessionId
+    const logger = ctx.getLogService()
+    const startedAt = Date.now()
+    const sendProgress = (stage: string, title: string, percent: number, detail?: string) => {
+      if (!sender.isDestroyed()) sender.send('persona:buildProgress', { sessionId, stage, title, percent, detail })
+    }
+    try {
+      if (!sessionId) return { success: false, error: '缺少 sessionId' }
+      // 先解析模型配置：没配 Key/模型时这里直接报错，不浪费后面的耗时步骤
+      const { resolveProviderConfig } = await import('../../services/agent/resolveProviderConfig')
+      const { refreshResolvedProxyUrl } = await import('../../services/ai/proxyFetch')
+      const providerConfig = resolveProviderConfig()
+      await refreshResolvedProxyUrl()
+
+      sendProgress('indexing', '正在读取聊天记录', 5)
+      const { chatSearchIndexService } = await import('../../services/search/chatSearchIndexService')
+      const messages = await chatSearchIndexService.listSessionMemoryMessages(sessionId, (p) => {
+        sendProgress('indexing', '正在读取聊天记录', 10, p.message)
+      }, 2000)
+
+      sendProgress('corpus', '正在分析说话风格', 45)
+      const { buildPersonaCorpus, MIN_FRIEND_MESSAGES } = await import('../../services/agent/persona/personaCorpus')
+      const corpus = buildPersonaCorpus(messages, displayName)
+      if (corpus.stats.friendMessageCount < MIN_FRIEND_MESSAGES) {
+        const error = `与「${displayName}」的可用文本消息太少（${corpus.stats.friendMessageCount} 条，至少需要 ${MIN_FRIEND_MESSAGES} 条），不足以克隆`
+        sendProgress('error', '克隆失败', 100, error)
+        return { success: false, error }
+      }
+
+      sendProgress('extracting', '正在提炼人格画像（调用 AI，约需几十秒）', 55)
+      const { agentProcessService } = await import('../../services/agent/agentProcessService')
+      agentProcessService.setLogger(logger)
+      const extracted = await agentProcessService.extractPersona({
+        providerConfig,
+        friendName: displayName,
+        corpusText: corpus.corpusText,
+        stats: corpus.stats,
+      })
+
+      sendProgress('saving', '正在保存画像', 92)
+      const { personaStore } = await import('../../services/agent/persona/personaStore')
+      const persona = personaStore.upsert({
+        sessionId,
+        displayName,
+        card: extracted.card,
+        fewShots: extracted.fewShots,
+        stats: corpus.stats,
+        modelProvider: providerConfig.name,
+        modelId: providerConfig.model,
+      })
+
+      sendProgress('done', '克隆完成', 100)
+      logger?.warn('Persona', '画像构建完成', {
+        sessionId,
+        elapsedMs: Date.now() - startedAt,
+        friendMessageCount: corpus.stats.friendMessageCount,
+        fewShotCount: persona.fewShots.length,
+        provider: providerConfig.name,
+        model: providerConfig.model,
+      })
+      return { success: true, persona }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      logger?.error('Persona', '画像构建失败', { sessionId, elapsedMs: Date.now() - startedAt, ...errorToLogData(e) })
+      sendProgress('error', '克隆失败', 100, message)
+      return { success: false, error: message }
+    }
+  })
+
   ipcMain.handle('agent:generateTitle', async (_event, payload: {
     firstMessage: string
     modelConfig?: AgentProviderConfigOverride | null

@@ -222,6 +222,7 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
   let purchaseWindow: BrowserWindow | null = null
   let welcomeWindow: BrowserWindow | null = null
   let chatHistoryWindow: BrowserWindow | null = null
+  let personaChatWindow: BrowserWindow | null = null
   let petWindow: BrowserWindow | null = null
   let petBaseBounds: { x: number; y: number; width: number; height: number } | null = null
   // 桌宠基础尺寸（与 openPetWindow 一致）；显示消息气泡时临时向上/左扩窗腾出空间
@@ -648,6 +649,66 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
         chatHistoryWindow = null
       })
       return chatHistoryWindow
+    },
+
+    // 克隆好友（数字分身）独立聊天窗口：手机聊天软件比例的窄窗
+    openPersonaChatWindow(sessionId: string) {
+      const hash = `/persona-chat/${encodeURIComponent(sessionId)}`
+      if (personaChatWindow && !personaChatWindow.isDestroyed()) {
+        if (personaChatWindow.isMinimized()) personaChatWindow.restore()
+        personaChatWindow.focus()
+        if (process.env.VITE_DEV_SERVER_URL) {
+          personaChatWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}?${getThemeQueryParams(ctx)}#${hash}`)
+        } else {
+          personaChatWindow.loadFile(join(__dirname, '../dist/index.html'), {
+            hash,
+            query: getThemeQuery(ctx)
+          })
+        }
+        return personaChatWindow
+      }
+
+      const isDark = nativeTheme.shouldUseDarkColors
+      personaChatWindow = new BrowserWindow({
+        width: 420,
+        height: 760,
+        minWidth: 360,
+        minHeight: 560,
+        ...getWindowIconOptions(ctx),
+        webPreferences: {
+          preload: join(__dirname, 'preload.js'),
+          devTools: ctx.allowDevTools,
+          contextIsolation: true,
+          nodeIntegration: false,
+          webSecurity: false
+        },
+        titleBarStyle: 'hidden',
+        titleBarOverlay: {
+          color: '#00000000',
+          symbolColor: isDark ? '#ffffff' : '#1a1a1a',
+          height: 40
+        },
+        show: false,
+        backgroundColor: isDark ? '#1A1A1A' : '#F0F0F0',
+        autoHideMenuBar: true
+      })
+
+      personaChatWindow.once('ready-to-show', () => personaChatWindow?.show())
+
+      if (process.env.VITE_DEV_SERVER_URL) {
+        personaChatWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}?${getThemeQueryParams(ctx)}#${hash}`)
+        setupDevToolsShortcut(personaChatWindow, () => personaChatWindow)
+      } else {
+        personaChatWindow.loadFile(join(__dirname, '../dist/index.html'), {
+          hash,
+          query: getThemeQuery(ctx)
+        })
+      }
+
+      personaChatWindow.on('closed', () => {
+        personaChatWindow = null
+      })
+      return personaChatWindow
     },
 
     openAgreementWindow() {

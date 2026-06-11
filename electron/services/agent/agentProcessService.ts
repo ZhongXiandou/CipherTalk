@@ -89,6 +89,32 @@ export class AgentProcessService {
     return result.title
   }
 
+  /** 克隆好友：在子进程内跑画像提取（两路 generateObject），返回画像卡 + few-shot。 */
+  async extractPersona(input: import('./persona/personaTypes').PersonaExtractInput): Promise<import('./persona/personaTypes').PersonaExtractResult> {
+    return this.call('extractPersona', input)
+  }
+
+  /** 克隆好友聊天：预检索 + 单次 streamText，流式 chunk 经 onChunk 回调（复用 run 的 chunk 通道）。 */
+  async personaChat(
+    input: import('./persona/personaTypes').PersonaChatInput,
+    onChunk: (chunk: UIMessageChunk) => void,
+    onProgress?: (progress: AgentProgressEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const runId = `persona-${++this.runSeq}`
+    this.chunkHandlers.set(runId, onChunk)
+    if (onProgress) this.progressHandlers.set(runId, onProgress)
+    if (signal) {
+      signal.addEventListener('abort', () => { void this.call('abort', { runId }).catch(() => undefined) })
+    }
+    try {
+      await this.call<{ done: boolean }>('personaChat', { runId, ...input })
+    } finally {
+      this.chunkHandlers.delete(runId)
+      this.progressHandlers.delete(runId)
+    }
+  }
+
   shutdown(): void {
     this.shuttingDown = true
     const w = this.worker

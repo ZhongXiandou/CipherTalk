@@ -1,4 +1,4 @@
-import { Aperture, Bell, BellOff, Image as ImageIcon, Info, Loader2, Mic, RefreshCw, Sparkles } from 'lucide-react'
+import { Aperture, Bell, BellOff, Bot, Image as ImageIcon, Info, Loader2, Mic, RefreshCw, Sparkles } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Drawer, Tooltip } from '@heroui/react'
 import { DateJumpPicker } from './DateJumpPicker'
@@ -472,6 +472,23 @@ export function ChatHeader({
               </Button>
             </Tooltip.Trigger>
             <Tooltip.Content>{notifyEnabled ? '新消息提醒已开启 · 点击关闭' : '开启新消息提醒（桌宠气泡）'}</Tooltip.Content>
+          </Tooltip>
+        )}
+
+        {isPrivateSession && (
+          <Tooltip delay={0}>
+            <Tooltip.Trigger>
+              <Button
+                isIconOnly
+                size="sm"
+                variant="ghost"
+                aria-label="克隆好友"
+                onPress={() => window.electronAPI.window.openPersonaChatWindow(currentSession.username)}
+              >
+                <Bot size={18} />
+              </Button>
+            </Tooltip.Trigger>
+            <Tooltip.Content>克隆好友（和 TA 的数字分身聊天）</Tooltip.Content>
           </Tooltip>
         )}
 

@@ -24,6 +24,7 @@ import VideoWindow from './pages/VideoWindow'
 import BrowserWindowPage from './pages/BrowserWindowPage'
 import SplashPage from './pages/SplashPage'
 import ChatHistoryPage from './pages/ChatHistoryPage'
+import PersonaChatPage from './pages/PersonaChatPage'
 import MomentsWindow from './pages/MomentsWindow'
 import PetWindow from './pages/PetWindow'
 import PetsPage from './pages/PetsPage'
@@ -466,6 +467,16 @@ function App() {
       <div className="standalone-window">
         <TitleBar variant="standalone" />
         <ChatHistoryPage />
+      </div>
+    )
+  }
+
+  // 独立克隆好友（数字分身）聊天窗口
+  if (location.pathname.startsWith('/persona-chat/')) {
+    return (
+      <div className="standalone-window">
+        <TitleBar variant="standalone" />
+        <PersonaChatPage />
       </div>
     )
   }

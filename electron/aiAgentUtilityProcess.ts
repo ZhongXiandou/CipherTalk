@@ -7,6 +7,9 @@
  * 隔离收益：AI 崩溃（如 sqlite-vec 原生 fatal）只终止本子进程，主进程会重启，不拖垮 UI。
  */
 import { generateConversationTitle, runAgent } from './services/agent/engine'
+import { runPersonaChat } from './services/agent/persona/personaChatEngine'
+import { extractPersona } from './services/agent/persona/personaLlm'
+import type { PersonaChatInput } from './services/agent/persona/personaTypes'
 import type { AgentRunInput } from './services/agent/types'
 
 const parentPort = process.parentPort
@@ -66,6 +69,30 @@ async function handleMessage(msg: any): Promise<void> {
           parentPort!.postMessage({ id, result: { title } })
         } finally {
           aborter.abort()
+        }
+        break
+      }
+
+      case 'extractPersona': {
+        const result = await extractPersona(payload)
+        parentPort!.postMessage({ id, result })
+        break
+      }
+
+      case 'personaChat': {
+        const { runId, ...input } = payload as { runId: string } & PersonaChatInput
+        const aborter = new AbortController()
+        aborters.set(runId, aborter)
+        try {
+          await runPersonaChat(
+            input,
+            (chunk) => parentPort!.postMessage({ id: -1, type: 'chunk', payload: { runId, chunk } }),
+            aborter.signal,
+            (progress) => parentPort!.postMessage({ id: -2, type: 'progress', payload: { runId, progress } }),
+          )
+          parentPort!.postMessage({ id, result: { done: true } })
+        } finally {
+          aborters.delete(runId)
         }
         break
       }

@@ -38,6 +38,7 @@ export interface WindowManager {
   openVideoPlayerWindow(videoPath: string, videoWidth?: number, videoHeight?: number): BrowserWindow
   openBrowserWindow(url: string, title?: string): BrowserWindow
   openChatHistoryWindow(sessionId: string, messageId: number): BrowserWindow
+  openPersonaChatWindow(sessionId: string): BrowserWindow
   completeWelcome(): boolean
   isChatWindowOpen(): boolean
   closeChatWindow(): boolean

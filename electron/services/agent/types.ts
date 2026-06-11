@@ -35,6 +35,8 @@ export interface AgentProviderConfigOverride {
 export type AgentScope =
   | { kind: 'global' }
   | { kind: 'session'; sessionId: string; displayName?: string }
+  /** 克隆好友对话（personaChatEngine），sessionId 为被克隆好友的会话 */
+  | { kind: 'persona'; sessionId: string; displayName?: string }
 
 export interface AgentMcpToolDescriptor {
   name: string
@@ -100,6 +102,8 @@ export type AgentRequest =
   | { id: number; type: 'ping' }
   | { id: number; type: 'run'; payload: { runId: string } & AgentRunInput }
   | { id: number; type: 'abort'; payload: { runId: string } }
+  | { id: number; type: 'extractPersona'; payload: import('./persona/personaTypes').PersonaExtractInput }
+  | { id: number; type: 'personaChat'; payload: { runId: string } & import('./persona/personaTypes').PersonaChatInput }
 
 export type AgentResponse =
   | { id: number; result?: unknown; error?: string }

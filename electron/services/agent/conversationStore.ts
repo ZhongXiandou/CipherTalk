@@ -43,16 +43,16 @@ interface ListConversationOptions {
 }
 
 function toScope(kind: string, sessionId?: string | null, displayName?: string | null): AgentScope {
-  if (kind === 'session' && sessionId) {
-    return { kind: 'session', sessionId, displayName: displayName || undefined }
+  if ((kind === 'session' || kind === 'persona') && sessionId) {
+    return { kind, sessionId, displayName: displayName || undefined }
   }
   return { kind: 'global' }
 }
 
 function scopeColumns(scope?: AgentScope): { kind: string; sessionId: string | null; displayName: string | null } {
-  if (scope?.kind === 'session') {
+  if (scope?.kind === 'session' || scope?.kind === 'persona') {
     return {
-      kind: 'session',
+      kind: scope.kind,
       sessionId: scope.sessionId,
       displayName: scope.displayName || null,
     }
@@ -180,9 +180,9 @@ export class AgentConversationStore {
     const filters = ['account_id = @accountId']
     const params: Record<string, unknown> = { accountId, limit }
 
-    if (options.scope?.kind === 'session') {
+    if (options.scope?.kind === 'session' || options.scope?.kind === 'persona') {
       filters.push('scope_kind = @scopeKind', 'session_id = @sessionId')
-      params.scopeKind = 'session'
+      params.scopeKind = options.scope.kind
       params.sessionId = options.scope.sessionId
     } else if (options.scope?.kind === 'global') {
       filters.push('scope_kind = @scopeKind')

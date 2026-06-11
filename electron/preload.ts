@@ -155,6 +155,40 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // 克隆好友（数字分身画像；构建进度经 persona:buildProgress 推回）
+  persona: {
+    get: (sessionId: string) =>
+      ipcRenderer.invoke('persona:get', sessionId) as Promise<{ success: boolean; persona?: unknown | null; error?: string }>,
+    list: () =>
+      ipcRenderer.invoke('persona:list') as Promise<{ success: boolean; personas?: unknown[]; error?: string }>,
+    build: (payload: { sessionId: string; displayName?: string }) =>
+      ipcRenderer.invoke('persona:build', payload) as Promise<{ success: boolean; persona?: unknown; error?: string }>,
+    delete: (sessionId: string) =>
+      ipcRenderer.invoke('persona:delete', sessionId) as Promise<{ success: boolean; error?: string }>,
+    onBuildProgress: (callback: (progress: unknown) => void): (() => void) => {
+      const listener = (_e: unknown, progress: unknown) => callback(progress)
+      ipcRenderer.on('persona:buildProgress', listener)
+      return () => ipcRenderer.removeListener('persona:buildProgress', listener)
+    },
+    chat: (runId: string, sessionId: string, messages: unknown[]) =>
+      ipcRenderer.invoke('persona:chat', { runId, sessionId, messages }) as Promise<{ success: boolean; error?: string }>,
+    abort: (runId: string) => ipcRenderer.invoke('persona:abort', runId) as Promise<{ success: boolean }>,
+    onChunk: (runId: string, callback: (chunk: unknown) => void): (() => void) => {
+      const listener = (_e: unknown, data: { runId: string; chunk: unknown }) => {
+        if (data?.runId === runId) callback(data.chunk)
+      }
+      ipcRenderer.on('persona:chunk', listener)
+      return () => ipcRenderer.removeListener('persona:chunk', listener)
+    },
+    onProgress: (runId: string, callback: (progress: unknown) => void): (() => void) => {
+      const listener = (_e: unknown, data: { runId: string; progress: unknown }) => {
+        if (data?.runId === runId) callback(data.progress)
+      }
+      ipcRenderer.on('persona:progress', listener)
+      return () => ipcRenderer.removeListener('persona:progress', listener)
+    },
+  },
+
   // AI 长期记忆管理（agent_memory.db）
   memory: {
     list: (opts?: {
@@ -295,6 +329,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     close: () => ipcRenderer.send('window:close'),
     openChatWindow: () => ipcRenderer.invoke('window:openChatWindow'),
     openMomentsWindow: (filterUsername?: string) => ipcRenderer.invoke('window:openMomentsWindow', filterUsername),
+    openPersonaChatWindow: (sessionId: string) => ipcRenderer.invoke('window:openPersonaChatWindow', sessionId),
     onMomentsFilterUser: (callback: (username: string) => void) => {
       ipcRenderer.on('moments:filterUser', (_, username) => callback(username))
       return () => ipcRenderer.removeAllListeners('moments:filterUser')

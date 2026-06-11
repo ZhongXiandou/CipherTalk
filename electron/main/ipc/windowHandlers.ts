@@ -123,6 +123,11 @@ export function registerWindowHandlers(ctx: MainProcessContext): void {
     return true
   })
 
+  ipcMain.handle('window:openPersonaChatWindow', async (_event, sessionId: string) => {
+    ctx.getWindowManager().openPersonaChatWindow(String(sessionId || '').trim())
+    return true
+  })
+
   ipcMain.handle('window:openAgreementWindow', async () => {
     ctx.getWindowManager().openAgreementWindow()
     return true

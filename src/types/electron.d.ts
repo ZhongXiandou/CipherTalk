@@ -148,6 +148,43 @@ export interface AgentMemoryItem {
   updatedAt: number
 }
 
+// 克隆好友（数字分身）：画像卡 + few-shot + 风格统计（与 electron/services/agent/persona/personaTypes.ts 对应）
+export interface PersonaCardInfo {
+  tone: string
+  personalityTraits: string[]
+  catchphrases: string[]
+  punctuationStyle: string
+  addressing: string
+  topics: string[]
+}
+
+export interface PersonaRecordInfo {
+  id: number
+  accountId: string
+  sessionId: string
+  displayName: string
+  card: PersonaCardInfo
+  fewShots: Array<{ user: string; replies: string[] }>
+  stats: {
+    sourceMessageCount: number
+    friendMessageCount: number
+    avgFriendMsgChars: number
+    avgFriendBurst: number
+  }
+  modelProvider: string
+  modelId: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface PersonaBuildProgressInfo {
+  sessionId: string
+  stage: 'indexing' | 'corpus' | 'extracting' | 'saving' | 'done' | 'error'
+  title: string
+  percent: number
+  detail?: string
+}
+
 export interface ElectronAPI {
   window: {
     minimize: () => void
@@ -157,6 +194,7 @@ export interface ElectronAPI {
     onSplashFadeOut?: (callback: () => void) => () => void
     openChatWindow: () => Promise<boolean>
     openMomentsWindow: (filterUsername?: string) => Promise<boolean>
+    openPersonaChatWindow: (sessionId: string) => Promise<boolean>
     onMomentsFilterUser: (callback: (username: string) => void) => () => void
     openAgreementWindow: () => Promise<boolean>
     openPurchaseWindow: () => Promise<boolean>
@@ -1044,6 +1082,17 @@ export interface ElectronAPI {
     renameConversation: (id: number, title: string) => Promise<{ success: boolean; conversation?: unknown; error?: string }>
     saveConversationMessages: (payload: unknown) => Promise<{ success: boolean; conversation?: unknown; error?: string }>
     getLastConversation: (scope?: unknown) => Promise<{ success: boolean; conversation?: unknown; error?: string }>
+  }
+  persona: {
+    get: (sessionId: string) => Promise<{ success: boolean; persona?: PersonaRecordInfo | null; error?: string }>
+    list: () => Promise<{ success: boolean; personas?: PersonaRecordInfo[]; error?: string }>
+    build: (payload: { sessionId: string; displayName?: string }) => Promise<{ success: boolean; persona?: PersonaRecordInfo; error?: string }>
+    delete: (sessionId: string) => Promise<{ success: boolean; error?: string }>
+    onBuildProgress: (callback: (progress: PersonaBuildProgressInfo) => void) => () => void
+    chat: (runId: string, sessionId: string, messages: unknown[]) => Promise<{ success: boolean; error?: string }>
+    abort: (runId: string) => Promise<{ success: boolean }>
+    onChunk: (runId: string, callback: (chunk: unknown) => void) => () => void
+    onProgress: (runId: string, callback: (progress: unknown) => void) => () => void
   }
   memory: {
     list: (opts?: { sourceType?: 'profile' | 'fact' | 'relationship'; sourceTypes?: Array<'profile' | 'fact' | 'relationship'>; sessionId?: string; tags?: string[]; withoutTags?: string[]; minConfidence?: number; limit?: number }) => Promise<{ success: boolean; items?: AgentMemoryItem[]; stats?: { itemCount: number }; error?: string }>
