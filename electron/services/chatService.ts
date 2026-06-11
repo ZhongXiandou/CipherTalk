@@ -197,9 +197,47 @@ class ChatService extends EventEmitter {
    * 获取 AI Agent @ 选择列表：只返回私聊和群聊，过滤公众号/系统号。
    * 独立于通用 getSessions，避免影响聊天页、导出页等其他会话列表。
    */
-  async getMentionTargets(offset?: number, limit?: number): Promise<{ success: boolean; sessions?: ChatSession[]; hasMore?: boolean; error?: string }> {
+  async getMentionTargets(offset?: number, limit?: number, keyword?: string): Promise<{ success: boolean; sessions?: ChatSession[]; hasMore?: boolean; error?: string }> {
     const safeOffset = Math.max(0, Math.floor(Number(offset) || 0))
     const safeLimit = Math.max(1, Math.min(1000, Math.floor(Number(limit) || 300)))
+    const safeKeyword = String(keyword || '').trim().toLowerCase()
+
+    if (safeKeyword) {
+      const contactsResult = await this.getContacts()
+      if (!contactsResult.success || !Array.isArray(contactsResult.contacts)) {
+        return { success: false, error: contactsResult.error || '获取通讯录失败' }
+      }
+
+      const matchedContacts = contactsResult.contacts
+        .filter((contact) => (contact.type === 'friend' || contact.type === 'group') && !isSystemContactUsername(contact.username))
+        .filter((contact) => [
+          contact.displayName,
+          contact.username,
+          contact.remark,
+          contact.nickname,
+          contact.weComCorp,
+        ].some((value) => String(value || '').toLowerCase().includes(safeKeyword)))
+
+      const page = matchedContacts.slice(safeOffset, safeOffset + safeLimit)
+      return {
+        success: true,
+        sessions: page.map((contact) => ({
+          username: contact.username,
+          type: contact.type === 'group' ? 2 : 1,
+          unreadCount: 0,
+          summary: '',
+          sortTimestamp: contact.lastContactTime || 0,
+          lastTimestamp: contact.lastContactTime || 0,
+          lastMsgType: 0,
+          displayName: contact.displayName,
+          avatarUrl: contact.avatarUrl,
+          isWeCom: contact.isWeCom,
+          weComCorp: contact.weComCorp,
+        })),
+        hasMore: matchedContacts.length > safeOffset + safeLimit,
+      }
+    }
+
     const result = await this.getSessions(safeOffset, safeLimit)
 
     if (result.success && Array.isArray(result.sessions)) {

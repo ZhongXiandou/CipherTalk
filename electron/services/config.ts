@@ -166,6 +166,7 @@ interface ConfigSchema {
     baseURL: string
     model: string
     size: string
+    timeoutMs: number
   }
   // 主进程探测到的系统代理 URL（写入后供 AI 子进程/嵌入跨进程读取；子进程无 session API 探测不了）
   aiResolvedProxyUrl: string
@@ -278,6 +279,7 @@ const defaults: ConfigSchema = {
     baseURL: 'https://api.siliconflow.cn/v1',
     model: 'Kwai-Kolors/Kolors',
     size: '1024x1024',
+    timeoutMs: 600000,
   },
   aiResolvedProxyUrl: '',
   petCurrent: '',

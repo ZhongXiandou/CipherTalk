@@ -38,6 +38,8 @@ function SplashPage() {
   const [version, setVersion] = useState('')
 
   useEffect(() => {
+    document.body.classList.add('splash-transparent')
+
     const readyTimer = setTimeout(() => {
       try {
         // @ts-ignore - splashReady 方法在运行时可用
@@ -56,6 +58,7 @@ function SplashPage() {
     return () => {
       clearTimeout(readyTimer)
       cleanup?.()
+      document.body.classList.remove('splash-transparent')
     }
   }, [])
 

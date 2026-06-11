@@ -15,6 +15,7 @@ const DEFAULT_CFG: ImageGenConfig = {
   baseURL: 'https://api.siliconflow.cn/v1',
   model: 'Kwai-Kolors/Kolors',
   size: '1024x1024',
+  timeoutMs: 600000,
 }
 
 const PROTOCOL_OPTIONS: Array<{ value: ImageGenConfig['protocol']; label: string; hint: string }> = [
@@ -40,6 +41,7 @@ export default function ImageGenTab() {
 
   const patch = (p: Partial<ImageGenConfig>) => setCfg((c) => ({ ...c, ...p }))
   const protocolOption = PROTOCOL_OPTIONS.find((o) => o.value === cfg.protocol)
+  const timeoutSeconds = Math.round((cfg.timeoutMs || DEFAULT_CFG.timeoutMs) / 1000)
 
   const handleTest = async () => {
     setTesting(true)
@@ -149,6 +151,23 @@ export default function ImageGenTab() {
             <InputGroup.Input placeholder="1024x1024" />
           </InputGroup>
           <Description>格式 宽x高（如 1024x1024），留空用服务商默认。</Description>
+        </TextField>
+
+        <TextField
+          fullWidth
+          onChange={(v) => {
+            const seconds = Math.max(60, Math.min(1800, Math.floor(Number(v) || 600)))
+            patch({ timeoutMs: seconds * 1000 })
+          }}
+          type="number"
+          value={String(timeoutSeconds)}
+        >
+          <Label>超时时间</Label>
+          <InputGroup fullWidth variant="secondary">
+            <InputGroup.Input max="1800" min="60" step="30" type="number" />
+            <InputGroup.Suffix>秒</InputGroup.Suffix>
+          </InputGroup>
+          <Description>默认 600 秒（10 分钟），可设置 60 到 1800 秒；慢速作图模型建议保持 600 秒以上。</Description>
         </TextField>
 
         {status && (

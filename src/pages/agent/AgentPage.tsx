@@ -907,6 +907,7 @@ function MentionField({
   onAdd,
   onLoadMore,
   onRemove,
+  onSearch,
 }: {
   sessions: MentionTarget[]
   mentions: MentionTarget[]
@@ -915,6 +916,7 @@ function MentionField({
   onAdd: (m: MentionTarget) => void
   onLoadMore: () => void
   onRemove: (username: string) => void
+  onSearch: (query: string) => void
 }) {
   const { textInput } = usePromptInputController()
   const value = textInput.value
@@ -940,6 +942,13 @@ function MentionField({
   useEffect(() => {
     if (query !== null && sessions.length === 0 && hasMore && !isLoading) onLoadMore()
   }, [hasMore, isLoading, onLoadMore, query, sessions.length])
+
+  useEffect(() => {
+    const q = query?.trim()
+    if (!q) return
+    const timer = window.setTimeout(() => onSearch(q), 180)
+    return () => window.clearTimeout(timer)
+  }, [onSearch, query])
 
   const loadNextVisibleBatch = useCallback(() => {
     if (visibleLimit < allResults.length) {
@@ -1736,6 +1745,7 @@ export default function AgentPage() {
   const mentionHasMoreRef = useRef(true)
   const mentionConnectedRef = useRef(false)
   const mentionSeenRef = useRef(new Set<string>())
+  const mentionSearchSeqRef = useRef(0)
   const addMention = useCallback(
     (m: MentionTarget) => setMentions((prev) => (prev.some((x) => x.username === m.username) ? prev : [...prev, m])),
     []
@@ -1921,6 +1931,30 @@ export default function AgentPage() {
       setMentionLoading(false)
     }
   }, [appendMentionTargets, updateMentionHasMore])
+
+  const searchMentionSessions = useCallback(async (query: string) => {
+    const keyword = query.trim()
+    if (!keyword) return
+    const seq = ++mentionSearchSeqRef.current
+    const chat = (window as any)?.electronAPI?.chat
+    setMentionLoading(true)
+
+    try {
+      if (!mentionConnectedRef.current) {
+        try { await chat?.connect?.() } catch { /* 配置不全则后续为空 */ }
+        mentionConnectedRef.current = true
+      }
+
+      const res = await chat?.getMentionTargets?.(0, MENTION_SESSION_PAGE_SIZE, keyword)
+      if (seq === mentionSearchSeqRef.current && res?.success && Array.isArray(res.sessions)) {
+        appendMentionTargets(
+          res.sessions.map((s: any) => toMentionTarget(s.username, s.displayName, s.avatarUrl))
+        )
+      }
+    } finally {
+      if (seq === mentionSearchSeqRef.current) setMentionLoading(false)
+    }
+  }, [appendMentionTargets])
 
   const refreshConversationRecords = useCallback(async () => {
     const result = await window.electronAPI.agent.listConversations()
@@ -2726,6 +2760,7 @@ export default function AgentPage() {
                 onAdd={addMention}
                 onLoadMore={loadMentionSessions}
                 onRemove={removeMention}
+                onSearch={searchMentionSessions}
                 sessions={sessions}
               />
               {mentions.length === 1 && (

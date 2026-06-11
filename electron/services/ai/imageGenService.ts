@@ -20,6 +20,8 @@ export interface ImageGenConfig {
   model: string
   /** 图片尺寸，如 1024x1024；空 = 服务商默认。 */
   size: string
+  /** 作图请求超时，毫秒。 */
+  timeoutMs: number
 }
 
 export interface ImageGenResult {
@@ -30,13 +32,33 @@ export interface ImageGenResult {
   error?: string
 }
 
-const IMAGE_GEN_TIMEOUT_MS = 120000
+const DEFAULT_IMAGE_GEN_TIMEOUT_MS = 600000
+const MIN_IMAGE_GEN_TIMEOUT_MS = 60000
+const MAX_IMAGE_GEN_TIMEOUT_MS = 1800000
+
+function normalizeImageGenTimeoutMs(value: unknown): number {
+  const n = Math.floor(Number(value))
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_IMAGE_GEN_TIMEOUT_MS
+  return Math.max(MIN_IMAGE_GEN_TIMEOUT_MS, Math.min(MAX_IMAGE_GEN_TIMEOUT_MS, n))
+}
+
+function normalizeImageGenConfig(cfg: ImageGenConfig | Partial<ImageGenConfig>): ImageGenConfig {
+  return {
+    enabled: Boolean(cfg.enabled),
+    protocol: cfg.protocol === 'openai' || cfg.protocol === 'google' ? cfg.protocol : 'openai-compatible',
+    apiKey: String(cfg.apiKey || ''),
+    baseURL: String(cfg.baseURL || ''),
+    model: String(cfg.model || ''),
+    size: String(cfg.size || ''),
+    timeoutMs: normalizeImageGenTimeoutMs(cfg.timeoutMs),
+  }
+}
 
 /** 读取持久化的作图配置。 */
 export function getImageGenConfig(): ImageGenConfig {
   const cs = new ConfigService()
   try {
-    return cs.get('imageGenConfig')
+    return normalizeImageGenConfig(cs.get('imageGenConfig'))
   } finally {
     cs.close()
   }
@@ -46,7 +68,7 @@ export function getImageGenConfig(): ImageGenConfig {
 export function saveImageGenConfig(patch: Partial<ImageGenConfig>): ImageGenConfig {
   const cs = new ConfigService()
   try {
-    const next = { ...cs.get('imageGenConfig'), ...patch }
+    const next = normalizeImageGenConfig({ ...cs.get('imageGenConfig'), ...patch })
     cs.set('imageGenConfig', next)
     return next
   } finally {
@@ -166,14 +188,15 @@ export async function generateImageToFile(
   prompt: string,
   options: { size?: string; config?: Partial<ImageGenConfig>; signal?: AbortSignal } = {},
 ): Promise<ImageGenResult> {
-  const cfg: ImageGenConfig = { ...getImageGenConfig(), ...options.config }
+  const cfg = normalizeImageGenConfig({ ...getImageGenConfig(), ...options.config })
   if (!cfg.apiKey) return { success: false, error: '未配置作图 API Key' }
   if (!cfg.model) return { success: false, error: '未配置作图模型' }
   const input = String(prompt || '').trim()
   if (!input) return { success: false, error: '作图提示词为空' }
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), IMAGE_GEN_TIMEOUT_MS)
+  const timeoutMs = normalizeImageGenTimeoutMs(cfg.timeoutMs)
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
   options.signal?.addEventListener('abort', () => controller.abort())
 
   try {
@@ -183,7 +206,7 @@ export async function generateImageToFile(
     return await generateViaAiSdk(input, cfg, options.size, controller.signal)
   } catch (e) {
     if (controller.signal.aborted && !options.signal?.aborted) {
-      return { success: false, error: '作图请求超时，请稍后重试' }
+      return { success: false, error: `作图请求超时（>${Math.round(timeoutMs / 1000)}秒），请稍后重试` }
     }
     return { success: false, error: e instanceof Error ? e.message : String(e) }
   } finally {
