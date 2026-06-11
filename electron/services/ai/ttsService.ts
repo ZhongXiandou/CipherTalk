@@ -1,8 +1,9 @@
 /**
  * 文字转语音服务 —— 独立的 TTS 配置（朗读 AI 回复/微信消息/角色语音回复用），与聊天模型分开。
- * 配置存 ConfigService.ttsConfig，支持两种主流接口形态（protocol）：
+ * 配置存 ConfigService.ttsConfig，支持三种接口形态（protocol）：
  * - openai-speech：标准 /audio/speech 专用端点（硅基流动 CosyVoice、OpenAI tts 等），走 AI SDK generateSpeech
  * - openai-chat：聊天接口出音频（gpt-4o-audio 风格 /chat/completions + modalities，小米等平台），直连 fetch
+ * - custom：完整接口地址，按 OpenAI speech 兼容 JSON 形态直连 fetch，不自动拼接路径
  * 可在主进程与 AI 子进程复用（ConfigService 在两边都能解析路径）。
  */
 import { experimental_generateSpeech as generateSpeech } from 'ai'
@@ -14,7 +15,7 @@ import { join } from 'path'
 import { ConfigService } from '../config'
 import { createProxyFetch, getResolvedProxyUrl } from './proxyFetch'
 
-export type TtsProtocol = 'openai-speech' | 'openai-chat'
+export type TtsProtocol = 'openai-speech' | 'openai-chat' | 'custom'
 
 export interface TtsConfig {
   enabled: boolean
@@ -95,6 +96,7 @@ export function isTtsAvailable(cfg: TtsConfig = getTtsConfig()): boolean {
 function validateTtsConfig(cfg: TtsConfig): string | null {
   if (!cfg.apiKey) return '未配置 TTS API Key'
   if (!cfg.model) return '未配置 TTS 模型'
+  if (cfg.protocol === 'custom' && !cfg.baseURL) return '自定义接口必须填写完整接口地址'
   if (cfg.baseURL) {
     try {
       new URL(cfg.baseURL)
@@ -328,6 +330,57 @@ async function synthesizeViaSpeechApi(text: string, cfg: TtsConfig, signal?: Abo
   }
 }
 
+/** custom：完整接口地址，按 OpenAI /audio/speech 兼容 JSON 请求，直接读取音频响应。 */
+async function synthesizeViaCustomApi(text: string, cfg: TtsConfig, signal?: AbortSignal): Promise<TtsSynthesisResult> {
+  const fetchImpl = createProxyFetch(getResolvedProxyUrl()) || fetch
+  const endpoint = cfg.baseURL.trim()
+  const body: Record<string, unknown> = {
+    model: cfg.model,
+    input: text,
+    voice: cfg.voice || undefined,
+    response_format: 'mp3',
+  }
+  const instructions = normalizeTtsInstructions(cfg.instructions)
+  if (instructions) body.instructions = instructions
+  if (cfg.speed && cfg.speed !== 1) body.speed = cfg.speed
+
+  const response = await fetchImpl(endpoint, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${cfg.apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  }) as Response
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '')
+    return { success: false, error: `HTTP ${response.status} · ${detail.slice(0, 300) || response.statusText}`, errorCode: 'SYNTHESIS_FAILED' }
+  }
+
+  const mimeType = response.headers.get('content-type')?.split(';')[0] || 'audio/mpeg'
+  if (mimeType.startsWith('application/json')) {
+    const payload: any = await response.json().catch(() => null)
+    const data = String(payload?.audio || payload?.audio_base64 || payload?.data || payload?.result?.audio || '').trim()
+    if (data) return { success: true, audioBase64: data, mimeType: 'audio/mpeg' }
+    const url = String(payload?.url || payload?.audio_url || payload?.result?.url || '').trim()
+    if (url) {
+      const audioResponse = await fetchImpl(url, { signal })
+      if (!audioResponse.ok) {
+        return { success: false, error: `下载音频失败: HTTP ${audioResponse.status}`, errorCode: 'SYNTHESIS_FAILED' }
+      }
+      const audioMimeType = audioResponse.headers.get('content-type')?.split(';')[0] || 'audio/mpeg'
+      const buffer = Buffer.from(await audioResponse.arrayBuffer())
+      return { success: true, audioBase64: buffer.toString('base64'), mimeType: audioMimeType }
+    }
+    return { success: false, error: `接口返回成功但没有音频数据：${JSON.stringify(payload)?.slice(0, 300) || '空响应'}`, errorCode: 'SYNTHESIS_FAILED' }
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer())
+  return { success: true, audioBase64: buffer.toString('base64'), mimeType }
+}
+
 /**
  * openai-chat：聊天接口出音频（gpt-4o-audio 风格）。
  * 请求 /chat/completions + modalities:["text","audio"]，响应取 choices[0].message.audio.data（base64）；
@@ -441,6 +494,9 @@ export async function synthesizeSpeech(
   options.signal?.addEventListener('abort', () => controller.abort())
 
   const runSynthesis = async (): Promise<TtsSynthesisResult> => {
+    if (cfg.protocol === 'custom') {
+      return synthesizeViaCustomApi(input, cfg, controller.signal)
+    }
     if (cfg.protocol === 'openai-chat') {
       return synthesizeViaChatApi(input, cfg, controller.signal)
     }

@@ -30,7 +30,7 @@ export interface WebSearchConfig {
 
 export interface TtsConfig {
   enabled: boolean
-  protocol: 'openai-speech' | 'openai-chat'
+  protocol: 'openai-speech' | 'openai-chat' | 'custom'
   apiKey: string
   baseURL: string
   model: string

@@ -147,10 +147,10 @@ interface ConfigSchema {
     maxResults: number
   }
   // 文字转语音 —— 朗读 AI 回复/微信消息/角色语音回复，独立于聊天模型
-  // protocol: openai-speech = 标准 /audio/speech；openai-chat = 聊天接口出音频（gpt-4o-audio 风格，小米等）
+  // protocol: openai-speech = 标准 /audio/speech；openai-chat = 聊天接口出音频；custom = 完整接口地址
   ttsConfig: {
     enabled: boolean
-    protocol: 'openai-speech' | 'openai-chat'
+    protocol: 'openai-speech' | 'openai-chat' | 'custom'
     apiKey: string
     baseURL: string
     model: string

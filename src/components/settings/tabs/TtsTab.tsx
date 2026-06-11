@@ -22,7 +22,13 @@ const DEFAULT_CFG: TtsConfig = {
 const PROTOCOL_OPTIONS: Array<{ value: TtsConfig['protocol']; label: string; hint: string }> = [
   { value: 'openai-speech', label: '语音接口（/audio/speech）', hint: '标准 TTS 端点：硅基流动 CosyVoice、OpenAI tts-1/gpt-4o-mini-tts 等' },
   { value: 'openai-chat', label: '聊天接口出音频（/chat/completions）', hint: 'gpt-4o-audio 风格：把文本发给聊天接口、从回复里取音频，小米等平台用这种' },
+  { value: 'custom', label: '自定义完整 URL', hint: '直接请求你填写的完整接口地址，不自动拼接路径，按 OpenAI speech 兼容 JSON 发送' },
 ]
+
+const DEFAULT_TTS_ENDPOINTS = new Set([
+  DEFAULT_CFG.baseURL,
+  'https://api.openai.com/v1',
+])
 
 export default function TtsTab() {
   const [cfg, setCfg] = useState<TtsConfig>(DEFAULT_CFG)
@@ -41,6 +47,14 @@ export default function TtsTab() {
   }, [])
 
   const patch = (p: Partial<TtsConfig>) => setCfg((c) => ({ ...c, ...p }))
+
+  const handleProtocolChange = (protocol: TtsConfig['protocol']) => {
+    setCfg((current) => ({
+      ...current,
+      protocol,
+      baseURL: protocol === 'custom' && DEFAULT_TTS_ENDPOINTS.has(current.baseURL.trim()) ? '' : current.baseURL,
+    }))
+  }
 
   const handleTest = async () => {
     setTesting(true)
@@ -98,7 +112,7 @@ export default function TtsTab() {
         <Select
           selectedKey={cfg.protocol || 'openai-speech'}
           onSelectionChange={(key) => {
-            if (key != null) patch({ protocol: String(key) as TtsConfig['protocol'] })
+            if (key != null) handleProtocolChange(String(key) as TtsConfig['protocol'])
           }}
           placeholder="选择接口形态"
           variant="secondary"
@@ -135,9 +149,15 @@ export default function TtsTab() {
         <TextField fullWidth onChange={(v) => patch({ baseURL: v })} value={cfg.baseURL}>
           <Label>接口地址</Label>
           <InputGroup fullWidth variant="secondary">
-            <InputGroup.Input placeholder="https://api.siliconflow.cn/v1" />
+            <InputGroup.Input placeholder={cfg.protocol === 'custom' ? 'https://your-api.example.com/v1/audio/speech' : 'https://api.siliconflow.cn/v1'} />
           </InputGroup>
-          <Description>OpenAI 兼容 /v1 地址，会自动拼接 /audio/speech。</Description>
+          <Description>
+            {cfg.protocol === 'custom'
+              ? '填写完整接口地址，系统会原样 POST，不拼接 /audio/speech 或 /chat/completions。'
+              : cfg.protocol === 'openai-chat'
+                ? '填写 OpenAI 兼容 /v1 地址，会自动拼接 /chat/completions。'
+                : '填写 OpenAI 兼容 /v1 地址，会自动拼接 /audio/speech。'}
+          </Description>
         </TextField>
 
         <TextField fullWidth onChange={(v) => patch({ model: v })} value={cfg.model}>
