@@ -254,6 +254,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     test: (cfg: unknown) => ipcRenderer.invoke('webSearch:test', cfg) as Promise<{ success: boolean; resultCount?: number; error?: string }>,
   },
 
+  // 文字转语音 —— 朗读 AI 回复/微信消息/角色语音回复
+  tts: {
+    getConfig: () => ipcRenderer.invoke('tts:getConfig') as Promise<{ success: boolean; config?: unknown; available?: boolean; error?: string }>,
+    setConfig: (patch: unknown) => ipcRenderer.invoke('tts:setConfig', patch) as Promise<{ success: boolean; config?: unknown; error?: string }>,
+    test: (cfg: unknown) => ipcRenderer.invoke('tts:test', cfg) as Promise<{ success: boolean; audioBase64?: string; mimeType?: string; error?: string; errorCode?: string }>,
+    speak: (text: string) => ipcRenderer.invoke('tts:speak', text) as Promise<{ success: boolean; audioBase64?: string; mimeType?: string; error?: string; errorCode?: string }>,
+  },
+
+  // AI 作图 —— AI 助手 generate_image 工具
+  imageGen: {
+    getConfig: () => ipcRenderer.invoke('imageGen:getConfig') as Promise<{ success: boolean; config?: unknown; available?: boolean; error?: string }>,
+    setConfig: (patch: unknown) => ipcRenderer.invoke('imageGen:setConfig', patch) as Promise<{ success: boolean; config?: unknown; error?: string }>,
+    test: (cfg: unknown) => ipcRenderer.invoke('imageGen:test', cfg) as Promise<{ success: boolean; filePath?: string; mimeType?: string; error?: string }>,
+  },
+
   // 数据库操作
   db: {
     open: (dbPath: string, key?: string) => ipcRenderer.invoke('db:open', dbPath, key),

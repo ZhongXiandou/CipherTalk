@@ -6,8 +6,10 @@
  */
 import { useEffect, useState } from 'react'
 import { Button, Card, Description, InputGroup, Label, Switch, TextField } from '@heroui/react'
-import { AlertCircle, CheckCircle, Plug } from 'lucide-react'
+import { AlertCircle, CheckCircle, ExternalLink, Plug } from 'lucide-react'
 import type { EmbeddingConfig } from '@/types/electron'
+
+const SILICONFLOW_REFERRAL_URL = 'https://cloud.siliconflow.cn/i/lNl8YK1m'
 
 const DEFAULT_CFG: EmbeddingConfig = {
   enabled: false,
@@ -34,6 +36,10 @@ export default function EmbeddingTab() {
   }, [])
 
   const patch = (p: Partial<EmbeddingConfig>) => setCfg((c) => ({ ...c, ...p }))
+
+  const handleOpenSiliconFlowReferral = () => {
+    void window.electronAPI.shell.openExternal(SILICONFLOW_REFERRAL_URL)
+  }
 
   const handleTest = async () => {
     setTesting(true)
@@ -77,6 +83,10 @@ export default function EmbeddingTab() {
           <Card.Description>
             供 AI 助手做语义/向量检索，独立于聊天模型。需 OpenAI 兼容的嵌入接口（如硅基流动 bge-m3、通义、智谱、OpenAI）。
           </Card.Description>
+          <Button className="mt-3" onPress={handleOpenSiliconFlowReferral} size="sm" type="button" variant="outline">
+            <ExternalLink size={14} />
+            推荐：硅基流动
+          </Button>
         </div>
         <Switch
           aria-label={cfg.enabled ? '关闭语义检索嵌入模型' : '启用语义检索嵌入模型'}

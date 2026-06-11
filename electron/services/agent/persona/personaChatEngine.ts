@@ -30,9 +30,14 @@ function splitReplyBubbles(text: string): string[] {
 const FALLBACK_SPLIT_MIN_CHARS = 50
 const FALLBACK_MAX_BUBBLES = 5
 
+/** 语音气泡标记：行首 [语音]/【语音】，渲染端显示成微信语音条（见 PersonaChatPage）。 */
+const VOICE_MARKER_RE = /^[\[【]\s*(?:语音|voice)\s*[\]】]/i
+
 /** 模型偶尔无视分条规则直接发大段：按句子边界兜底拆成微信式短消息（已分条/不算长的原样返回）。 */
 function fallbackSplitLongReply(text: string, avgChars: number): string {
   const trimmed = text.trim()
+  // 语音消息本来就可以一大段（60 秒长语音很真实），不拆，拆了标记也会丢
+  if (VOICE_MARKER_RE.test(trimmed)) return text
   if (splitReplyBubbles(trimmed).length > 1) return text
   if (trimmed.length <= Math.max(FALLBACK_SPLIT_MIN_CHARS, avgChars * 2.5)) return text
 
@@ -187,6 +192,7 @@ export function buildPersonaSystemPrompt(
   persona: PersonaChatPersona,
   memories: string[],
   similarPairs: PersonaFewShot[] = [],
+  voiceEnabled = false,
 ): string {
   const { displayName, card, fewShots, stats, profile, notes } = persona
   const lines: string[] = [
@@ -265,6 +271,9 @@ export function buildPersonaSystemPrompt(
     '【聊天规则】',
     `- 微信短消息风格：单条 ${Math.max(stats.avgFriendMsgChars, 4)} 字左右；超过两句话必须拆成多条连发，每条之间用换行或「${BURST_JOINER}」分隔（会被拆成多条气泡发出），绝不要一条发一大段`,
     '- 回复几条由你根据上下文定：简单的话就一条，有内容的拆成 2-4 条，像真人打字那样一句一句发',
+    ...(voiceEnabled ? [
+      '- 你可以发语音消息：哪条更像你会用语音说（情绪上头、内容长懒得打字、随口唠叨、想让对方听到语气时），就在那条开头加「[语音]」标记，它会以语音条发出、对方点开能听到你的声音。语音可以比打字长、更口语化（带"呃""然后"这种），但别每条都语音，文字语音穿插才像真人',
+    ] : []),
     '- 上面的背景、经历、聊天片段都是你脑子里的记忆：只在话题相关时自然带一嘴，别一股脑往外倒',
     '- 禁止 markdown、列表、序号、emoji 之外的格式符号',
     '- 不知道、记不清的事就像真人一样含糊带过或反问，绝不编造具体细节',
@@ -289,10 +298,17 @@ export async function runPersonaChat(
         ])
       : [[], []]
 
+    // TTS 配好才允许模型发语音：没配时标记只会变成念不出的哑文本
+    let voiceEnabled = false
+    try {
+      const { isTtsAvailable } = await import('../../ai/ttsService')
+      voiceEnabled = isTtsAvailable()
+    } catch { /* TTS 不可用就纯文字 */ }
+
     reportAgentProgress({ stage: 'run_started', title: '正在组织语言' })
     const result = await generateText({
       model: createLanguageModel(input.providerConfig),
-      system: buildPersonaSystemPrompt(input.persona, memories, similarPairs),
+      system: buildPersonaSystemPrompt(input.persona, memories, similarPairs, voiceEnabled),
       messages: input.messages,
       temperature: PERSONA_TEMPERATURE,
       abortSignal: signal,

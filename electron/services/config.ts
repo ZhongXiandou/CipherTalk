@@ -146,6 +146,26 @@ interface ConfigSchema {
     apiKey: string
     maxResults: number
   }
+  // 文字转语音 —— 朗读 AI 回复/微信消息/角色语音回复，独立于聊天模型
+  // protocol: openai-speech = 标准 /audio/speech；openai-chat = 聊天接口出音频（gpt-4o-audio 风格，小米等）
+  ttsConfig: {
+    enabled: boolean
+    protocol: 'openai-speech' | 'openai-chat'
+    apiKey: string
+    baseURL: string
+    model: string
+    voice: string
+    speed: number
+  }
+  // AI 作图 —— AI 助手 generate_image 工具用，独立于聊天模型
+  imageGenConfig: {
+    enabled: boolean
+    protocol: 'openai-compatible' | 'openai' | 'google'
+    apiKey: string
+    baseURL: string
+    model: string
+    size: string
+  }
   // 主进程探测到的系统代理 URL（写入后供 AI 子进程/嵌入跨进程读取；子进程无 session API 探测不了）
   aiResolvedProxyUrl: string
   // AI 宠物（petdex 宠物包格式，用户宠物包存放在 cachePath/pets/<slug>/）
@@ -239,6 +259,23 @@ const defaults: ConfigSchema = {
     enabled: false,
     apiKey: '',
     maxResults: 5,
+  },
+  ttsConfig: {
+    enabled: false,
+    protocol: 'openai-speech',
+    apiKey: '',
+    baseURL: 'https://api.siliconflow.cn/v1',
+    model: 'FunAudioLLM/CosyVoice2-0.5B',
+    voice: 'FunAudioLLM/CosyVoice2-0.5B:anna',
+    speed: 1,
+  },
+  imageGenConfig: {
+    enabled: false,
+    protocol: 'openai-compatible',
+    apiKey: '',
+    baseURL: 'https://api.siliconflow.cn/v1',
+    model: 'Kwai-Kolors/Kolors',
+    size: '1024x1024',
   },
   aiResolvedProxyUrl: '',
   petCurrent: '',

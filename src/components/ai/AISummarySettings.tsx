@@ -37,6 +37,8 @@ import AIProviderLogo from './AIProviderLogo'
 import EmbeddingTab from '../settings/tabs/EmbeddingTab'
 import RerankTab from '../settings/tabs/RerankTab'
 import WebSearchTab from '../settings/tabs/WebSearchTab'
+import TtsTab from '../settings/tabs/TtsTab'
+import ImageGenTab from '../settings/tabs/ImageGenTab'
 
 type AiProviderProtocol = configService.AiProviderProtocol
 type PresetTab = 'name' | 'provider' | 'config'
@@ -316,7 +318,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
   const [remoteModelDetails, setRemoteModelDetails] = useState<AIModelInfo[]>([])
   const [modelListError, setModelListError] = useState('')
   const [presets, setPresets] = useState<configService.AiConfigPreset[]>([])
-  const [configMode, setConfigMode] = useState<'llm' | 'vector' | 'rerank' | 'webSearch'>('llm')
+  const [configMode, setConfigMode] = useState<'llm' | 'vector' | 'rerank' | 'webSearch' | 'tts' | 'imageGen'>('llm')
   const [showPresetDrawer, setShowPresetDrawer] = useState(false)
   const [showSavePresetDialog, setShowSavePresetDialog] = useState(false)
   const [presetName, setPresetName] = useState('')
@@ -761,13 +763,15 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
               </>
             )}
             {/* 大模型 / 向量 / 重排 切换：同一套 UI 配置不同对象 */}
-            <Tabs className="shrink-0" selectedKey={configMode} onSelectionChange={(key) => setConfigMode(key as 'llm' | 'vector' | 'rerank' | 'webSearch')}>
+            <Tabs className="shrink-0" selectedKey={configMode} onSelectionChange={(key) => setConfigMode(key as 'llm' | 'vector' | 'rerank' | 'webSearch' | 'tts' | 'imageGen')}>
               <Tabs.ListContainer>
                 <Tabs.List aria-label="配置类型">
                   <Tabs.Tab className="whitespace-nowrap" id="llm">大模型<Tabs.Indicator /></Tabs.Tab>
                   <Tabs.Tab className="whitespace-nowrap" id="vector">向量<Tabs.Indicator /></Tabs.Tab>
                   <Tabs.Tab className="whitespace-nowrap" id="rerank">重排<Tabs.Indicator /></Tabs.Tab>
                   <Tabs.Tab className="whitespace-nowrap" id="webSearch">联网<Tabs.Indicator /></Tabs.Tab>
+                  <Tabs.Tab className="whitespace-nowrap" id="tts">语音<Tabs.Indicator /></Tabs.Tab>
+                  <Tabs.Tab className="whitespace-nowrap" id="imageGen">作图<Tabs.Indicator /></Tabs.Tab>
                 </Tabs.List>
               </Tabs.ListContainer>
             </Tabs>
@@ -1017,6 +1021,8 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
         {configMode === 'vector' && <EmbeddingTab />}
         {configMode === 'rerank' && <RerankTab />}
         {configMode === 'webSearch' && <WebSearchTab />}
+        {configMode === 'tts' && <TtsTab />}
+        {configMode === 'imageGen' && <ImageGenTab />}
       </div>
 
       {settingsPagePortalHost && createPortal(

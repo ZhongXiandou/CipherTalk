@@ -51,6 +51,7 @@ import { Loader } from '@/components/ai-elements/loader'
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import { IpcChatTransport, type AgentModelConfig, type AgentProgressEvent, type AgentReasoningEffort, type AgentScope } from '@/features/aiagent/transport/ipcChatTransport'
 import * as configService from '@/services/config'
+import { useTtsSpeaker } from '@/lib/ttsPlayer'
 
 const PROMPT_PRESETS = [
   { label: '最近聊了什么', text: '最近一周我和大家主要聊了什么？按主题总结，并列出关键时间。', icon: Clock3 },
@@ -261,6 +262,7 @@ const TOOL_LABELS: Record<string, string> = {
   search_moments: '搜索朋友圈',
   moments_stats: '朋友圈统计',
   web_search: '联网搜索',
+  generate_image: '生成图片',
   auto_memory: '自动记忆',
   final_review: '最终审核',
 }
@@ -1659,7 +1661,7 @@ export default function AgentPage() {
   const [agentNotice, setAgentNotice] = useState('')
   const [usageDetailsModal, setUsageDetailsModal] = useState<AgentMessageMetadata | null>(null)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
-  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null)
+  const { speakingKey: speakingMessageId, speak: speakMessage, stop: stopSpeakingMessage } = useTtsSpeaker()
   const selectedPreset = useMemo(
     () => presets.find((preset) => preset.id === selectedPresetId) || null,
     [presets, selectedPresetId]
@@ -1786,29 +1788,13 @@ export default function AgentPage() {
   }, [])
 
   const handleSpeakAssistantMessage = useCallback((messageId: string, text: string) => {
-    if (!text || typeof window === 'undefined' || !('speechSynthesis' in window)) return
-    if (speakingMessageId === messageId) {
-      window.speechSynthesis.cancel()
-      setSpeakingMessageId(null)
-      return
-    }
-
-    window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = 'zh-CN'
-    utterance.onend = () => setSpeakingMessageId((current) => current === messageId ? null : current)
-    utterance.onerror = () => setSpeakingMessageId((current) => current === messageId ? null : current)
-    setSpeakingMessageId(messageId)
-    window.speechSynthesis.speak(utterance)
-  }, [speakingMessageId])
+    if (!text) return
+    void speakMessage(messageId, text)
+  }, [speakMessage])
 
   useEffect(() => {
-    return () => {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel()
-      }
-    }
-  }, [])
+    return () => { stopSpeakingMessage() }
+  }, [stopSpeakingMessage])
   const [conversationId, setConversationId] = useState<number | null>(null)
   const conversationIdRef = useRef(conversationId)
   conversationIdRef.current = conversationId
@@ -2258,10 +2244,7 @@ export default function AgentPage() {
     const files = userMessage.parts.filter((part): part is Extract<UIMessage['parts'][number], { type: 'file' }> => part.type === 'file')
     if (!text && files.length === 0) return
 
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel()
-      setSpeakingMessageId(null)
-    }
+    stopSpeakingMessage()
     setAgentNotice('')
     setAgentProgress([{ stage: 'run_started', title: AGENT_PENDING_TITLE, detail: '正在重新生成回答', at: Date.now() }])
     setAgentRunPending(true)
@@ -2640,6 +2623,26 @@ export default function AgentPage() {
                           <MessageAttachments key={`file-${index}`}>
                             <MessageAttachment data={part} />
                           </MessageAttachments>
+                        )
+                      }
+                      // generate_image 工具的产出图：直接展示在消息流里，点击在文件夹中打开
+                      if (part.type === 'tool-generate_image' && part.state === 'output-available') {
+                        const filePath = String((part.output as { filePath?: unknown } | undefined)?.filePath || '')
+                        if (!filePath) return null
+                        return (
+                          <button
+                            className="mt-1 block w-fit cursor-zoom-in border-0 bg-transparent p-0 text-left"
+                            key={`genimg-${index}`}
+                            onClick={() => { void window.electronAPI.shell.showItemInFolder(filePath) }}
+                            title="点击在文件夹中查看"
+                            type="button"
+                          >
+                            <img
+                              alt="AI 生成的图片"
+                              className="max-h-90 max-w-full rounded-(--agent-radius,12px) border border-border/60 shadow-xs"
+                              src={`local-image://${encodeURIComponent(filePath)}`}
+                            />
+                          </button>
                         )
                       }
                       return null

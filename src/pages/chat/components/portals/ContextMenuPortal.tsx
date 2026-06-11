@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom'
-import { CheckSquare, Copy, Download, Edit, Info, RefreshCw, ZoomIn } from 'lucide-react'
+import { CheckSquare, Copy, Download, Edit, Info, RefreshCw, Volume2, VolumeX, ZoomIn } from 'lucide-react'
+import { useTtsSpeaker } from '@/lib/ttsPlayer'
 import type { ChatSession, Message } from '../../../../types/models'
 import type { ContextMenuState } from '../../types'
 
@@ -28,7 +29,10 @@ export function ContextMenuPortal({
   exportVoiceMessage,
   setShowMessageInfo
 }: ContextMenuPortalProps) {
+  const { speakingKey, speak } = useTtsSpeaker()
   if (!contextMenu) return null
+  const speakKey = `wxmsg-${contextMenu.message.localId}`
+  const isSpeakingThis = speakingKey === speakKey
 
   return createPortal(
     <div
@@ -82,6 +86,18 @@ export function ContextMenuPortal({
             >
               <ZoomIn size={16} />
               <span>放大阅读</span>
+            </div>
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                closeContextMenu()
+                void speak(speakKey, contextMenu.message.parsedContent || '').then((res) => {
+                  if (!res.ok && res.error) showTopToast(res.error, false)
+                })
+              }}
+            >
+              {isSpeakingThis ? <VolumeX size={16} /> : <Volume2 size={16} />}
+              <span>{isSpeakingThis ? '停止朗读' : '朗读'}</span>
             </div>
           </>
         )}

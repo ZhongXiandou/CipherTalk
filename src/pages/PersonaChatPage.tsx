@@ -11,6 +11,7 @@ import { useChat } from '@ai-sdk/react'
 import { AlertDialog, Button, ProgressBar, Label, Tooltip } from '@heroui/react'
 import type { UIMessage } from 'ai'
 import { PersonaChatTransport } from '../features/aiagent/transport/personaChatTransport'
+import { useTtsSpeaker } from '../lib/ttsPlayer'
 import { parseWechatEmoji } from '../utils/wechatEmoji'
 import type { PersonaBuildProgressInfo, PersonaRecordInfo } from '../types/electron'
 
@@ -26,6 +27,44 @@ function messageText(message: UIMessage): string {
 /** 模型按"换行或／即分条"输出，两种分隔都拆成微信式的多条气泡。 */
 function splitBubbles(text: string): string[] {
   return text.split(/[\n／]/).map((line) => line.trim()).filter(Boolean)
+}
+
+/** 语音气泡标记（与 personaChatEngine 的提示词约定一致）：行首 [语音]/【语音】。 */
+const VOICE_MARKER_RE = /^[\[【]\s*(?:语音|voice)\s*[\]】]\s*/i
+
+interface PersonaBubble {
+  text: string
+  isVoice: boolean
+  /** 估算语音时长（秒）：中文语速约 4 字/秒，1-60 截断 */
+  seconds: number
+}
+
+function parseBubble(raw: string): PersonaBubble {
+  const match = raw.match(VOICE_MARKER_RE)
+  if (!match) return { text: raw, isVoice: false, seconds: 0 }
+  const text = raw.slice(match[0].length).trim()
+  if (!text) return { text: raw, isVoice: false, seconds: 0 }
+  return { text, isVoice: true, seconds: Math.min(60, Math.max(1, Math.round(Array.from(text).length / 4))) }
+}
+
+/** 微信语音条的声波图标：播放中三道弧线依次闪烁。 */
+function VoiceWaves({ playing }: { playing: boolean }) {
+  return (
+    <svg
+      className="shrink-0"
+      fill="none"
+      height="16"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeWidth="2.2"
+      viewBox="0 0 24 24"
+      width="16"
+    >
+      <path className={playing ? 'animate-pulse' : ''} d="M6 9.5a4.2 4.2 0 0 1 0 5" />
+      <path className={playing ? 'animate-pulse' : ''} d="M9.5 7a8 8 0 0 1 0 10" style={playing ? { animationDelay: '0.25s' } : undefined} />
+      <path className={playing ? 'animate-pulse' : ''} d="M13 4.5a12 12 0 0 1 0 15" style={playing ? { animationDelay: '0.5s' } : undefined} />
+    </svg>
+  )
 }
 
 function PersonaAvatar({ name, avatarUrl, size }: { name: string; avatarUrl?: string; size: number }) {
@@ -82,6 +121,45 @@ export default function PersonaChatPage() {
   const transport = useMemo(() => new PersonaChatTransport(() => sessionId), [sessionId])
   const { messages, sendMessage, setMessages, status, stop, error } = useChat({ transport, experimental_throttle: 50 })
   const busy = status === 'submitted' || status === 'streaming'
+
+  // 语音消息：模型自己决定哪条用语音发（行首 [语音] 标记），这里负责微信式的"点开听"
+  const { speakingKey, speak: speakVoice, stop: stopVoice } = useTtsSpeaker()
+  /** 已听过的语音气泡 key（message.id:index）；恢复历史时全部预置为已听，新来的才有红点 */
+  const [playedVoice, setPlayedVoice] = useState<Set<string>>(() => new Set())
+  /** 播放失败（TTS 不可用等）兜底显示文字的气泡 */
+  const [revealedVoice, setRevealedVoice] = useState<Set<string>>(() => new Set())
+  /** 连播链 id：点新语音/停止时自增，旧的连播循环检测到后退出 */
+  const voiceChainRef = useRef(0)
+  useEffect(() => () => { stopVoice() }, [stopVoice])
+
+  const markVoicePlayed = (key: string) => {
+    setPlayedVoice((prev) => {
+      if (prev.has(key)) return prev
+      const next = new Set(prev)
+      next.add(key)
+      return next
+    })
+  }
+
+  /** 点开一条语音：先播它，然后像微信一样自动连播本条消息里后续未听过的语音。 */
+  const handlePlayVoice = async (messageId: string, bubbles: PersonaBubble[], startIndex: number) => {
+    const chain = ++voiceChainRef.current
+    for (let i = startIndex; i < bubbles.length; i += 1) {
+      if (voiceChainRef.current !== chain) return
+      const bubble = bubbles[i]
+      if (!bubble.isVoice) continue
+      const key = `${messageId}:${i}`
+      if (i > startIndex && playedVoice.has(key)) continue
+      markVoicePlayed(key)
+      const res = await speakVoice(key, bubble.text, { awaitEnd: true })
+      if (voiceChainRef.current !== chain || res.stopped) return
+      if (!res.ok) {
+        // 念不出来就把文字亮出来兜底
+        setRevealedVoice((prev) => new Set(prev).add(key))
+        return
+      }
+    }
+  }
   // AI 已经开始逐条吐气泡后就不再显示"正在输入"指示器，否则像凭空多了一条带头像的消息
   const lastMessage = messages[messages.length - 1]
   const showTypingIndicator = busy && !(lastMessage?.role === 'assistant' && messageText(lastMessage).trim().length > 0)
@@ -181,6 +259,15 @@ export default function PersonaChatPage() {
             setConversationId(conv.id)
             lastSavedCountRef.current = conv.messages.length
             setMessages(conv.messages)
+            // 历史里的语音视为已听过：红点只给本次会话新收到的语音
+            const played = new Set<string>()
+            for (const message of conv.messages) {
+              if (message.role !== 'assistant') continue
+              splitBubbles(messageText(message)).forEach((raw, index) => {
+                if (parseBubble(raw).isVoice) played.add(`${message.id}:${index}`)
+              })
+            }
+            setPlayedVoice(played)
           }
         } catch { /* 恢复失败就从空对话开始 */ }
       } else {
@@ -424,25 +511,51 @@ export default function PersonaChatPage() {
           </div>
         )}
         {messages.map((message) => {
-          const bubbles = splitBubbles(messageText(message))
-          if (bubbles.length === 0) return null
+          const rawBubbles = splitBubbles(messageText(message))
+          if (rawBubbles.length === 0) return null
+          const bubbles = rawBubbles.map(parseBubble)
           const isMine = message.role === 'user'
           return (
             <div key={message.id} className={`flex w-full gap-2 ${isMine ? 'justify-end' : 'justify-start'}`}>
               {!isMine && <PersonaAvatar name={displayName} avatarUrl={avatarUrl} size={30} />}
               <div className={`flex max-w-[78%] flex-col gap-1 ${isMine ? 'items-end' : 'items-start'}`}>
-                {bubbles.map((bubble, index) => (
-                  <div
-                    key={`${message.id}:${index}`}
-                    className={`whitespace-pre-wrap wrap-break-word rounded-2xl px-3 py-2 text-sm ${
-                      isMine
-                        ? 'rounded-tr-sm bg-success-soft text-success-soft-foreground'
-                        : 'rounded-tl-sm bg-surface text-foreground'
-                    }`}
-                  >
-                    {parseWechatEmoji(bubble)}
-                  </div>
-                ))}
+                {bubbles.map((bubble, index) => {
+                  const bubbleKey = `${message.id}:${index}`
+                  if (bubble.isVoice && !isMine) {
+                    const playing = speakingKey === bubbleKey
+                    const unplayed = !playedVoice.has(bubbleKey)
+                    return (
+                      <div key={bubbleKey} className="flex items-center gap-1.5">
+                        <button
+                          aria-label={playing ? '停止播放语音' : `播放语音，约 ${bubble.seconds} 秒`}
+                          className="flex cursor-pointer items-center rounded-2xl rounded-tl-sm border-0 bg-surface px-3 py-2.5 text-sm text-foreground transition-colors hover:bg-surface/80"
+                          onClick={() => { void handlePlayVoice(message.id, bubbles, index) }}
+                          style={{ width: Math.min(220, 88 + bubble.seconds * 3) }}
+                          type="button"
+                        >
+                          <VoiceWaves playing={playing} />
+                          <span className="ml-auto text-xs text-muted">{bubble.seconds}″</span>
+                        </button>
+                        {unplayed && <span aria-label="未播放" className="size-2 shrink-0 rounded-full bg-red-500" />}
+                        {revealedVoice.has(bubbleKey) && (
+                          <span className="max-w-50 text-xs text-muted">{bubble.text}</span>
+                        )}
+                      </div>
+                    )
+                  }
+                  return (
+                    <div
+                      key={bubbleKey}
+                      className={`whitespace-pre-wrap wrap-break-word rounded-2xl px-3 py-2 text-sm ${
+                        isMine
+                          ? 'rounded-tr-sm bg-success-soft text-success-soft-foreground'
+                          : 'rounded-tl-sm bg-surface text-foreground'
+                      }`}
+                    >
+                      {parseWechatEmoji(bubble.text)}
+                    </div>
+                  )
+                })}
               </div>
               {isMine && <PersonaAvatar name="我" avatarUrl={myAvatarUrl} size={30} />}
             </div>

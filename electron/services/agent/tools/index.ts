@@ -23,6 +23,7 @@ import { createRemember, createRecall, createListMemories, createForget, createC
 import { createDelegateAnalysis } from './delegateAnalysis'
 import { buildMcpTools } from './mcpExternal'
 import { webSearch } from './webSearch'
+import { generateImage } from './generateImage'
 
 /** 基础读/查工具（不含 delegate_analysis），主 Agent 与子 Agent 共用。 */
 export function buildBaseTools(_scope: AgentScope): ToolSet {
@@ -69,11 +70,12 @@ export function buildPlanModeTools(_scope: AgentScope): ToolSet {
   }
 }
 
-export function buildTools(scope: AgentScope, providerConfig: AgentProviderConfig, mcpTools: AgentMcpToolDescriptor[] = [], enableWebSearch = false): ToolSet {
+export function buildTools(scope: AgentScope, providerConfig: AgentProviderConfig, mcpTools: AgentMcpToolDescriptor[] = [], enableWebSearch = false, enableImageGen = false): ToolSet {
   return {
     ...buildBaseTools(scope),
     ...buildMcpTools(mcpTools),
     ...(enableWebSearch ? { web_search: webSearch } : {}),
+    ...(enableImageGen ? { generate_image: generateImage } : {}),
     remember: createRemember(scope),
     recall: createRecall(scope),
     list_memories: createListMemories(scope),

@@ -513,6 +513,79 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     }
   })
 
+  // ========== 文字转语音（TTS） ==========
+
+  ipcMain.handle('tts:getConfig', async () => {
+    try {
+      const { getTtsConfig, isTtsAvailable } = await import('../../services/ai/ttsService')
+      const config = getTtsConfig()
+      return { success: true, config, available: isTtsAvailable(config) }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('tts:setConfig', async (_e, patch: Record<string, unknown>) => {
+    try {
+      const { saveTtsConfig } = await import('../../services/ai/ttsService')
+      return { success: true, config: saveTtsConfig(patch as any) }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('tts:test', async (_e, cfg: any) => {
+    try {
+      const { testTtsConfig } = await import('../../services/ai/ttsService')
+      const { refreshResolvedProxyUrl } = await import('../../services/ai/proxyFetch')
+      await refreshResolvedProxyUrl() // 测试也走代理，保证"测试通过=实际可用"
+      return await testTtsConfig(cfg)
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e), errorCode: 'SYNTHESIS_FAILED' }
+    }
+  })
+
+  ipcMain.handle('tts:speak', async (_e, text: string) => {
+    try {
+      const { synthesizeSpeech } = await import('../../services/ai/ttsService')
+      return await synthesizeSpeech(String(text || ''))
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e), errorCode: 'SYNTHESIS_FAILED' }
+    }
+  })
+
+  // ========== AI 作图 ==========
+
+  ipcMain.handle('imageGen:getConfig', async () => {
+    try {
+      const { getImageGenConfig, isImageGenAvailable } = await import('../../services/ai/imageGenService')
+      const config = getImageGenConfig()
+      return { success: true, config, available: isImageGenAvailable(config) }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('imageGen:setConfig', async (_e, patch: Record<string, unknown>) => {
+    try {
+      const { saveImageGenConfig } = await import('../../services/ai/imageGenService')
+      return { success: true, config: saveImageGenConfig(patch as any) }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('imageGen:test', async (_e, cfg: any) => {
+    try {
+      const { testImageGenConfig } = await import('../../services/ai/imageGenService')
+      const { refreshResolvedProxyUrl } = await import('../../services/ai/proxyFetch')
+      await refreshResolvedProxyUrl() // 测试也走代理，保证"测试通过=实际可用"
+      return await testImageGenConfig(cfg)
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
   // 某会话的向量化状态：是否启用嵌入 + 已建片段数
   ipcMain.handle('embedding:sessionStatus', async (_e, sessionId: string) => {
     try {

@@ -28,6 +28,33 @@ export interface WebSearchConfig {
   maxResults: number
 }
 
+export interface TtsConfig {
+  enabled: boolean
+  protocol: 'openai-speech' | 'openai-chat'
+  apiKey: string
+  baseURL: string
+  model: string
+  voice: string
+  speed: number
+}
+
+export interface TtsSpeakResult {
+  success: boolean
+  audioBase64?: string
+  mimeType?: string
+  error?: string
+  errorCode?: 'NOT_CONFIGURED' | 'SYNTHESIS_FAILED'
+}
+
+export interface ImageGenConfig {
+  enabled: boolean
+  protocol: 'openai-compatible' | 'openai' | 'google'
+  apiKey: string
+  baseURL: string
+  model: string
+  size: string
+}
+
 export interface EmbeddingBuildProgress {
   sessionId: string
   stage: 'loading' | 'chunking' | 'embedding' | 'done'
@@ -1134,6 +1161,17 @@ export interface ElectronAPI {
     getConfig: () => Promise<{ success: boolean; config?: WebSearchConfig; error?: string }>
     setConfig: (patch: Partial<WebSearchConfig>) => Promise<{ success: boolean; config?: WebSearchConfig; error?: string }>
     test: (cfg: WebSearchConfig) => Promise<{ success: boolean; resultCount?: number; error?: string }>
+  }
+  tts: {
+    getConfig: () => Promise<{ success: boolean; config?: TtsConfig; available?: boolean; error?: string }>
+    setConfig: (patch: Partial<TtsConfig>) => Promise<{ success: boolean; config?: TtsConfig; error?: string }>
+    test: (cfg: Partial<TtsConfig>) => Promise<TtsSpeakResult>
+    speak: (text: string) => Promise<TtsSpeakResult>
+  }
+  imageGen: {
+    getConfig: () => Promise<{ success: boolean; config?: ImageGenConfig; available?: boolean; error?: string }>
+    setConfig: (patch: Partial<ImageGenConfig>) => Promise<{ success: boolean; config?: ImageGenConfig; error?: string }>
+    test: (cfg: Partial<ImageGenConfig>) => Promise<{ success: boolean; filePath?: string; mimeType?: string; error?: string }>
   }
   // AI 接入
   ai: {
