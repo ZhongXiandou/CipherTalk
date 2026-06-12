@@ -1,24 +1,80 @@
 import { useEffect, useMemo, useState, type Key } from 'react'
-import { Button as HeroButton, Modal, ScrollShadow, Switch, Tabs, toast } from '@heroui/react'
-import { Check, Download, FileArchive, HelpCircle, Loader2, Monitor, Search, Trash2 } from 'lucide-react'
+import { Button as HeroButton, Input, Label, ListBox, Modal, ScrollShadow, Select, Switch, Tabs, TextArea, TextField, toast } from '@heroui/react'
+import { Bell, Bot, CalendarClock, Check, Download, FileArchive, HelpCircle, Loader2, Monitor, Plus, Search, Trash2, Volume2 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { PetSprite } from '../features/pets/PetSprite'
+import type { PersonaRecordInfo } from '../types/electron'
 
 type InstalledPet = { slug: string; displayName: string; description: string; spriteUrl: string; builtin?: boolean }
 type OnlinePet = { slug: string; displayName: string; submittedBy?: string; spritesheetUrl: string }
+type PetTab = 'gallery' | 'installed' | 'interaction'
+type PetReminderKind = 'once' | 'daily' | 'yearly'
+type PetReminder = {
+  id: string
+  text: string
+  kind: PetReminderKind
+  date?: string
+  time: string
+  lastFired?: string
+}
+type ReminderDraft = {
+  text: string
+  kind: PetReminderKind
+  date: string
+  time: string
+}
 
 const ONLINE_PAGE_SIZE = 30
+const AI_ASSISTANT_KEY = '__ai_assistant__'
+
+function localDateInputValue(date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function defaultReminderTime(): string {
+  const date = new Date()
+  date.setMinutes(date.getMinutes() + 10)
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+function createReminderId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
+  return `reminder-${Date.now()}-${Math.floor(Math.random() * 1e9)}`
+}
+
+function reminderKindLabel(kind: PetReminderKind): string {
+  if (kind === 'daily') return '每天'
+  if (kind === 'yearly') return '每年'
+  return '一次'
+}
+
+function formatReminderSchedule(reminder: PetReminder): string {
+  if (reminder.kind === 'daily') return `每天 ${reminder.time}`
+  if (reminder.kind === 'yearly') return `每年 ${String(reminder.date || '').slice(5)} ${reminder.time}`
+  return `${reminder.date || '未设日期'} ${reminder.time}`
+}
 
 /**
  * AI 宠物页：宠物库（petdex.dev 在线画廊）/ 已安装 两个 Tab，
  * 支持在线领养和本地压缩包导入。选中的宠物展示在 AI 助手页和桌面桌宠。
  */
 export default function PetsPage() {
-  const [tab, setTab] = useState<'gallery' | 'installed'>('gallery')
+  const [tab, setTab] = useState<PetTab>('gallery')
   const [helpOpen, setHelpOpen] = useState(false)
   const [installed, setInstalled] = useState<InstalledPet[]>([])
   const [currentSlug, setCurrentSlug] = useState('')
   const [desktopEnabled, setDesktopEnabled] = useState(false)
+  const [personas, setPersonas] = useState<PersonaRecordInfo[]>([])
+  const [personaSessionId, setPersonaSessionId] = useState('')
+  const [ttsEnabled, setTtsEnabled] = useState(false)
+  const [dailySummaryEnabled, setDailySummaryEnabled] = useState(true)
+  const [reminders, setReminders] = useState<PetReminder[]>([])
+  const [reminderDraft, setReminderDraft] = useState<ReminderDraft>({
+    text: '',
+    kind: 'once',
+    date: localDateInputValue(),
+    time: defaultReminderTime(),
+  })
   const [online, setOnline] = useState<OnlinePet[] | null>(null)
   const [onlineError, setOnlineError] = useState('')
   const [query, setQuery] = useState('')
@@ -40,12 +96,29 @@ export default function PetsPage() {
     void loadInstalled()
     void window.electronAPI.config.get('petCurrent').then((value) => setCurrentSlug((value as string) || ''))
     void window.electronAPI.config.get('petDesktopEnabled').then((value) => setDesktopEnabled(Boolean(value)))
+    void window.electronAPI.config.get('petPersonaSessionId').then((value) => setPersonaSessionId(String(value || '')))
+    void window.electronAPI.config.get('petTtsEnabled').then((value) => setTtsEnabled(Boolean(value)))
+    void window.electronAPI.config.get('petDailySummaryEnabled').then((value) => setDailySummaryEnabled(value !== false))
+    void window.electronAPI.config.get('petReminders').then((value) => {
+      setReminders(Array.isArray(value) ? (value as PetReminder[]) : [])
+    })
+    void window.electronAPI.persona.list().then((res) => {
+      if (res.success && res.personas) setPersonas(res.personas)
+    })
     window.electronAPI.pet.manifest()
       .then((res) => {
         if (res.success && res.pets) setOnline(res.pets)
         else setOnlineError(res.error || '在线宠物库加载失败')
       })
       .catch((error) => setOnlineError(String(error)))
+
+    const off = window.electronAPI.config.onChanged(({ key, value }) => {
+      if (key === 'petPersonaSessionId') setPersonaSessionId(String(value || ''))
+      if (key === 'petTtsEnabled') setTtsEnabled(Boolean(value))
+      if (key === 'petDailySummaryEnabled') setDailySummaryEnabled(value !== false)
+      if (key === 'petReminders') setReminders(Array.isArray(value) ? (value as PetReminder[]) : [])
+    })
+    return off
   }, [])
 
   const filteredOnline = useMemo(() => {
@@ -111,13 +184,65 @@ export default function PetsPage() {
     await window.electronAPI.pet.toggleDesktopWindow(enabled)
   }
 
+  const selectPersona = async (key: Key | null) => {
+    const value = key == null || String(key) === AI_ASSISTANT_KEY ? '' : String(key)
+    setPersonaSessionId(value)
+    await window.electronAPI.config.set('petPersonaSessionId', value)
+  }
+
+  const toggleTts = async (enabled: boolean) => {
+    setTtsEnabled(enabled)
+    await window.electronAPI.config.set('petTtsEnabled', enabled)
+  }
+
+  const toggleDailySummary = async (enabled: boolean) => {
+    setDailySummaryEnabled(enabled)
+    await window.electronAPI.config.set('petDailySummaryEnabled', enabled)
+    if (enabled) await window.electronAPI.config.set('petDailySummaryDate', '')
+  }
+
+  const saveReminders = async (next: PetReminder[]) => {
+    setReminders(next)
+    await window.electronAPI.config.set('petReminders', next)
+  }
+
+  const addReminder = async () => {
+    const text = reminderDraft.text.trim()
+    if (!text) {
+      toast.danger('先写提醒内容')
+      return
+    }
+    if (!reminderDraft.time) {
+      toast.danger('先设置提醒时间')
+      return
+    }
+    if (reminderDraft.kind !== 'daily' && !reminderDraft.date) {
+      toast.danger('先设置提醒日期')
+      return
+    }
+    const next: PetReminder = {
+      id: createReminderId(),
+      text,
+      kind: reminderDraft.kind,
+      time: reminderDraft.time,
+      ...(reminderDraft.kind === 'daily' ? {} : { date: reminderDraft.date }),
+    }
+    await saveReminders([...reminders, next])
+    setReminderDraft((draft) => ({ ...draft, text: '' }))
+  }
+
+  const removeReminder = async (id: string) => {
+    await saveReminders(reminders.filter((item) => item.id !== id))
+  }
+
   const petGridClass = 'grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8'
+  const currentPersona = personas.find((persona) => persona.sessionId === personaSessionId)
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       {/* 顶栏：Tab 切换 + 说明 + 桌宠开关 */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-        <Tabs selectedKey={tab} onSelectionChange={(key: Key) => setTab(key === 'installed' ? 'installed' : 'gallery')}>
+        <Tabs selectedKey={tab} onSelectionChange={(key: Key) => setTab(key === 'installed' || key === 'interaction' ? key : 'gallery')}>
           <Tabs.ListContainer>
             <Tabs.List aria-label="宠物页签">
               <Tabs.Tab id="gallery">
@@ -126,6 +251,10 @@ export default function PetsPage() {
               </Tabs.Tab>
               <Tabs.Tab className="whitespace-nowrap" id="installed">
                 已安装{installed.length > 0 ? `（${installed.length}）` : ''}
+                <Tabs.Indicator />
+              </Tabs.Tab>
+              <Tabs.Tab id="interaction">
+                互动
                 <Tabs.Indicator />
               </Tabs.Tab>
             </Tabs.List>
@@ -220,7 +349,7 @@ export default function PetsPage() {
               </>
             )}
           </section>
-        ) : (
+        ) : tab === 'installed' ? (
           <section>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <span className="text-muted text-sm">点击宠物选用或取消，普通宠物悬停可删除</span>
@@ -284,6 +413,181 @@ export default function PetsPage() {
                 })}
               </div>
             )}
+          </section>
+        ) : (
+          <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="flex flex-col gap-4">
+              <div className="rounded-2xl border border-border bg-surface p-4">
+                <div className="mb-4 flex items-start gap-3">
+                  <span className="rounded-full bg-primary/10 p-2 text-primary">
+                    <Bot className="size-4.5" />
+                  </span>
+                  <div className="min-w-0">
+                    <h2 className="font-semibold text-foreground text-sm">数字分身实体</h2>
+                    <p className="mt-0.5 text-muted text-xs">点击桌宠时使用这里绑定的分身对话；未绑定时走 AI 助手。</p>
+                  </div>
+                </div>
+                <Select
+                  fullWidth
+                  onSelectionChange={(key) => void selectPersona(key)}
+                  placeholder="AI 助手"
+                  selectedKey={personaSessionId || AI_ASSISTANT_KEY}
+                  variant="secondary"
+                >
+                  <Label>快捷对话对象</Label>
+                  <Select.Trigger>
+                    <Select.Value>
+                      {() => currentPersona?.displayName || 'AI 助手'}
+                    </Select.Value>
+                    <Select.Indicator />
+                  </Select.Trigger>
+                  <Select.Popover>
+                    <ListBox>
+                      <ListBox.Item id={AI_ASSISTANT_KEY} textValue="AI 助手">
+                        AI 助手
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                      {personas.map((persona) => (
+                        <ListBox.Item id={persona.sessionId} key={persona.sessionId} textValue={persona.displayName}>
+                          {persona.displayName}
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                      ))}
+                    </ListBox>
+                  </Select.Popover>
+                </Select>
+                {personas.length === 0 && (
+                  <p className="mt-2 text-muted text-xs">还没有数字分身，创建后会出现在这里。</p>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-border bg-surface p-4">
+                <div className="mb-4 flex items-start gap-3">
+                  <span className="rounded-full bg-primary/10 p-2 text-primary">
+                    <Volume2 className="size-4.5" />
+                  </span>
+                  <div className="min-w-0">
+                    <h2 className="font-semibold text-foreground text-sm">播报</h2>
+                    <p className="mt-0.5 text-muted text-xs">桌宠气泡、每日摘要和快捷对话回复可使用已配置的 TTS 朗读。</p>
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface-secondary px-3 py-2">
+                    <span className="text-foreground text-sm">朗读气泡和回复</span>
+                    <Switch aria-label="朗读气泡和回复" isSelected={ttsEnabled} onChange={(selected) => void toggleTts(Boolean(selected))}>
+                      <Switch.Control>
+                        <Switch.Thumb />
+                      </Switch.Control>
+                    </Switch>
+                  </label>
+                  <label className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface-secondary px-3 py-2">
+                    <span className="text-foreground text-sm">每日摘要播报</span>
+                    <Switch aria-label="每日摘要播报" isSelected={dailySummaryEnabled} onChange={(selected) => void toggleDailySummary(Boolean(selected))}>
+                      <Switch.Control>
+                        <Switch.Thumb />
+                      </Switch.Control>
+                    </Switch>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-surface p-4">
+              <div className="mb-4 flex items-start gap-3">
+                <span className="rounded-full bg-primary/10 p-2 text-primary">
+                  <CalendarClock className="size-4.5" />
+                </span>
+                <div className="min-w-0">
+                  <h2 className="font-semibold text-foreground text-sm">纪念日 / 定时提醒</h2>
+                  <p className="mt-0.5 text-muted text-xs">到点后桌宠弹气泡；桌宠没开时走系统通知。</p>
+                </div>
+              </div>
+
+              <div className="grid gap-3">
+                <Select
+                  fullWidth
+                  onSelectionChange={(key) => {
+                    if (key) setReminderDraft((draft) => ({ ...draft, kind: key as PetReminderKind }))
+                  }}
+                  selectedKey={reminderDraft.kind}
+                  variant="secondary"
+                >
+                  <Label>类型</Label>
+                  <Select.Trigger>
+                    <Select.Value>{() => reminderKindLabel(reminderDraft.kind)}</Select.Value>
+                    <Select.Indicator />
+                  </Select.Trigger>
+                  <Select.Popover>
+                    <ListBox>
+                      <ListBox.Item id="once" textValue="一次提醒">一次提醒<ListBox.ItemIndicator /></ListBox.Item>
+                      <ListBox.Item id="daily" textValue="每天提醒">每天提醒<ListBox.ItemIndicator /></ListBox.Item>
+                      <ListBox.Item id="yearly" textValue="纪念日">纪念日<ListBox.ItemIndicator /></ListBox.Item>
+                    </ListBox>
+                  </Select.Popover>
+                </Select>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <TextField
+                    fullWidth
+                    isDisabled={reminderDraft.kind === 'daily'}
+                    onChange={(value) => setReminderDraft((draft) => ({ ...draft, date: value }))}
+                    type="date"
+                    value={reminderDraft.date}
+                  >
+                    <Label>{reminderDraft.kind === 'yearly' ? '纪念日日期' : '日期'}</Label>
+                    <Input variant="secondary" />
+                  </TextField>
+                  <TextField
+                    fullWidth
+                    onChange={(value) => setReminderDraft((draft) => ({ ...draft, time: value }))}
+                    type="time"
+                    value={reminderDraft.time}
+                  >
+                    <Label>时间</Label>
+                    <Input variant="secondary" />
+                  </TextField>
+                </div>
+
+                <TextField
+                  fullWidth
+                  onChange={(value) => setReminderDraft((draft) => ({ ...draft, text: value }))}
+                  value={reminderDraft.text}
+                >
+                  <Label>提醒内容</Label>
+                  <TextArea placeholder="例如：记得喝水，或者今天是纪念日" rows={3} variant="secondary" />
+                </TextField>
+
+                <HeroButton className="rounded-full" fullWidth onPress={() => void addReminder()} size="sm" variant="secondary">
+                  <Plus className="size-3.5" />
+                  添加提醒
+                </HeroButton>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {reminders.length === 0 ? (
+                  <p className="rounded-xl border border-border border-dashed px-3 py-4 text-center text-muted text-xs">
+                    暂无提醒
+                  </p>
+                ) : reminders.map((reminder) => (
+                  <div className="flex items-start gap-2 rounded-xl border border-border bg-surface-secondary px-3 py-2" key={reminder.id}>
+                    <Bell className="mt-0.5 size-3.5 shrink-0 text-muted" />
+                    <div className="min-w-0 flex-1">
+                      <p className="line-clamp-2 text-foreground text-xs">{reminder.text}</p>
+                      <p className="mt-0.5 text-muted text-[11px]">{formatReminderSchedule(reminder)}</p>
+                    </div>
+                    <HeroButton
+                      aria-label="删除提醒"
+                      isIconOnly
+                      onPress={() => void removeReminder(reminder.id)}
+                      size="sm"
+                      variant="ghost"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </HeroButton>
+                  </div>
+                ))}
+              </div>
+            </div>
           </section>
         )}
       </ScrollShadow>

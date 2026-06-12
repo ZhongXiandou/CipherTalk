@@ -1779,6 +1779,13 @@ export default function AgentPage() {
 
   const handleAgentProgress = useCallback((progress: AgentProgressEvent) => {
     const displayProgress = shouldDisplayAgentProgress(progress)
+    if ((progress.depth ?? 0) === 0 && (displayProgress || progress.stage === 'run_finished' || progress.stage === 'error')) {
+      window.electronAPI.pet.sendAgentProgress({
+        stage: progress.stage,
+        title: progress.stage === 'run_finished' && !displayProgress ? 'AI 助手已完成' : progress.title,
+        detail: progress.detail,
+      })
+    }
     if ((progress.depth ?? 0) > 0) {
       if (displayProgress) setSubAgentProgress((prev) => mergeSubAgentProgress(prev, progress))
     } else {

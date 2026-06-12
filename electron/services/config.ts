@@ -174,6 +174,18 @@ interface ConfigSchema {
   petCurrent: string         // 当前宠物 slug，空 = 不展示
   petDesktopEnabled: boolean  // 桌面悬浮桌宠开关
   petDefaultInitialized: boolean // 是否已执行过内置默认宠物初始化
+  petPersonaSessionId: string // 桌宠快捷对话绑定的数字分身 sessionId，空 = AI 助手
+  petTtsEnabled: boolean // 桌宠气泡/快捷对话是否朗读
+  petDailySummaryEnabled: boolean // 桌宠每日摘要播报开关
+  petDailySummaryDate: string // 最近一次每日摘要日期 YYYY-MM-DD
+  petReminders: Array<{
+    id: string
+    text: string
+    kind: 'once' | 'daily' | 'yearly'
+    date?: string
+    time: string
+    lastFired?: string
+  }>
   // 消息提醒：开启了"新消息提醒"的私聊会话用户名列表（默认全关，空数组）
   notifySessions: string[]
   mcpEnabled: boolean
@@ -285,6 +297,11 @@ const defaults: ConfigSchema = {
   petCurrent: '',
   petDesktopEnabled: true,
   petDefaultInitialized: false,
+  petPersonaSessionId: '',
+  petTtsEnabled: false,
+  petDailySummaryEnabled: true,
+  petDailySummaryDate: '',
+  petReminders: [],
   notifySessions: [],
   mcpEnabled: false,
   mcpExposeMediaPaths: true,

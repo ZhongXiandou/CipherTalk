@@ -207,6 +207,7 @@ function getModelsDevProviders(data: any): Record<string, any> {
 function inferProtocolFromModelsDevProvider(provider: any): AIProviderProtocol | null {
   const npmPackage = String(provider?.npm || '').trim()
   if (npmPackage === '@ai-sdk/openai-compatible') return 'openai-compatible'
+  if (npmPackage === '@ai-sdk/xai') return 'openai-compatible'
   if (npmPackage === '@openrouter/ai-sdk-provider') return 'openai-compatible'
   if (npmPackage === '@ai-sdk/openai') return 'openai-responses'
   if (npmPackage === '@ai-sdk/anthropic') return 'anthropic'
@@ -215,7 +216,10 @@ function inferProtocolFromModelsDevProvider(provider: any): AIProviderProtocol |
 }
 
 function getModelsDevProviderBaseURL(provider: any): string {
-  return String(provider?.api || '').trim().replace(/\/+$/, '')
+  const configured = String(provider?.api || '').trim().replace(/\/+$/, '')
+  if (configured) return configured
+  if (String(provider?.npm || '').trim() === '@ai-sdk/xai') return 'https://api.x.ai/v1'
+  return ''
 }
 
 function getModelsDevProviderLogo(providerId: string): string {

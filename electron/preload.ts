@@ -48,6 +48,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     importZip: () => ipcRenderer.invoke('pet:importZip') as Promise<{ success: boolean; canceled?: boolean; pet?: { slug: string; displayName: string; description: string; builtin?: boolean }; error?: string }>,
     getSprite: (slug: string) => ipcRenderer.invoke('pet:getSprite', slug) as Promise<{ success: boolean; dataUrl?: string; error?: string }>,
     setAgentState: (state: string) => ipcRenderer.send('pet:agentState', state),
+    sendAgentProgress: (progress: { stage: string; title: string; detail?: string }) => ipcRenderer.send('pet:agentProgress', progress),
+    getDailySummary: () => ipcRenderer.invoke('pet:getDailySummary') as Promise<{ success: boolean; text?: string; error?: string }>,
     toggleDesktopWindow: (enabled: boolean) => ipcRenderer.invoke('pet:toggleDesktopWindow', enabled) as Promise<{ success: boolean }>,
     setBubble: (expanded: boolean) => ipcRenderer.send('pet:setBubble', expanded),
     showContextMenu: () => ipcRenderer.send('pet:showContextMenu'),
@@ -75,6 +77,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const listener = (_: any, payload: any) => callback(payload)
       ipcRenderer.on('pet:notify', listener)
       return () => { ipcRenderer.removeListener('pet:notify', listener) }
+    },
+    onAgentProgress: (callback: (progress: { stage: string; title: string; detail?: string }) => void) => {
+      const listener = (_: any, progress: any) => callback(progress)
+      ipcRenderer.on('pet:agentProgress', listener)
+      return () => { ipcRenderer.removeListener('pet:agentProgress', listener) }
+    },
+    onBubble: (callback: (payload: { kind: string; title: string; text: string; id?: string }) => void) => {
+      const listener = (_: any, payload: any) => callback(payload)
+      ipcRenderer.on('pet:bubble', listener)
+      return () => { ipcRenderer.removeListener('pet:bubble', listener) }
     }
   },
 

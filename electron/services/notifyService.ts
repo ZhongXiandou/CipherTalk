@@ -33,7 +33,7 @@ interface SessionSnap {
   unread: number
 }
 
-function isPrivateSession(session: ChatSession): boolean {
+export function isPrivateSession(session: ChatSession): boolean {
   const username = String(session.username || '')
   if (!username) return false
   if (username.includes('@chatroom')) return false

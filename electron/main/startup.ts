@@ -168,13 +168,6 @@ export function warmupAgentProcess(ctx: MainProcessContext): void {
  */
 export function checkForUpdatesOnStartup(ctx: MainProcessContext): void {
   if (process.env.VITE_DEV_SERVER_URL) {
-    // 开发模式：推送一条模拟的更新通知，便于本地测试更新提示 UI（不会真实下载/安装）
-    setTimeout(() => {
-      const mainWindow = ctx.getMainWindow()
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('app:updateAvailable', appUpdateService.createSimulatedUpdateInfo())
-      }
-    }, 3000)
     return
   }
 
