@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/aie-button";
 import { cn } from "@/lib/utils";
 import { ArrowDownIcon } from "lucide-react";
 import type { ComponentProps } from "react";
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
 export type ConversationProps = ComponentProps<typeof StickToBottom>;
@@ -34,18 +34,36 @@ export const ConversationContent = ({
 }: ConversationContentProps) => {
   const context = useStickToBottomContext();
   const { state } = context;
+  const contentNodeRef = useRef<HTMLDivElement | null>(null);
 
-  // 流式内容撑高列表时，在浏览器绘制前同步把滚动钉回底部。
-  // 库自身的校正走 ResizeObserver→rAF 排到下一帧，会先画出"冒在底部的新内容"
-  // 下一帧才跳上去，50ms 一批就是持续抖动。state.scrollTop setter 自带
-  // ignoreScrollToTop 标记，不会被误判为用户滚动、不影响向上滚的逃逸锁。
-  useLayoutEffect(() => {
+  // 贴底校正（双向）：钉在底部时把 scrollTop 同步对齐到目标位置。
+  // - 变高：库自身的校正走 ResizeObserver→rAF 排到下一帧，会先画出"冒在底部的新内容"
+  //   下一帧才跳上去，50ms 一批就是持续抖动，所以必须在绘制前同步钉回。
+  // - 变矮（思考块收起、表格占位消失等）：浏览器原生 clamp 产生的滚动事件没有
+  //   ignoreScrollToTop 标记，库靠 resizeDifference + setTimeout(1) 去猜，竞态漏掉时
+  //   会被误判成"用户向上滚"→ 解除贴底锁 → 后续校正全部晚一帧 = 滚动条上下抽搐。
+  //   这里主动用 state.scrollTop setter 对齐（自带 ignoreScrollToTop 标记），让 clamp
+  //   场景也走"程序滚动"路径，不触发误逃逸；用户真实向上滚仍由 wheel/scroll 正常逃逸。
+  const pinToBottom = useCallback(() => {
     if (!state.isAtBottom || state.escapedFromLock) return;
     const target = state.calculatedTargetScrollTop;
-    if (state.scrollTop < target) {
+    if (Math.abs(state.scrollTop - target) > 0.5) {
       state.scrollTop = target;
     }
-  });
+  }, [state]);
+
+  // React 提交引起的高度变化：绘制前同步钉回。
+  useLayoutEffect(pinToBottom);
+
+  // React 之外的高度变化（radix 折叠动画结束、图片/字体加载、异步高亮等）：
+  // ResizeObserver 回调在布局后、绘制前触发，同样能赶在这一帧画出来之前钉回。
+  useEffect(() => {
+    const node = contentNodeRef.current;
+    if (!node) return;
+    const observer = new ResizeObserver(pinToBottom);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [pinToBottom]);
 
   return (
     <ScrollShadow
@@ -56,7 +74,10 @@ export const ConversationContent = ({
     >
       <div
         className={cn("flex flex-col gap-8", className)}
-        ref={(node) => context.contentRef(node)}
+        ref={(node) => {
+          contentNodeRef.current = node;
+          context.contentRef(node);
+        }}
         style={{ overflowAnchor: "none", ...style }}
         {...props}
       >
