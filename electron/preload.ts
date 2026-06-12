@@ -373,7 +373,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     completeWelcome: () => ipcRenderer.invoke('window:completeWelcome'),
     isChatWindowOpen: () => ipcRenderer.invoke('window:isChatWindowOpen'),
     closeChatWindow: () => ipcRenderer.invoke('window:closeChatWindow'),
-    setTitleBarOverlay: (options: { symbolColor: string }) => ipcRenderer.send('window:setTitleBarOverlay', options),
+    setTitleBarOverlay: (options: { hidden?: boolean; symbolColor?: string }) => ipcRenderer.send('window:setTitleBarOverlay', options),
     openImageViewerWindow: (
       imagePath: string,
       liveVideoPath?: string,

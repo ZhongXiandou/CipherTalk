@@ -51,9 +51,11 @@ interface ConfigSchema {
   themeMode: string
   language: string
   releaseAnnouncementVersion: string
+  releaseAnnouncementId: string
   releaseAnnouncementBody: string
   releaseAnnouncementNotes: string
   releaseAnnouncementSeenVersion: string
+  releaseAnnouncementSeenId: string
   homeBackgroundSource: 'preset' | 'custom'
   homeBackgroundPreset: 'beijing' | 'beijing2'
   homeBackgroundCustomType: 'image' | 'video' | ''
@@ -212,9 +214,11 @@ const defaults: ConfigSchema = {
   themeMode: 'light',
   language: 'zh-CN',
   releaseAnnouncementVersion: '',
+  releaseAnnouncementId: '',
   releaseAnnouncementBody: '',
   releaseAnnouncementNotes: '',
   releaseAnnouncementSeenVersion: '',
+  releaseAnnouncementSeenId: '',
   homeBackgroundSource: 'preset',
   homeBackgroundPreset: 'beijing',
   homeBackgroundCustomType: '',

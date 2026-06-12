@@ -8,6 +8,7 @@ import {
   Tray,
   type BrowserWindowConstructorOptions
 } from 'electron'
+import { createHash } from 'crypto'
 import { join } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import { autoUpdater } from 'electron-updater'
@@ -34,6 +35,22 @@ function getReleaseAnnouncementPath(): string {
     : join(process.resourcesPath, 'release-announcement.json')
 }
 
+function buildReleaseAnnouncementId(payload: ReleaseAnnouncementPayload, releaseBody: string, releaseNotes: string): string {
+  const version = String(payload.version || '').trim()
+  const generatedAt = String(payload.generatedAt || '').trim()
+  if (generatedAt) return `${version}:${generatedAt}`
+
+  const contentHash = createHash('sha256')
+    .update(version)
+    .update('\n')
+    .update(releaseBody)
+    .update('\n')
+    .update(releaseNotes)
+    .digest('hex')
+    .slice(0, 16)
+  return `${version}:${contentHash}`
+}
+
 function syncPackagedReleaseAnnouncement(ctx: MainProcessContext) {
   const configService = ctx.getConfigService()
   if (!configService) return
@@ -51,13 +68,16 @@ function syncPackagedReleaseAnnouncement(ctx: MainProcessContext) {
 
     const releaseBody = String(payload.releaseBody || '').trim()
     const releaseNotes = String(payload.releaseNotes || '').trim()
+    const announcementId = buildReleaseAnnouncementId(payload, releaseBody, releaseNotes)
 
     const storedVersion = configService.get('releaseAnnouncementVersion')
+    const storedId = configService.get('releaseAnnouncementId')
     const storedBody = configService.get('releaseAnnouncementBody')
     const storedNotes = configService.get('releaseAnnouncementNotes')
 
     if (
       storedVersion === version &&
+      storedId === announcementId &&
       storedBody === releaseBody &&
       storedNotes === releaseNotes
     ) {
@@ -65,6 +85,7 @@ function syncPackagedReleaseAnnouncement(ctx: MainProcessContext) {
     }
 
     configService.set('releaseAnnouncementVersion', version)
+    configService.set('releaseAnnouncementId', announcementId)
     configService.set('releaseAnnouncementBody', releaseBody)
     configService.set('releaseAnnouncementNotes', releaseNotes)
     ctx.getLogService()?.info('ReleaseAnnouncement', '已同步本地版本公告', {

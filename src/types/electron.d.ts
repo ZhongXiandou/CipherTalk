@@ -258,7 +258,7 @@ export interface ElectronAPI {
     completeWelcome: () => Promise<boolean>
     isChatWindowOpen: () => Promise<boolean>
     closeChatWindow: () => Promise<boolean>
-    setTitleBarOverlay: (options: { symbolColor: string }) => void
+    setTitleBarOverlay: (options: { hidden?: boolean; symbolColor?: string }) => void
     openImageViewerWindow: (
       imagePath: string,
       liveVideoPath?: string,

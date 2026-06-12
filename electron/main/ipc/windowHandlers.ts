@@ -1,6 +1,30 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import type { ImageViewerListItem, ImageViewerOpenOptions, MainProcessContext } from '../context'
 
+type TitleBarOverlayState = {
+  hidden: boolean
+  symbolColor: string
+}
+
+const titleBarOverlayStates = new WeakMap<BrowserWindow, TitleBarOverlayState>()
+
+function applyTitleBarOverlay(win: BrowserWindow, state: TitleBarOverlayState) {
+  try {
+    if (process.platform === 'darwin') {
+      win.setWindowButtonVisibility(!state.hidden)
+      return
+    }
+
+    win.setTitleBarOverlay({
+      color: '#00000000',
+      symbolColor: state.hidden ? '#00000000' : state.symbolColor,
+      height: state.hidden ? 0 : 40
+    })
+  } catch {
+    // 某些窗口未启用 titleBarOverlay。
+  }
+}
+
 export function registerWindowHandlers(ctx: MainProcessContext): void {
   ipcMain.on('window:splashReady', () => {
     ctx.setSplashReady(true)
@@ -98,18 +122,20 @@ export function registerWindowHandlers(ctx: MainProcessContext): void {
     return true
   })
 
-  ipcMain.on('window:setTitleBarOverlay', (event, options: { symbolColor: string }) => {
+  ipcMain.on('window:setTitleBarOverlay', (event, options: { hidden?: boolean; symbolColor?: string }) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) {
-      try {
-        win.setTitleBarOverlay({
-          color: '#00000000',
-          symbolColor: options.symbolColor,
-          height: 40
-        })
-      } catch {
-        // 某些窗口未启用 titleBarOverlay。
+      const currentState = titleBarOverlayStates.get(win) ?? {
+        hidden: false,
+        symbolColor: '#1a1a1a'
       }
+      const nextState = {
+        hidden: typeof options.hidden === 'boolean' ? options.hidden : currentState.hidden,
+        symbolColor: options.symbolColor ?? currentState.symbolColor
+      }
+
+      titleBarOverlayStates.set(win, nextState)
+      applyTitleBarOverlay(win, nextState)
     }
   })
 

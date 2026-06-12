@@ -19,6 +19,7 @@ function HomePage() {
 
   const [showWhatsNew, setShowWhatsNew] = useState(false)
   const [currentVersion, setCurrentVersion] = useState('')
+  const [currentAnnouncementId, setCurrentAnnouncementId] = useState('')
   const [failedBackgroundKey, setFailedBackgroundKey] = useState('')
 
   const [randomSnippet, setRandomSnippet] = useState<RandomMomentSnippet | null>(null)
@@ -78,15 +79,26 @@ function HomePage() {
       const version = await window.electronAPI.app.getVersion()
       setCurrentVersion(version)
 
-      const [announcementVersion, seenVersion] = await Promise.all([
+      const [announcementVersion, announcementId, seenVersion, seenId] = await Promise.all([
         window.electronAPI.config.get('releaseAnnouncementVersion'),
+        window.electronAPI.config.get('releaseAnnouncementId'),
         window.electronAPI.config.get('releaseAnnouncementSeenVersion')
+          .catch(() => ''),
+        window.electronAPI.config.get('releaseAnnouncementSeenId')
+          .catch(() => '')
       ])
 
       const normalizedAnnouncementVersion = String(announcementVersion || '').trim()
+      const normalizedAnnouncementId = String(announcementId || '').trim()
       const normalizedSeenVersion = String(seenVersion || '').trim()
+      const normalizedSeenId = String(seenId || '').trim()
+      setCurrentAnnouncementId(normalizedAnnouncementId)
 
-      if (normalizedAnnouncementVersion === version && normalizedSeenVersion !== version) {
+      const shouldShowAnnouncement = normalizedAnnouncementId
+        ? normalizedSeenId !== normalizedAnnouncementId
+        : normalizedSeenVersion !== version
+
+      if (normalizedAnnouncementVersion === version && shouldShowAnnouncement) {
         setShowWhatsNew(true)
       }
     } catch (e) {
@@ -98,6 +110,9 @@ function HomePage() {
     setShowWhatsNew(false)
     if (currentVersion) {
       window.electronAPI.config.set('releaseAnnouncementSeenVersion', currentVersion)
+    }
+    if (currentAnnouncementId) {
+      window.electronAPI.config.set('releaseAnnouncementSeenId', currentAnnouncementId)
     }
   }
 
