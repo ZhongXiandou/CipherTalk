@@ -17,6 +17,7 @@ import {
   sendText,
   sendImage,
   sendFile,
+  sendVoice,
   getConfig,
   sendTyping,
   notifyStart,
@@ -25,6 +26,7 @@ import {
   isSessionExpiredError,
   type IlinkSession,
 } from './weixinIlinkClient'
+import { synthesizeWeixinVoice } from './weixinVoiceService'
 
 const TOKEN_FILE = 'wechat-bot-token.json'
 const QR_DEADLINE_MS = 5 * 60_000
@@ -54,8 +56,11 @@ type TypingIndicator = {
 }
 
 type WechatBotMedia = {
-  kind: 'image' | 'file'
-  filePath: string
+  kind: 'image' | 'file' | 'voice'
+  filePath?: string
+  text?: string
+  durationMs?: number
+  sampleRate?: number
 }
 
 type WechatBotReply = {
@@ -89,12 +94,44 @@ function dedupeMedia(media: WechatBotMedia[]): WechatBotMedia[] {
   const seen = new Set<string>()
   const result: WechatBotMedia[] = []
   for (const item of media) {
-    const key = `${item.kind}:${item.filePath}`
+    const key = `${item.kind}:${item.filePath || item.text || ''}`
     if (seen.has(key)) continue
     seen.add(key)
     result.push(item)
   }
   return result
+}
+
+const VOICE_MARKER_RE = /^[\[【]\s*(?:语音|voice)\s*[\]】]\s*/i
+
+function wantsVoiceReply(text: string): boolean {
+  return /(?:发|回|用|说|讲|来).{0,8}(?:语音|声音)|(?:语音|声音).{0,8}(?:回复|说|讲|发|回)|听你说|想听/i.test(text)
+}
+
+function splitVoiceMarkedReply(reply: WechatBotReply, forceVoice: boolean): WechatBotReply {
+  const text = reply.text.trim()
+  if (!text) return reply
+  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean)
+  const textLines: string[] = []
+  const media: WechatBotMedia[] = [...reply.media]
+  let hasVoiceMarker = false
+
+  for (const line of lines) {
+    if (!VOICE_MARKER_RE.test(line)) {
+      textLines.push(line)
+      continue
+    }
+    hasVoiceMarker = true
+    const voiceText = line.replace(VOICE_MARKER_RE, '').trim()
+    if (voiceText) media.push({ kind: 'voice', text: voiceText })
+  }
+
+  if (!hasVoiceMarker && forceVoice) {
+    media.push({ kind: 'voice', text })
+    return { text: '', media: dedupeMedia(media) }
+  }
+
+  return { text: textLines.join('\n'), media: dedupeMedia(media) }
 }
 
 class WeixinBotService {
@@ -334,7 +371,7 @@ class WeixinBotService {
 
       const history = agentConversationStore.load(conv.id)?.messages ?? [userMsg]
       typing = await this.startTypingIndicator(from, contextToken)
-      const reply = await this.runAgent(history)
+      const reply = splitVoiceMarkedReply(await this.runAgent(history), wantsVoiceReply(text))
       console.log(`[WechatBot] Agent 回复长度=${reply.text.length} 媒体=${reply.media.length} 内容="${reply.text.slice(0, 120)}"`)
 
       if (this.session && (reply.text || reply.media.length > 0)) {
@@ -375,16 +412,32 @@ class WeixinBotService {
     for (const item of media) {
       try {
         if (item.kind === 'image') {
+          if (!item.filePath) throw new Error('图片路径为空')
           await sendImage(this.session, toUserId, item.filePath, contextToken)
+        } else if (item.kind === 'voice') {
+          const voiceText = String(item.text || '').trim()
+          if (!voiceText) throw new Error('语音文本为空')
+          const voice = await synthesizeWeixinVoice(voiceText)
+          await sendVoice(this.session, toUserId, voice.filePath, {
+            playtimeMs: voice.durationMs,
+            sampleRate: voice.sampleRate,
+            text: voiceText,
+            contextToken,
+          })
         } else {
+          if (!item.filePath) throw new Error('文件路径为空')
           await sendFile(this.session, toUserId, item.filePath, contextToken)
         }
-        this.logger?.warn('WechatBot', '已发送微信媒体', { to: toUserId, kind: item.kind, filePath: item.filePath })
+        this.logger?.warn('WechatBot', '已发送微信媒体', { to: toUserId, kind: item.kind, filePath: item.filePath, textLength: item.text?.length })
       } catch (e) {
         this.logger?.error('WechatBot', '发送微信媒体失败', { to: toUserId, kind: item.kind, filePath: item.filePath, error: String(e) })
         console.error('[WechatBot] 发送媒体失败：', e)
         try {
-          if (this.session) await sendText(this.session, toUserId, `${item.kind === 'image' ? '图片' : '文件'}发送失败，请稍后再试。`, contextToken)
+          if (this.session && item.kind === 'voice' && item.text) {
+            await sendText(this.session, toUserId, item.text, contextToken)
+          } else if (this.session) {
+            await sendText(this.session, toUserId, `${item.kind === 'image' ? '图片' : item.kind === 'voice' ? '语音' : '文件'}发送失败，请稍后再试。`, contextToken)
+          }
         } catch {
           /* 文本兜底也失败则只记录原错误 */
         }

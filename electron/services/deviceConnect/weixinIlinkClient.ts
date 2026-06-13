@@ -17,15 +17,18 @@ const BOT_AGENT = 'OpenClaw'
 const CDN_UPLOAD_RETRIES = 3
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 const MAX_FILE_BYTES = 100 * 1024 * 1024
+const MAX_VOICE_BYTES = 10 * 1024 * 1024
 
 const UploadMediaType = {
   IMAGE: 1,
   FILE: 3,
+  VOICE: 4,
 } as const
 
 const MessageItemType = {
   TEXT: 1,
   IMAGE: 2,
+  VOICE: 3,
   FILE: 4,
 } as const
 
@@ -79,7 +82,7 @@ export interface IlinkMessageItem {
   type: number
   text_item?: { text?: string }
   image_item?: IlinkImageItem
-  voice_item?: { text?: string }
+  voice_item?: IlinkVoiceItem
   file_item?: IlinkFileItem
 }
 
@@ -128,6 +131,15 @@ interface IlinkCdnMedia {
 interface IlinkImageItem {
   media?: IlinkCdnMedia
   mid_size?: number
+}
+
+interface IlinkVoiceItem {
+  media?: IlinkCdnMedia
+  encode_type?: number
+  bits_per_sample?: number
+  sample_rate?: number
+  playtime?: number
+  text?: string
 }
 
 interface IlinkFileItem {
@@ -414,6 +426,26 @@ export async function sendFile(
       len: String(uploaded.fileSize),
     },
   }, contextToken)
+}
+
+export async function sendVoice(
+  session: IlinkSession,
+  toUserId: string,
+  filePath: string,
+  options: { playtimeMs: number; sampleRate?: number; text?: string; contextToken?: string },
+): Promise<void> {
+  const uploaded = await uploadLocalMedia(session, toUserId, filePath, UploadMediaType.VOICE, MAX_VOICE_BYTES)
+  await sendMediaItem(session, toUserId, {
+    type: MessageItemType.VOICE,
+    voice_item: {
+      media: toCdnMedia(uploaded),
+      encode_type: 6,
+      bits_per_sample: 16,
+      sample_rate: options.sampleRate || 24000,
+      playtime: Math.max(1, Math.round(options.playtimeMs)),
+      text: options.text,
+    },
+  }, options.contextToken)
 }
 
 /** 从消息 item_list 提取可读文本（非文本类型给占位标记） */
