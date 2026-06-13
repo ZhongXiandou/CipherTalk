@@ -5,6 +5,8 @@ import { Home, MessageSquare, Database, Settings, SquareChevronLeft, SquareChevr
 import { MCP } from '@lobehub/icons'
 import packageJson from '../../package.json'
 import { useAppStore } from '../stores/appStore'
+import { useDeviceConnectStatus } from '../hooks/useDeviceConnectStatus'
+import { DeviceConnectStatusDot } from './DeviceConnectStatusDot'
 import { cn } from '../lib/utils'
 
 const EXPANDED_WIDTH = 220
@@ -35,6 +37,7 @@ function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
   const userInfo = useAppStore(state => state.userInfo)
+  const deviceStatus = useDeviceConnectStatus()
   const [collapsed, setCollapsed] = useState(false)
   const userDisplayName = userInfo?.nickName?.trim() || userInfo?.alias?.trim() || '未连接用户'
   const userInitial = userDisplayName.slice(0, 1).toUpperCase()
@@ -61,7 +64,12 @@ function Sidebar() {
     { key: 'home', label: '首页', icon: <Home size={NAV_ICON_SIZE} />, type: 'route', path: '/home' },
     { key: 'agent', label: 'AI 助手', icon: <Bot size={NAV_ICON_SIZE} />, type: 'route', path: '/agent' },
     { key: 'pets', label: 'AI 宠物', icon: <PawPrint size={NAV_ICON_SIZE} />, type: 'route', path: '/pets' },
-    { key: 'device-connect', label: '设备连接', icon: <Smartphone size={NAV_ICON_SIZE} />, type: 'route', path: '/device-connect' },
+    { key: 'device-connect', label: '设备连接', icon: (
+      <span className="relative inline-flex">
+        <Smartphone size={NAV_ICON_SIZE} />
+        <DeviceConnectStatusDot status={deviceStatus} className="absolute -right-0.5 -top-0.5 size-2.5 ring-2 ring-background" />
+      </span>
+    ), type: 'route', path: '/device-connect' },
     { key: 'chat', label: '聊天查看', icon: <MessageSquare size={NAV_ICON_SIZE} />, type: 'action', onClick: openChatWindow },
     { key: 'moments', label: '朋友圈', icon: <Aperture size={NAV_ICON_SIZE} />, type: 'action', onClick: openMomentsWindow },
     { key: 'transcription-assistant', label: '转文字助手', icon: <FileAudio size={NAV_ICON_SIZE} />, type: 'route', path: '/transcription-assistant' },

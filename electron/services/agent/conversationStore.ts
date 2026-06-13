@@ -259,6 +259,11 @@ export class AgentConversationStore {
     return this.create({ source: input.source, externalId: input.externalId, title: input.title })
   }
 
+  /** 显式开启一个新的外部来源会话；旧会话保留，后续 getOrCreateExternal 会取最新这条。 */
+  createExternal(input: { source: string; externalId: string; title?: string }): AgentConversationRecord {
+    return this.create({ source: input.source, externalId: input.externalId, title: input.title })
+  }
+
   load(id: number): AgentConversationLoaded | null {
     const meta = this.loadMeta(id, false)
     if (!meta) return null

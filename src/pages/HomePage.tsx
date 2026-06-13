@@ -18,6 +18,7 @@ function HomePage() {
   const homeBackground = useThemeStore(s => s.homeBackground)
 
   const [showWhatsNew, setShowWhatsNew] = useState(false)
+  const [deferVisionClose, setDeferVisionClose] = useState(false)
   const [currentVersion, setCurrentVersion] = useState('')
   const [currentAnnouncementId, setCurrentAnnouncementId] = useState('')
   const [failedBackgroundKey, setFailedBackgroundKey] = useState('')
@@ -99,6 +100,7 @@ function HomePage() {
         : normalizedSeenVersion !== version
 
       if (normalizedAnnouncementVersion === version && shouldShowAnnouncement) {
+        setDeferVisionClose(true)
         setShowWhatsNew(true)
       }
     } catch (e) {
@@ -166,10 +168,23 @@ function HomePage() {
         />
       )}
       <div className="home-background-tint" aria-hidden="true" />
-      <button className="whats-new-btn" onClick={() => setShowWhatsNew(true)}>
+      <button
+        className="whats-new-btn"
+        aria-label="打开开发者愿景"
+        onClick={() => {
+          setDeferVisionClose(false)
+          setShowWhatsNew(true)
+        }}
+      >
         <Smile size={18} />
       </button>
-      {showWhatsNew && <WhatsNewModal version={currentVersion} onClose={handleCloseWhatsNew} />}
+      {showWhatsNew && (
+        <WhatsNewModal
+          deferCloseUntilAudioEnds={deferVisionClose}
+          version={currentVersion}
+          onClose={handleCloseWhatsNew}
+        />
+      )}
 
       {isDbConnected && (
         <div className="random-message-card" aria-busy={randomSnippetLoading}>

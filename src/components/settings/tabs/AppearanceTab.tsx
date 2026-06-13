@@ -1,10 +1,9 @@
-import { useRef, useState, type CSSProperties } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { Description, Label, Radio, RadioGroup, Slider, Switch, Tabs, type Key } from '@heroui/react'
 import { ImageIcon, Moon, Monitor, PanelBottom, PanelLeft, Sun, Upload, Video } from 'lucide-react'
 import {
   HOME_BACKGROUND_PRESETS,
   getHomeBackgroundPresetPoster,
-  getHomeBackgroundPresetSrc,
   useThemeStore,
   type HomeBackgroundPreset,
   type HomeBackgroundSource,
@@ -32,29 +31,12 @@ const getAvatarFallback = (name?: string, wxid?: string): string => {
   return text.slice(0, 2) || '我'
 }
 
-/**
- * 背景视频预览：默认只展示静态画面，悬停才播放。
- * 有 poster（预设视频的抽帧图）时用 preload="none"，挂载时完全不初始化解码器，
- * 消除进入外观页的卡顿；无 poster（自定义视频）时退回 #t=0.1 画首帧。
- */
-function HoverPlayVideo({ src, poster, className, style }: { src: string; poster?: string; className?: string; style?: CSSProperties }) {
-  const ref = useRef<HTMLVideoElement>(null)
+/** 视频背景占位：不预览/播放，只用一个视频图标标记“这是视频”。 */
+function VideoPlaceholder({ className }: { className?: string }) {
   return (
-    <video
-      aria-hidden="true"
-      className={className}
-      muted
-      loop
-      playsInline
-      poster={poster}
-      preload={poster ? 'none' : 'metadata'}
-      ref={ref}
-      src={(poster || src.includes('#')) ? src : `${src}#t=0.1`}
-      style={style}
-      title="悬停预览"
-      onMouseEnter={() => { void ref.current?.play().catch(() => undefined) }}
-      onMouseLeave={() => { ref.current?.pause() }}
-    />
+    <div aria-label="视频背景" className={`flex h-full w-full items-center justify-center bg-(--bg-tertiary) ${className ?? ''}`}>
+      <Video size={32} aria-hidden className="opacity-60" />
+    </div>
   )
 }
 
@@ -84,7 +66,6 @@ function AppearanceTab() {
 
   const customBackgroundReady = Boolean(homeBackground.customUrl)
     && (homeBackground.customType === 'image' || homeBackground.customType === 'video')
-  const presetBackgroundSrc = getHomeBackgroundPresetSrc(homeBackground.preset)
   const presetBackgroundPoster = getHomeBackgroundPresetPoster(homeBackground.preset)
   const backgroundPreviewStyle = {
     '--home-background-preview-blur': `${homeBackground.blur}px`
@@ -200,12 +181,17 @@ function AppearanceTab() {
                     <Radio.Indicator />
                   </Radio.Control>
                   <Radio.Content className="home-background-preset-radio-content">
-                    <HoverPlayVideo
+                    <img
                       className="home-background-preset-video"
-                      poster={preset.poster}
-                      src={preset.src}
+                      src={preset.poster}
+                      alt=""
+                      decoding="async"
+                      loading="lazy"
                       style={backgroundPreviewStyle}
                     />
+                    <span className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white pointer-events-none">
+                      <Video size={11} aria-hidden />视频
+                    </span>
                     <span className="home-background-preset-overlay">{preset.label}</span>
                   </Radio.Content>
                 </Radio>
@@ -220,10 +206,10 @@ function AppearanceTab() {
                   homeBackground.customType === 'image' ? (
                     <img src={homeBackground.customUrl} alt="" decoding="async" loading="lazy" style={backgroundPreviewStyle} />
                   ) : (
-                    <HoverPlayVideo src={homeBackground.customUrl} style={backgroundPreviewStyle} />
+                    <VideoPlaceholder />
                   )
                 ) : (
-                  <HoverPlayVideo poster={presetBackgroundPoster} src={presetBackgroundSrc} style={backgroundPreviewStyle} />
+                  <img src={presetBackgroundPoster} alt="" decoding="async" loading="lazy" style={backgroundPreviewStyle} />
                 )}
                 <span className="home-background-preview-badge">
                   {customBackgroundReady

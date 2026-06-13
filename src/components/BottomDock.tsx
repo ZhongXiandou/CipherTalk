@@ -8,6 +8,8 @@ import {
 } from 'lucide-react'
 import MacOSDock, { type DockApp } from '@/components/ui/mac-os-dock'
 import { useThemeStore } from '@/stores/themeStore'
+import { useDeviceConnectStatus } from '@/hooks/useDeviceConnectStatus'
+import { DeviceConnectStatusDot } from '@/components/DeviceConnectStatusDot'
 
 const HIDE_DELAY = 2500
 const EDGE_TRIGGER_PX = 8
@@ -40,6 +42,7 @@ function BottomDock() {
   const navigate = useNavigate()
   const location = useLocation()
   const autoHideSetting = useThemeStore(s => s.dockAutoHide)
+  const deviceStatus = useDeviceConnectStatus()
   // 首页强制显示 Dock：避免用户进入软件后找不到导航
   const autoHide = autoHideSetting && location.pathname !== '/home'
   const [visible, setVisible] = useState(true)
@@ -108,7 +111,12 @@ function BottomDock() {
     { id: 'chat', name: '聊天查看', icon: makeIcon(MessageSquare, 'linear-gradient(135deg, #2ECC71 0%, #27AE60 100%)') },
     { id: 'moments', name: '朋友圈', icon: makeIcon(Aperture, 'linear-gradient(135deg, #FF7AA2 0%, #E84B7E 100%)') },
     { id: 'transcription', name: '转文字助手', icon: makeIcon(FileAudio, 'linear-gradient(135deg, #5B6CFF 0%, #3F50E0 100%)') },
-    { id: 'device-connect', name: '设备连接', icon: makeIcon(Smartphone, 'linear-gradient(135deg, #1AAD5A 0%, #07C160 100%)') },
+    { id: 'device-connect', name: '设备连接', icon: (
+      <div className="relative w-full h-full">
+        <AppIcon Icon={Smartphone} gradient="linear-gradient(135deg, #1AAD5A 0%, #07C160 100%)" />
+        <DeviceConnectStatusDot status={deviceStatus} className="absolute right-[4%] top-[4%] size-[26%] ring-2 ring-white" />
+      </div>
+    ) },
     { id: 'export', name: '导出数据', icon: makeIcon(Download, 'linear-gradient(135deg, #1ABC9C 0%, #16A085 100%)') },
     { id: 'data-management', name: '数据管理', icon: makeIcon(Database, 'linear-gradient(135deg, #607D8B 0%, #455A64 100%)') },
     { id: 'open-api', name: '开放接口', icon: makeIcon(Network, 'linear-gradient(135deg, #00BCD4 0%, #0097A7 100%)') },

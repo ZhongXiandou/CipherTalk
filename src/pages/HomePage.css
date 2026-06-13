@@ -45,8 +45,8 @@
 
 .whats-new-btn {
   position: fixed;
-  top: calc(var(--window-chrome-height, 40px) + 8px);
-  right: 12px;
+  top: calc(var(--window-chrome-height, 40px) + 16px);
+  right: 24px;
   z-index: 100;
   width: 36px;
   height: 36px;

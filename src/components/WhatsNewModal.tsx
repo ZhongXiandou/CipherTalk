@@ -3,6 +3,7 @@ import { Quote, Send, X } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 
 interface WhatsNewModalProps {
+  deferCloseUntilAudioEnds?: boolean
   onClose: () => void
   version: string
 }
@@ -254,7 +255,7 @@ const VISION_LINE_STARTS = VISION_LINES.reduce<number[]>((starts, parts, index) 
   return starts
 }, [])
 
-function WhatsNewModal({ onClose }: WhatsNewModalProps) {
+function WhatsNewModal({ deferCloseUntilAudioEnds = false, onClose }: WhatsNewModalProps) {
   const visionAudioRef = useRef<HTMLAudioElement | null>(null)
   const progressFillRef = useRef<HTMLDivElement | null>(null)
   const audioProgressFrameRef = useRef<number | null>(null)
@@ -263,6 +264,7 @@ function WhatsNewModal({ onClose }: WhatsNewModalProps) {
   const lastStateProgressRef = useRef(-1)
   const closeTimeoutRef = useRef<number | null>(null)
   const [isVisionOpen, setIsVisionOpen] = useState(true)
+  const [isCloseVisible, setIsCloseVisible] = useState(!deferCloseUntilAudioEnds)
   const [audioProgress, setAudioProgress] = useState(0)
   const [audioCurrentTime, setAudioCurrentTime] = useState(0)
   const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>(FALLBACK_SUBTITLE_CUES)
@@ -373,6 +375,7 @@ function WhatsNewModal({ onClose }: WhatsNewModalProps) {
     }
     void audio.play().catch((error) => {
       console.warn('开发者愿景音频自动播放失败:', error)
+      setIsCloseVisible(true)
     })
     audioProgressFrameRef.current = window.requestAnimationFrame(syncAudioProgress)
 
@@ -428,10 +431,14 @@ function WhatsNewModal({ onClose }: WhatsNewModalProps) {
         onEnded={() => {
           lastStateProgressRef.current = 100
           setAudioProgress(100)
+          setIsCloseVisible(true)
           setAudioCurrentTime(decodedDurationRef.current || visionAudioRef.current?.duration || 0)
           if (progressFillRef.current) {
             progressFillRef.current.style.transform = 'translate3d(0, 0, 0) scaleX(1)'
           }
+        }}
+        onError={() => {
+          setIsCloseVisible(true)
         }}
       />
       <Modal.Container className="px-5 py-0 sm:px-10" placement="center" scroll="inside" size="full">
@@ -443,11 +450,14 @@ function WhatsNewModal({ onClose }: WhatsNewModalProps) {
             <article className="relative mx-auto flex max-w-180 flex-col gap-5 pr-15 text-[15px] leading-8 text-white/88 drop-shadow-[0_2px_12px_rgba(0,0,0,0.55)] sm:pr-16">
               <button
                 aria-label="关闭开发者愿景"
-                className="absolute right-0 top-0 z-10 inline-flex size-10 items-center justify-center rounded-full border-0 bg-white/10 p-0 text-white outline-none transition-colors hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/60"
+                aria-hidden={!isCloseVisible}
+                className={`absolute right-0 top-0 z-10 inline-flex size-10 items-center justify-center rounded-full border-0 bg-white/10 p-0 text-white outline-none transition-[opacity,transform,background-color] duration-700 ease-out focus-visible:ring-2 focus-visible:ring-white/60 ${isCloseVisible ? 'opacity-100 scale-100 hover:bg-white/20' : 'pointer-events-none scale-95 opacity-0'}`}
+                disabled={!isCloseVisible}
                 onClick={(event) => {
                   event.stopPropagation()
                   requestClose()
                 }}
+                tabIndex={isCloseVisible ? 0 : -1}
                 type="button"
               >
                 <X className="size-4" />
