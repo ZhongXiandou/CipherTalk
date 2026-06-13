@@ -6,6 +6,7 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import QRCode from 'qrcode'
+import type { UIMessage, UIMessageChunk } from 'ai'
 import { getUserDataPath } from '../runtimePaths'
 import type { MainProcessContext } from '../../main/context'
 import {
@@ -14,6 +15,8 @@ import {
   fetchQrcodeStatus,
   getUpdates,
   sendText,
+  sendImage,
+  sendFile,
   getConfig,
   sendTyping,
   notifyStart,
@@ -48,6 +51,50 @@ interface BotLogger {
 
 type TypingIndicator = {
   stop: () => Promise<void>
+}
+
+type WechatBotMedia = {
+  kind: 'image' | 'file'
+  filePath: string
+}
+
+type WechatBotReply = {
+  text: string
+  media: WechatBotMedia[]
+}
+
+function extractMediaFromToolChunk(chunk: UIMessageChunk): WechatBotMedia | null {
+  const c = chunk as {
+    type?: string
+    toolName?: string
+    output?: { success?: unknown; filePath?: unknown; error?: unknown }
+  }
+  if (c.type !== 'tool-output-available' || c.output?.success !== true) return null
+  const filePath = typeof c.output.filePath === 'string' ? c.output.filePath.trim() : ''
+  if (!filePath) return null
+
+  switch (c.toolName) {
+    case 'generate_image':
+    case 'send_random_image':
+    case 'send_sticker':
+      return { kind: 'image', filePath }
+    case 'send_wechat_file':
+      return { kind: 'file', filePath }
+    default:
+      return null
+  }
+}
+
+function dedupeMedia(media: WechatBotMedia[]): WechatBotMedia[] {
+  const seen = new Set<string>()
+  const result: WechatBotMedia[] = []
+  for (const item of media) {
+    const key = `${item.kind}:${item.filePath}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(item)
+  }
+  return result
 }
 
 class WeixinBotService {
@@ -288,15 +335,22 @@ class WeixinBotService {
       const history = agentConversationStore.load(conv.id)?.messages ?? [userMsg]
       typing = await this.startTypingIndicator(from, contextToken)
       const reply = await this.runAgent(history)
-      console.log(`[WechatBot] Agent 回复长度=${reply.length} 内容="${reply.slice(0, 120)}"`)
+      console.log(`[WechatBot] Agent 回复长度=${reply.text.length} 媒体=${reply.media.length} 内容="${reply.text.slice(0, 120)}"`)
 
-      if (this.session && reply) {
+      if (this.session && (reply.text || reply.media.length > 0)) {
         await typing?.stop()
         typing = null
-        const assistantMsg: UIMessage = { id: `wx-a-${Date.now()}`, role: 'assistant', parts: [{ type: 'text', text: reply }] }
+        const assistantMsg: UIMessage = {
+          id: `wx-a-${Date.now()}`,
+          role: 'assistant',
+          parts: [{ type: 'text', text: reply.text || `[已发送 ${reply.media.length} 个媒体文件]` }]
+        }
         agentConversationStore.append(conv.id, [assistantMsg])
-        await sendText(this.session, from, reply, contextToken)
-        this.logger?.warn('WechatBot', '已回复微信消息', { from, replyLength: reply.length })
+        if (reply.text) {
+          await sendText(this.session, from, reply.text, contextToken)
+        }
+        await this.sendReplyMedia(from, reply.media, contextToken)
+        this.logger?.warn('WechatBot', '已回复微信消息', { from, replyLength: reply.text.length, mediaCount: reply.media.length })
         console.log('[WechatBot] 已调用 sendmessage 发送回复')
       } else {
         console.warn('[WechatBot] Agent 回复为空，未发送')
@@ -313,6 +367,28 @@ class WeixinBotService {
       }
     } finally {
       await typing?.stop()
+    }
+  }
+
+  private async sendReplyMedia(toUserId: string, media: WechatBotMedia[], contextToken?: string): Promise<void> {
+    if (!this.session || media.length === 0) return
+    for (const item of media) {
+      try {
+        if (item.kind === 'image') {
+          await sendImage(this.session, toUserId, item.filePath, contextToken)
+        } else {
+          await sendFile(this.session, toUserId, item.filePath, contextToken)
+        }
+        this.logger?.warn('WechatBot', '已发送微信媒体', { to: toUserId, kind: item.kind, filePath: item.filePath })
+      } catch (e) {
+        this.logger?.error('WechatBot', '发送微信媒体失败', { to: toUserId, kind: item.kind, filePath: item.filePath, error: String(e) })
+        console.error('[WechatBot] 发送媒体失败：', e)
+        try {
+          if (this.session) await sendText(this.session, toUserId, `${item.kind === 'image' ? '图片' : '文件'}发送失败，请稍后再试。`, contextToken)
+        } catch {
+          /* 文本兜底也失败则只记录原错误 */
+        }
+      }
     }
   }
 
@@ -359,7 +435,7 @@ class WeixinBotService {
   }
 
   /** 把对话（历史 + 本轮）交给项目内 Agent，收集流式文本作为回复（v1 纯文本，不注入 MCP/技能）。 */
-  private async runAgent(uiMessages: UIMessage[]): Promise<string> {
+  private async runAgent(uiMessages: UIMessage[]): Promise<WechatBotReply> {
     const { resolveProviderConfig } = await import('../agent/resolveProviderConfig')
     const { refreshResolvedProxyUrl } = await import('../ai/proxyFetch')
     const { convertToModelMessages } = await import('ai')
@@ -369,14 +445,17 @@ class WeixinBotService {
     await refreshResolvedProxyUrl()
     const messages = await convertToModelMessages(uiMessages)
     let reply = ''
+    const media: WechatBotMedia[] = []
     await agentProcessService.run(
       { messages, providerConfig, scope: { kind: 'global' }, mcpTools: [], skills: [], planMode: false },
       (chunk) => {
         const c = chunk as { type?: string; delta?: string; text?: string }
         if (c?.type === 'text-delta') reply += c.delta ?? c.text ?? ''
+        const item = extractMediaFromToolChunk(chunk)
+        if (item) media.push(item)
       },
     )
-    return reply.trim()
+    return { text: reply.trim(), media: dedupeMedia(media) }
   }
 
   // ── token 持久化（userData 下独立 JSON，不混入共享 config） ──

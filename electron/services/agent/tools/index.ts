@@ -26,6 +26,7 @@ import { webSearch } from './webSearch'
 import { generateImage } from './generateImage'
 import { searchStickers, sendSticker } from './stickers'
 import { sendRandomImage } from './sendRandomImage'
+import { sendWechatFile } from './sendWechatFile'
 
 /** 基础读/查工具（不含 delegate_analysis），主 Agent 与子 Agent 共用。 */
 export function buildBaseTools(_scope: AgentScope): ToolSet {
@@ -81,6 +82,7 @@ export function buildTools(scope: AgentScope, providerConfig: AgentProviderConfi
     search_stickers: searchStickers,
     send_sticker: sendSticker,
     send_random_image: sendRandomImage,
+    send_wechat_file: sendWechatFile,
     remember: createRemember(scope),
     recall: createRecall(scope),
     list_memories: createListMemories(scope),
