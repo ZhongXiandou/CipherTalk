@@ -624,6 +624,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('export:exportContacts', outputDir, options),
     exportMoments: (outputDir: string, options: any) =>
       ipcRenderer.invoke('export:exportMoments', outputDir, options),
+    scanDatabases: () =>
+      ipcRenderer.invoke('export:scanDatabases'),
+    exportDatabases: (selectedPaths: string[], outputDir: string) =>
+      ipcRenderer.invoke('export:exportDatabases', selectedPaths, outputDir),
     onProgress: (callback: (data: any) => void) => {
       ipcRenderer.on('export:progress', (_, data) => callback(data))
       return () => ipcRenderer.removeAllListeners('export:progress')

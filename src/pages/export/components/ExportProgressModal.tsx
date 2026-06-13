@@ -4,17 +4,29 @@ import type { ExportOptions, ExportProgress } from '../types'
 
 interface ExportProgressModalProps {
   progress: ExportProgress
-  options: ExportOptions
+  /** 聊天导出才有的格式/媒体选项；其它导出（如数据库）不传 */
+  options?: ExportOptions
+  /** 进度单位，例如「个会话」「个数据库」 */
+  unitLabel?: string
+  /** 当前项的前缀标签，例如「当前会话」「当前数据库」 */
+  currentLabel?: string
 }
 
-export default function ExportProgressModal({ progress, options }: ExportProgressModalProps) {
-  const optionChips = [
-    options.exportImages && '含图片',
-    options.exportVideos && '含视频',
-    options.exportEmojis && '含表情',
-    options.exportVoices && '含语音',
-    options.exportAvatars && '含头像'
-  ].filter(Boolean) as string[]
+export default function ExportProgressModal({
+  progress,
+  options,
+  unitLabel = '个会话',
+  currentLabel = '当前会话'
+}: ExportProgressModalProps) {
+  const optionChips = options
+    ? ([
+        options.exportImages && '含图片',
+        options.exportVideos && '含视频',
+        options.exportEmojis && '含表情',
+        options.exportVoices && '含语音',
+        options.exportAvatars && '含头像'
+      ].filter(Boolean) as string[])
+    : []
 
   return (
     <Modal.Backdrop isOpen isDismissable={false}>
@@ -30,19 +42,21 @@ export default function ExportProgressModal({ progress, options }: ExportProgres
             <div className="flex flex-col gap-2">
               {progress.phase && <Typography type="body-sm" weight="medium">{progress.phase}</Typography>}
               {progress.currentName && (
-                <Typography type="body-sm" className="text-muted">当前会话: {progress.currentName}</Typography>
+                <Typography type="body-sm" className="text-muted">{currentLabel}: {progress.currentName}</Typography>
               )}
               {progress.detail && <Typography type="body-xs" className="text-muted">{progress.detail}</Typography>}
               {!progress.currentName && !progress.detail && (
                 <Typography type="body-sm" className="text-muted">准备中...</Typography>
               )}
 
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Chip variant="secondary" size="sm">格式: {options.format.toUpperCase()}</Chip>
-                {optionChips.map(label => (
-                  <Chip key={label} variant="secondary" size="sm">{label}</Chip>
-                ))}
-              </div>
+              {(options || optionChips.length > 0) && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {options && <Chip variant="secondary" size="sm">格式: {options.format.toUpperCase()}</Chip>}
+                  {optionChips.map(label => (
+                    <Chip key={label} variant="secondary" size="sm">{label}</Chip>
+                  ))}
+                </div>
+              )}
 
               {progress.total > 0 && (
                 <ProgressBar
@@ -51,7 +65,7 @@ export default function ExportProgressModal({ progress, options }: ExportProgres
                   maxValue={Math.max(1, progress.total)}
                   className="mt-1"
                 >
-                  <Label>{progress.current} / {progress.total} 个会话</Label>
+                  <Label>{progress.current} / {progress.total} {unitLabel}</Label>
                   <ProgressBar.Track><ProgressBar.Fill /></ProgressBar.Track>
                 </ProgressBar>
               )}

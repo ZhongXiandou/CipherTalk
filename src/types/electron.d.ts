@@ -938,6 +938,26 @@ export interface ElectronAPI {
       failCount?: number
       error?: string
     }>
+    scanDatabases: () => Promise<{
+      success: boolean
+      root?: string
+      databases?: Array<{
+        path: string
+        name: string
+        relativePath: string
+        folder: string
+        size: number
+      }>
+      error?: string
+    }>
+    exportDatabases: (selectedPaths: string[], outputDir: string) => Promise<{
+      success: boolean
+      successCount?: number
+      failCount?: number
+      error?: string
+      outputDir?: string
+      tableErrors?: Array<{ db: string; table: string; error: string }>
+    }>
     onProgress: (callback: (data: {
       current?: number
       total?: number

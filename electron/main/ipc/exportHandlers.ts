@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { exportService, type ExportOptions, type MomentsExportOptions } from '../../services/exportService'
+import { databaseExportService } from '../../services/databaseExportService'
 import type { MainProcessContext } from '../context'
 
 /**
@@ -27,6 +28,17 @@ export function registerExportHandlers(ctx: MainProcessContext): void {
 
   ipcMain.handle('export:exportMoments', async (event, outputDir: string, options: MomentsExportOptions) => {
     return exportService.exportMoments(outputDir, options, (progress) => {
+      event.sender.send('export:progress', progress)
+    })
+  })
+
+  // 数据库导出（解密落地）
+  ipcMain.handle('export:scanDatabases', async () => {
+    return databaseExportService.scanDatabases()
+  })
+
+  ipcMain.handle('export:exportDatabases', async (event, selectedPaths: string[], outputDir: string) => {
+    return databaseExportService.exportDatabases(selectedPaths, outputDir, (progress) => {
       event.sender.send('export:progress', progress)
     })
   })

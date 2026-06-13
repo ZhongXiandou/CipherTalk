@@ -3,6 +3,19 @@ export function getAvatarLetter(name: string) {
   return [...name][0] || '?'
 }
 
+// 文件体积人类可读
+export function formatBytes(bytes: number): string {
+  if (!bytes || bytes < 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let value = bytes
+  let i = 0
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024
+    i++
+  }
+  return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
+
 // 微信系统 / 通知类特殊账号（非真人、非群聊）
 const SYSTEM_ACCOUNTS = new Set([
   'weixin', 'fmessage', 'medianote', 'floatbottle', 'qmessage', 'tmessage',

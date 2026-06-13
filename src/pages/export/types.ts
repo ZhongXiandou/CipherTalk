@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 
-export type ExportTab = 'chat' | 'contacts' | 'moments'
+export type ExportTab = 'chat' | 'contacts' | 'moments' | 'database'
 
 // 会话类型筛选
 export type SessionTypeFilter = 'all' | 'group' | 'private'
@@ -67,6 +67,15 @@ export interface ExportResult {
   successCount?: number
   failCount?: number
   error?: string
+}
+
+// 数据库导出：db_storage 下的单个加密库
+export interface DatabaseFile {
+  path: string
+  name: string
+  relativePath: string
+  folder: string
+  size: number
 }
 
 export interface ExportProgress {
