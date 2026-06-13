@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom'
 import * as configService from '../../../services/config'
 import type { ChatSession, ExportOptions, SessionTypeFilter } from '../types'
 import type { ExportShared } from './useExportShared'
+import { isExcludedSession } from '../utils'
 
 // 计算「最近 N 天」的起止日期字符串
 function computeDefaultDateRange(defaultDateRange: number): { startDate: string; endDate: string } {
@@ -101,7 +102,8 @@ export function useChatExport(shared: ExportShared) {
 
   // 聊天会话搜索与类型过滤
   useEffect(() => {
-    let filtered = sessions
+    // 先排除公众号/服务号/系统账号，「全部」只含群聊与真人私聊
+    let filtered = sessions.filter(s => !isExcludedSession(s.username))
 
     // 类型过滤
     if (sessionTypeFilter === 'group') {
@@ -121,40 +123,6 @@ export function useChatExport(shared: ExportShared) {
 
     setFilteredSessions(filtered)
   }, [searchKeyword, sessions, sessionTypeFilter])
-
-  const toggleSession = (username: string) => {
-    const newSet = new Set(selectedSessions)
-    if (newSet.has(username)) {
-      newSet.delete(username)
-    } else {
-      newSet.add(username)
-    }
-    setSelectedSessions(newSet)
-  }
-
-  const toggleSelectAll = () => {
-    if (selectedSessions.size === filteredSessions.length && filteredSessions.length > 0) {
-      setSelectedSessions(new Set())
-    } else {
-      setSelectedSessions(new Set(filteredSessions.map(s => s.username)))
-    }
-  }
-
-  // 快捷选择：仅选群聊
-  const selectOnlyGroups = () => {
-    const groupUsernames = filteredSessions
-      .filter(s => s.username.includes('@chatroom'))
-      .map(s => s.username)
-    setSelectedSessions(new Set(groupUsernames))
-  }
-
-  // 快捷选择：仅选私聊
-  const selectOnlyPrivate = () => {
-    const privateUsernames = filteredSessions
-      .filter(s => !s.username.includes('@chatroom'))
-      .map(s => s.username)
-    setSelectedSessions(new Set(privateUsernames))
-  }
 
   // 导出聊天记录
   const startExport = async () => {
@@ -201,6 +169,7 @@ export function useChatExport(shared: ExportShared) {
     sessions,
     filteredSessions,
     selectedSessions,
+    setSelectedSessions,
     isLoading,
     searchKeyword,
     setSearchKeyword,
@@ -209,10 +178,6 @@ export function useChatExport(shared: ExportShared) {
     options,
     setOptions,
     loadSessions,
-    toggleSession,
-    toggleSelectAll,
-    selectOnlyGroups,
-    selectOnlyPrivate,
     startExport
   }
 }

@@ -72,16 +72,6 @@ export function useContactExport(shared: ExportShared, active: boolean) {
     setFilteredContacts(filtered)
   }, [contactSearchKeyword, contacts, contactOptions.contactTypes])
 
-  const toggleContact = (username: string) => {
-    const newSet = new Set(selectedContacts)
-    if (newSet.has(username)) {
-      newSet.delete(username)
-    } else {
-      newSet.add(username)
-    }
-    setSelectedContacts(newSet)
-  }
-
   const toggleSelectAllContacts = () => {
     if (selectedContacts.size === filteredContacts.length && filteredContacts.length > 0) {
       setSelectedContacts(new Set())
@@ -119,13 +109,13 @@ export function useContactExport(shared: ExportShared, active: boolean) {
   return {
     filteredContacts,
     selectedContacts,
+    setSelectedContacts,
     contactSearchKeyword,
     setContactSearchKeyword,
     isLoadingContacts,
     contactOptions,
     setContactOptions,
     loadContacts,
-    toggleContact,
     toggleSelectAllContacts,
     startContactExport
   }

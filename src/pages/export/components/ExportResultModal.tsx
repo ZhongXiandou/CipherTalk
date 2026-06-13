@@ -1,4 +1,5 @@
 import { CheckCircle, XCircle, ExternalLink } from 'lucide-react'
+import { Modal, Button, Typography } from '@heroui/react'
 import type { ExportResult } from '../types'
 
 interface ExportResultModalProps {
@@ -11,34 +12,41 @@ interface ExportResultModalProps {
 
 export default function ExportResultModal({ result, unitLabel, onOpenFolder, onClose }: ExportResultModalProps) {
   return (
-    <div className="export-overlay">
-      <div className="export-result-modal">
-        <div className={`result-icon ${result.success ? 'success' : 'error'}`}>
-          {result.success ? <CheckCircle size={48} /> : <XCircle size={48} />}
-        </div>
-        <h3>{result.success ? '导出完成' : '导出失败'}</h3>
-        {result.success ? (
-          <p className="result-text">
-            {result.successCount !== undefined
-              ? `成功导出 ${result.successCount} ${unitLabel}`
-              : '导出成功'}
-            {result.failCount ? `，${result.failCount} 个失败` : ''}
-          </p>
-        ) : (
-          <p className="result-text error">{result.error}</p>
-        )}
-        <div className="result-actions">
-          {result.success && (
-            <button className="open-folder-btn" onClick={onOpenFolder}>
-              <ExternalLink size={16} />
-              <span>打开文件夹</span>
-            </button>
-          )}
-          <button className="close-btn" onClick={onClose}>
-            关闭
-          </button>
-        </div>
-      </div>
-    </div>
+    <Modal isOpen onOpenChange={(open) => { if (!open) onClose() }}>
+      <Modal.Backdrop>
+        <Modal.Container size="sm">
+          <Modal.Dialog>
+            <Modal.CloseTrigger />
+            <Modal.Header>
+              <Modal.Icon className={result.success ? 'bg-success-soft text-success-soft-foreground' : 'bg-danger-soft text-danger-soft-foreground'}>
+                {result.success ? <CheckCircle className="size-5" /> : <XCircle className="size-5" />}
+              </Modal.Icon>
+              <Modal.Heading>{result.success ? '导出完成' : '导出失败'}</Modal.Heading>
+            </Modal.Header>
+            <Modal.Body>
+              {result.success ? (
+                <Typography type="body-sm" className="text-muted">
+                  {result.successCount !== undefined
+                    ? `成功导出 ${result.successCount} ${unitLabel}`
+                    : '导出成功'}
+                  {result.failCount ? `，${result.failCount} 个失败` : ''}
+                </Typography>
+              ) : (
+                <Typography type="body-sm" className="text-danger">{result.error}</Typography>
+              )}
+            </Modal.Body>
+            <Modal.Footer>
+              {result.success && (
+                <Button variant="tertiary" onPress={onOpenFolder}>
+                  <ExternalLink size={16} />
+                  打开文件夹
+                </Button>
+              )}
+              <Button slot="close" variant="primary">关闭</Button>
+            </Modal.Footer>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    </Modal>
   )
 }

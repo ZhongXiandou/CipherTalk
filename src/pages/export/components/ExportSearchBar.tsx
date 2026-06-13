@@ -1,26 +1,20 @@
-import { Search, X } from 'lucide-react'
+import { SearchField } from '@heroui/react'
 
 interface ExportSearchBarProps {
   value: string
   onChange: (value: string) => void
   placeholder: string
+  'aria-label': string
 }
 
-export default function ExportSearchBar({ value, onChange, placeholder }: ExportSearchBarProps) {
+export default function ExportSearchBar({ value, onChange, placeholder, 'aria-label': ariaLabel }: ExportSearchBarProps) {
   return (
-    <div className="search-bar">
-      <Search size={16} />
-      <input
-        type="text"
-        placeholder={placeholder}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-      />
-      {value && (
-        <button className="clear-btn" onClick={() => onChange('')}>
-          <X size={14} />
-        </button>
-      )}
-    </div>
+    <SearchField aria-label={ariaLabel} value={value} onChange={onChange}>
+      <SearchField.Group>
+        <SearchField.SearchIcon />
+        <SearchField.Input placeholder={placeholder} />
+        <SearchField.ClearButton />
+      </SearchField.Group>
+    </SearchField>
   )
 }

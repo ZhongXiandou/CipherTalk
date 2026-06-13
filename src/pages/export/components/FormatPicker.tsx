@@ -1,27 +1,42 @@
+import { Card, Checkbox } from '@heroui/react'
 import type { FormatOption } from '../types'
 
 interface FormatPickerProps {
   options: FormatOption[]
   value: string
   onChange: (value: string) => void
-  /** 额外的容器类名，例如通讯录用的 contact-formats */
-  className?: string
+  'aria-label': string
 }
 
-export default function FormatPicker({ options, value, onChange, className }: FormatPickerProps) {
+export default function FormatPicker({ options, value, onChange, 'aria-label': ariaLabel }: FormatPickerProps) {
   return (
-    <div className={`format-options${className ? ` ${className}` : ''}`}>
-      {options.map(fmt => (
-        <div
-          key={fmt.value}
-          className={`format-card ${value === fmt.value ? 'active' : ''}`}
-          onClick={() => onChange(fmt.value)}
-        >
-          <fmt.icon size={24} />
-          <span className="format-label">{fmt.label}</span>
-          <span className="format-desc">{fmt.desc}</span>
-        </div>
-      ))}
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3" role="group" aria-label={ariaLabel}>
+      {options.map(fmt => {
+        const selected = value === fmt.value
+        return (
+          <Card
+            key={fmt.value}
+            variant={selected ? 'secondary' : 'default'}
+            role="button"
+            tabIndex={0}
+            aria-pressed={selected}
+            onClick={() => onChange(fmt.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onChange(fmt.value) } }}
+            className="cursor-pointer gap-2"
+          >
+            <Card.Header className="gap-1">
+              <div className="flex items-center gap-2">
+                <fmt.icon size={18} className="shrink-0" />
+                <Card.Title className="flex-1 text-sm">{fmt.label}</Card.Title>
+                <Checkbox isSelected={selected} isReadOnly aria-hidden>
+                  <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                </Checkbox>
+              </div>
+              <Card.Description className="text-xs">{fmt.desc}</Card.Description>
+            </Card.Header>
+          </Card>
+        )
+      })}
     </div>
   )
 }

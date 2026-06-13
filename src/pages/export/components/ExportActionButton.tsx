@@ -1,4 +1,5 @@
-import { Download, Loader2 } from 'lucide-react'
+import { Download } from 'lucide-react'
+import { Button } from '@heroui/react'
 
 interface ExportActionButtonProps {
   label: string
@@ -9,20 +10,15 @@ interface ExportActionButtonProps {
 
 export default function ExportActionButton({ label, isExporting, disabled, onClick }: ExportActionButtonProps) {
   return (
-    <div className="export-action">
-      <button className="export-btn" onClick={onClick} disabled={disabled}>
-        {isExporting ? (
-          <>
-            <Loader2 size={18} className="spin" />
-            <span>导出中...</span>
-          </>
-        ) : (
-          <>
-            <Download size={18} />
-            <span>{label}</span>
-          </>
-        )}
-      </button>
-    </div>
+    <Button
+      variant="primary"
+      fullWidth
+      isPending={isExporting}
+      isDisabled={disabled}
+      onPress={onClick}
+    >
+      {!isExporting && <Download size={18} />}
+      {isExporting ? '导出中...' : label}
+    </Button>
   )
 }

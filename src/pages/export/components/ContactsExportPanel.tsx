@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { RefreshCw, User, Users, MessageSquare } from 'lucide-react'
+import { RefreshCw, User, Users, MessageSquare, CircleUserRound } from 'lucide-react'
+import { ScrollShadow, Button, Typography } from '@heroui/react'
 import type { ContactExportOptions } from '../types'
 import type { ExportShared } from '../hooks/useExportShared'
 import type { useContactExport } from '../hooks/useContactExport'
@@ -7,26 +7,32 @@ import { contactFormatOptions } from '../constants'
 import ExportSearchBar from './ExportSearchBar'
 import ContactList from './ContactList'
 import FormatPicker from './FormatPicker'
+import OptionCardGroup from './OptionCardGroup'
 import ExportPathSelect from './ExportPathSelect'
 import ExportActionButton from './ExportActionButton'
 
 interface ContactsExportPanelProps {
   contact: ReturnType<typeof useContactExport>
   shared: ExportShared
-  tabs: ReactNode
 }
 
-export default function ContactsExportPanel({ contact, shared, tabs }: ContactsExportPanelProps) {
+const contactTypeToggles: { key: keyof ContactExportOptions['contactTypes']; label: string; icon: typeof User }[] = [
+  { key: 'friends', label: '好友', icon: User },
+  { key: 'groups', label: '群聊', icon: Users },
+  { key: 'officials', label: '公众号', icon: MessageSquare }
+]
+
+export default function ContactsExportPanel({ contact, shared }: ContactsExportPanelProps) {
   const {
     filteredContacts,
     selectedContacts,
+    setSelectedContacts,
     contactSearchKeyword,
     setContactSearchKeyword,
     isLoadingContacts,
     contactOptions,
     setContactOptions,
     loadContacts,
-    toggleContact,
     toggleSelectAllContacts,
     startContactExport
   } = contact
@@ -34,125 +40,93 @@ export default function ContactsExportPanel({ contact, shared, tabs }: ContactsE
   const allSelected = selectedContacts.size === filteredContacts.length && filteredContacts.length > 0
 
   const setContactType = (key: keyof ContactExportOptions['contactTypes'], value: boolean) =>
-    setContactOptions(prev => ({
-      ...prev,
-      contactTypes: { ...prev.contactTypes, [key]: value }
-    }))
+    setContactOptions(prev => ({ ...prev, contactTypes: { ...prev.contactTypes, [key]: value } }))
 
   return (
-    <>
-      <div className="session-panel contacts-panel">
-        <div className="panel-header">
-          <h2>通讯录预览</h2>
-          <button className="icon-btn" onClick={loadContacts} disabled={isLoadingContacts}>
-            <RefreshCw size={18} className={isLoadingContacts ? 'spin' : ''} />
-          </button>
+    <div className="grid h-full min-h-0 grid-cols-1 gap-3 lg:grid-cols-[360px_minmax(0,1fr)]">
+      {/* 左侧：通讯录预览 */}
+      <div className="flex min-h-0 flex-col gap-3 overflow-hidden lg:border-r lg:border-default lg:pr-3">
+        <div className="flex items-center justify-between">
+          <Typography type="h6">通讯录预览</Typography>
+          <Button isIconOnly variant="tertiary" size="sm" isDisabled={isLoadingContacts} onPress={loadContacts}>
+            <RefreshCw size={16} className={isLoadingContacts ? 'animate-spin' : ''} />
+          </Button>
         </div>
 
         <ExportSearchBar
+          aria-label="搜索联系人"
           value={contactSearchKeyword}
           onChange={setContactSearchKeyword}
           placeholder="搜索联系人..."
         />
 
-        <div className="select-actions">
-          <button className="select-all-btn" onClick={toggleSelectAllContacts}>
-            {allSelected ? '取消全选' : '全选'}
-          </button>
-          <span className="selected-count">
+        <div className="flex items-center justify-between gap-2">
+          <Button variant="tertiary" size="sm" onPress={toggleSelectAllContacts}>{allSelected ? '取消全选' : '全选'}</Button>
+          <Typography type="body-xs" className="shrink-0 text-muted">
             {selectedContacts.size > 0 ? `已选 ${selectedContacts.size} 个` : `共 ${filteredContacts.length} 个联系人`}
-          </span>
+          </Typography>
         </div>
 
-        <ContactList
-          isLoading={isLoadingContacts}
-          contacts={filteredContacts}
-          selectedContacts={selectedContacts}
-          onToggle={toggleContact}
-        />
+        <ScrollShadow hideScrollBar className="min-h-0 flex-1" size={32}>
+          <ContactList
+            isLoading={isLoadingContacts}
+            contacts={filteredContacts}
+            selectedContacts={selectedContacts}
+            onSelectionChange={setSelectedContacts}
+          />
+        </ScrollShadow>
       </div>
 
-      <div className="settings-panel">
-        <div className="panel-header">
-          <h2>导出设置</h2>
-          {tabs}
+      {/* 右侧：导出设置 */}
+      <div className="flex min-h-0 flex-col overflow-hidden">
+        <ScrollShadow hideScrollBar className="min-h-0 flex-1" size={32}>
+          <div className="flex flex-col gap-5 px-1 py-1">
+            <section className="flex flex-col gap-2">
+              <Typography type="body-sm" weight="semibold">导出格式</Typography>
+              <FormatPicker
+                aria-label="导出格式"
+                options={contactFormatOptions}
+                value={contactOptions.format}
+                onChange={(value) => setContactOptions(prev => ({ ...prev, format: value as ContactExportOptions['format'] }))}
+              />
+            </section>
+
+            <section className="flex flex-col gap-2">
+              <Typography type="body-sm" weight="semibold">联系人类型</Typography>
+              <OptionCardGroup
+                aria-label="联系人类型"
+                items={contactTypeToggles}
+                isSelected={(key) => contactOptions.contactTypes[key as keyof ContactExportOptions['contactTypes']]}
+                onToggle={(key, checked) => setContactType(key as keyof ContactExportOptions['contactTypes'], checked)}
+              />
+            </section>
+
+            <section className="flex flex-col gap-2">
+              <Typography type="body-sm" weight="semibold">导出选项</Typography>
+              <OptionCardGroup
+                aria-label="导出选项"
+                items={[{ key: 'exportAvatars', label: '导出头像', icon: CircleUserRound }]}
+                isSelected={() => contactOptions.exportAvatars}
+                onToggle={(_key, checked) => setContactOptions(prev => ({ ...prev, exportAvatars: checked }))}
+              />
+            </section>
+
+            <section className="flex flex-col gap-2">
+              <Typography type="body-sm" weight="semibold">导出位置</Typography>
+              <ExportPathSelect exportFolder={shared.exportFolder} onSelect={shared.selectExportFolder} />
+            </section>
+          </div>
+        </ScrollShadow>
+
+        <div className="border-t border-default pt-3">
+          <ExportActionButton
+            label="导出通讯录"
+            isExporting={shared.isExporting}
+            disabled={!shared.exportFolder || shared.isExporting}
+            onClick={startContactExport}
+          />
         </div>
-
-        <div className="settings-content">
-          <div className="setting-section">
-            <h3>导出格式</h3>
-            <FormatPicker
-              options={contactFormatOptions}
-              value={contactOptions.format}
-              onChange={(value) => setContactOptions(prev => ({ ...prev, format: value as ContactExportOptions['format'] }))}
-              className="contact-formats"
-            />
-          </div>
-
-          <div className="setting-section">
-            <h3>联系人类型</h3>
-            <div className="export-options">
-              <label className="checkbox-item">
-                <input
-                  type="checkbox"
-                  checked={contactOptions.contactTypes.friends}
-                  onChange={e => setContactType('friends', e.target.checked)}
-                />
-                <div className="custom-checkbox"></div>
-                <User size={16} />
-                <span>好友</span>
-              </label>
-              <label className="checkbox-item">
-                <input
-                  type="checkbox"
-                  checked={contactOptions.contactTypes.groups}
-                  onChange={e => setContactType('groups', e.target.checked)}
-                />
-                <div className="custom-checkbox"></div>
-                <Users size={16} />
-                <span>群聊</span>
-              </label>
-              <label className="checkbox-item">
-                <input
-                  type="checkbox"
-                  checked={contactOptions.contactTypes.officials}
-                  onChange={e => setContactType('officials', e.target.checked)}
-                />
-                <div className="custom-checkbox"></div>
-                <MessageSquare size={16} />
-                <span>公众号</span>
-              </label>
-            </div>
-          </div>
-
-          <div className="setting-section">
-            <h3>导出选项</h3>
-            <div className="export-options">
-              <label className="checkbox-item">
-                <input
-                  type="checkbox"
-                  checked={contactOptions.exportAvatars}
-                  onChange={e => setContactOptions(prev => ({ ...prev, exportAvatars: e.target.checked }))}
-                />
-                <div className="custom-checkbox"></div>
-                <span>导出头像</span>
-              </label>
-            </div>
-          </div>
-
-          <div className="setting-section">
-            <h3>导出位置</h3>
-            <ExportPathSelect exportFolder={shared.exportFolder} onSelect={shared.selectExportFolder} />
-          </div>
-        </div>
-
-        <ExportActionButton
-          label="导出通讯录"
-          isExporting={shared.isExporting}
-          disabled={!shared.exportFolder || shared.isExporting}
-          onClick={startContactExport}
-        />
       </div>
-    </>
+    </div>
   )
 }

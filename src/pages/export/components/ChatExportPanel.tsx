@@ -1,23 +1,31 @@
-import type { ReactNode } from 'react'
 import { RefreshCw, Users, User, CircleUserRound, Image, Video, Smile, Mic } from 'lucide-react'
+import { ScrollShadow, Button, Tabs, Chip, Typography } from '@heroui/react'
 import DateRangePicker from '../../../components/DateRangePicker'
-import type { ExportOptions } from '../types'
+import type { ExportOptions, SessionTypeFilter } from '../types'
 import type { ExportShared } from '../hooks/useExportShared'
 import type { useChatExport } from '../hooks/useChatExport'
 import { chatFormatOptions } from '../constants'
 import ExportSearchBar from './ExportSearchBar'
 import SessionList from './SessionList'
 import FormatPicker from './FormatPicker'
+import OptionCardGroup from './OptionCardGroup'
 import ExportPathSelect from './ExportPathSelect'
 import ExportActionButton from './ExportActionButton'
 
 interface ChatExportPanelProps {
   chat: ReturnType<typeof useChatExport>
   shared: ExportShared
-  tabs: ReactNode
 }
 
-export default function ChatExportPanel({ chat, shared, tabs }: ChatExportPanelProps) {
+const exportToggles: { key: keyof ExportOptions; label: string; icon: typeof Image }[] = [
+  { key: 'exportAvatars', label: '导出头像', icon: CircleUserRound },
+  { key: 'exportImages', label: '导出图片', icon: Image },
+  { key: 'exportVideos', label: '导出视频', icon: Video },
+  { key: 'exportEmojis', label: '导出表情包', icon: Smile },
+  { key: 'exportVoices', label: '导出语音', icon: Mic }
+]
+
+export default function ChatExportPanel({ chat, shared }: ChatExportPanelProps) {
   const {
     filteredSessions,
     selectedSessions,
@@ -29,180 +37,112 @@ export default function ChatExportPanel({ chat, shared, tabs }: ChatExportPanelP
     options,
     setOptions,
     loadSessions,
-    toggleSession,
-    toggleSelectAll,
-    selectOnlyGroups,
-    selectOnlyPrivate,
+    setSelectedSessions,
     startExport
   } = chat
-
-  const allSelected = selectedSessions.size === filteredSessions.length && filteredSessions.length > 0
 
   const setOption = <K extends keyof ExportOptions>(key: K, value: ExportOptions[K]) =>
     setOptions(prev => ({ ...prev, [key]: value }))
 
   return (
-    <>
-      <div className="session-panel">
-        <div className="panel-header">
-          <h2>选择会话</h2>
-          <button className="icon-btn" onClick={loadSessions} disabled={isLoading}>
-            <RefreshCw size={18} className={isLoading ? 'spin' : ''} />
-          </button>
+    <div className="grid h-full min-h-0 grid-cols-1 gap-3 lg:grid-cols-[360px_minmax(0,1fr)]">
+      {/* 左侧：会话预览 */}
+      <div className="flex min-h-0 flex-col gap-3 overflow-hidden lg:border-r lg:border-default lg:pr-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Typography type="h6">选择会话</Typography>
+            {selectedSessions.size > 0 && (
+              <Chip variant="secondary" size="sm">已选 {selectedSessions.size}</Chip>
+            )}
+          </div>
+          <Button isIconOnly variant="tertiary" size="sm" isDisabled={isLoading} onPress={loadSessions}>
+            <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
+          </Button>
         </div>
 
         <ExportSearchBar
+          aria-label="搜索会话"
           value={searchKeyword}
           onChange={setSearchKeyword}
           placeholder="搜索联系人或群组..."
         />
 
-        <div className="session-type-filter">
-          <button
-            className={`type-filter-btn ${sessionTypeFilter === 'all' ? 'active' : ''}`}
-            onClick={() => setSessionTypeFilter('all')}
-          >
-            全部
-          </button>
-          <button
-            className={`type-filter-btn ${sessionTypeFilter === 'group' ? 'active' : ''}`}
-            onClick={() => setSessionTypeFilter('group')}
-          >
-            <Users size={13} />
-            群聊
-          </button>
-          <button
-            className={`type-filter-btn ${sessionTypeFilter === 'private' ? 'active' : ''}`}
-            onClick={() => setSessionTypeFilter('private')}
-          >
-            <User size={13} />
-            私聊
-          </button>
-        </div>
+        <Tabs
+          selectedKey={sessionTypeFilter}
+          onSelectionChange={(key) => setSessionTypeFilter(String(key) as SessionTypeFilter)}
+        >
+          <Tabs.ListContainer>
+            <Tabs.List aria-label="会话类型筛选">
+              <Tabs.Tab id="all">全部<Tabs.Indicator /></Tabs.Tab>
+              <Tabs.Tab id="group"><Users size={13} />群聊<Tabs.Indicator /></Tabs.Tab>
+              <Tabs.Tab id="private"><User size={13} />私聊<Tabs.Indicator /></Tabs.Tab>
+            </Tabs.List>
+          </Tabs.ListContainer>
+        </Tabs>
 
-        <div className="select-actions">
-          <div className="select-actions-left">
-            <button className="select-all-btn" onClick={toggleSelectAll}>
-              {allSelected ? '取消全选' : '全选'}
-            </button>
-            <button className="select-type-btn" onClick={selectOnlyGroups} title="仅选中列表中的群聊">
-              <Users size={12} />
-              选群聊
-            </button>
-            <button className="select-type-btn" onClick={selectOnlyPrivate} title="仅选中列表中的私聊">
-              <User size={12} />
-              选私聊
-            </button>
-          </div>
-          <span className="selected-count">已选 {selectedSessions.size} 个</span>
-        </div>
-
-        <SessionList
-          isLoading={isLoading}
-          sessions={filteredSessions}
-          selectedSessions={selectedSessions}
-          onToggle={toggleSession}
-        />
+        <ScrollShadow hideScrollBar className="min-h-0 flex-1" size={32}>
+          <SessionList
+            isLoading={isLoading}
+            sessions={filteredSessions}
+            selectedSessions={selectedSessions}
+            onSelectionChange={setSelectedSessions}
+          />
+        </ScrollShadow>
       </div>
 
-      <div className="settings-panel">
-        <div className="panel-header">
-          <h2>导出设置</h2>
-          {tabs}
-        </div>
-
-        <div className="settings-content">
-          <div className="setting-section">
-            <h3>导出格式</h3>
-            <FormatPicker
-              options={chatFormatOptions}
-              value={options.format}
-              onChange={(value) => setOption('format', value as ExportOptions['format'])}
-            />
-          </div>
-
-          <div className="setting-section">
-            <h3>时间范围</h3>
-            <div className="time-options">
-              <DateRangePicker
-                startDate={options.startDate}
-                endDate={options.endDate}
-                onStartDateChange={(date) => setOption('startDate', date)}
-                onEndDateChange={(date) => setOption('endDate', date)}
+      {/* 右侧：导出设置 */}
+      <div className="flex min-h-0 flex-col overflow-hidden">
+        <ScrollShadow hideScrollBar className="min-h-0 flex-1" size={32}>
+          <div className="flex flex-col gap-5 px-1 py-1">
+            <section className="flex flex-col gap-2">
+              <Typography type="body-sm" weight="semibold">导出格式</Typography>
+              <FormatPicker
+                aria-label="导出格式"
+                options={chatFormatOptions}
+                value={options.format}
+                onChange={(value) => setOption('format', value as ExportOptions['format'])}
               />
-              <p className="time-hint">不选择时间范围则导出全部消息</p>
-            </div>
-          </div>
+            </section>
 
-          <div className="setting-section">
-            <h3>导出选项</h3>
-            <div className="export-options">
-              <label className="checkbox-item">
-                <input
-                  type="checkbox"
-                  checked={options.exportAvatars}
-                  onChange={e => setOption('exportAvatars', e.target.checked)}
+            <section className="flex flex-col gap-2">
+              <Typography type="body-sm" weight="semibold">时间范围</Typography>
+              <div className="max-w-xs">
+                <DateRangePicker
+                  startDate={options.startDate}
+                  endDate={options.endDate}
+                  onStartDateChange={(date) => setOption('startDate', date)}
+                  onEndDateChange={(date) => setOption('endDate', date)}
                 />
-                <div className="custom-checkbox"></div>
-                <CircleUserRound size={16} style={{ color: 'var(--text-tertiary)' }} />
-                <span>导出头像</span>
-              </label>
-              <label className="checkbox-item">
-                <input
-                  type="checkbox"
-                  checked={options.exportImages}
-                  onChange={e => setOption('exportImages', e.target.checked)}
-                />
-                <div className="custom-checkbox"></div>
-                <Image size={16} style={{ color: 'var(--text-tertiary)' }} />
-                <span>导出图片</span>
-              </label>
-              <label className="checkbox-item">
-                <input
-                  type="checkbox"
-                  checked={options.exportVideos}
-                  onChange={e => setOption('exportVideos', e.target.checked)}
-                />
-                <div className="custom-checkbox"></div>
-                <Video size={16} style={{ color: 'var(--text-tertiary)' }} />
-                <span>导出视频</span>
-              </label>
-              <label className="checkbox-item">
-                <input
-                  type="checkbox"
-                  checked={options.exportEmojis}
-                  onChange={e => setOption('exportEmojis', e.target.checked)}
-                />
-                <div className="custom-checkbox"></div>
-                <Smile size={16} style={{ color: 'var(--text-tertiary)' }} />
-                <span>导出表情包</span>
-              </label>
-              <label className="checkbox-item">
-                <input
-                  type="checkbox"
-                  checked={options.exportVoices}
-                  onChange={e => setOption('exportVoices', e.target.checked)}
-                />
-                <div className="custom-checkbox"></div>
-                <Mic size={16} style={{ color: 'var(--text-tertiary)' }} />
-                <span>导出语音</span>
-              </label>
-            </div>
-          </div>
+              </div>
+              <Typography type="body-xs" className="text-muted">不选择时间范围则导出全部消息</Typography>
+            </section>
 
-          <div className="setting-section">
-            <h3>导出位置</h3>
-            <ExportPathSelect exportFolder={shared.exportFolder} onSelect={shared.selectExportFolder} />
+            <section className="flex flex-col gap-2">
+              <Typography type="body-sm" weight="semibold">导出选项</Typography>
+              <OptionCardGroup
+                aria-label="导出选项"
+                items={exportToggles}
+                isSelected={(key) => options[key as keyof ExportOptions] as boolean}
+                onToggle={(key, checked) => setOption(key as keyof ExportOptions, checked)}
+              />
+            </section>
+
+            <section className="flex flex-col gap-2">
+              <Typography type="body-sm" weight="semibold">导出位置</Typography>
+              <ExportPathSelect exportFolder={shared.exportFolder} onSelect={shared.selectExportFolder} />
+            </section>
           </div>
+        </ScrollShadow>
+
+        <div className="border-t border-default pt-3">
+          <ExportActionButton
+            label="开始导出"
+            isExporting={shared.isExporting}
+            disabled={selectedSessions.size === 0 || !shared.exportFolder || shared.isExporting}
+            onClick={startExport}
+          />
         </div>
-
-        <ExportActionButton
-          label="开始导出"
-          isExporting={shared.isExporting}
-          disabled={selectedSessions.size === 0 || !shared.exportFolder || shared.isExporting}
-          onClick={startExport}
-        />
       </div>
-    </>
+    </div>
   )
 }

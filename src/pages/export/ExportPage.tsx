@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import './ExportPage.css'
+import { MessageSquare, Users, Camera } from 'lucide-react'
+import { Tabs } from '@heroui/react'
 import type { ExportTab } from './types'
 import { useExportShared } from './hooks/useExportShared'
 import { useChatExport } from './hooks/useChatExport'
 import { useContactExport } from './hooks/useContactExport'
 import { useMomentsExport } from './hooks/useMomentsExport'
-import ExportTabs from './components/ExportTabs'
 import ChatExportPanel from './components/ChatExportPanel'
 import ContactsExportPanel from './components/ContactsExportPanel'
 import MomentsExportPanel from './components/MomentsExportPanel'
@@ -20,15 +20,33 @@ function ExportPage() {
   const contact = useContactExport(shared, activeTab === 'contacts')
   const moments = useMomentsExport(shared, activeTab === 'moments')
 
-  const tabs = <ExportTabs activeTab={activeTab} onChange={setActiveTab} />
-
   const unitLabel = activeTab === 'chat' ? '个会话' : activeTab === 'contacts' ? '个联系人' : '条朋友圈'
 
   return (
-    <div className="export-page">
-      {activeTab === 'chat' && <ChatExportPanel chat={chat} shared={shared} tabs={tabs} />}
-      {activeTab === 'contacts' && <ContactsExportPanel contact={contact} shared={shared} tabs={tabs} />}
-      {activeTab === 'moments' && <MomentsExportPanel moments={moments} shared={shared} tabs={tabs} />}
+    <div className="flex h-full min-h-0 flex-col p-4">
+      <Tabs
+        selectedKey={activeTab}
+        onSelectionChange={(key) => setActiveTab(String(key) as ExportTab)}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <Tabs.ListContainer>
+          <Tabs.List aria-label="导出模式">
+            <Tabs.Tab id="chat"><MessageSquare size={14} />聊天记录<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab id="contacts"><Users size={14} />通讯录<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab id="moments"><Camera size={14} />朋友圈<Tabs.Indicator /></Tabs.Tab>
+          </Tabs.List>
+        </Tabs.ListContainer>
+
+        <Tabs.Panel id="chat" className="min-h-0 flex-1 pt-3">
+          <ChatExportPanel chat={chat} shared={shared} />
+        </Tabs.Panel>
+        <Tabs.Panel id="contacts" className="min-h-0 flex-1 pt-3">
+          <ContactsExportPanel contact={contact} shared={shared} />
+        </Tabs.Panel>
+        <Tabs.Panel id="moments" className="min-h-0 flex-1 pt-3">
+          <MomentsExportPanel moments={moments} shared={shared} />
+        </Tabs.Panel>
+      </Tabs>
 
       {/* 导出进度弹窗 */}
       {shared.isExporting && (
