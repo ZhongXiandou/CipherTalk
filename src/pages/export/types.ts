@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 
-export type ExportTab = 'chat' | 'contacts' | 'moments' | 'database'
+export type ExportTab = 'chat' | 'database'
 
 // 会话类型筛选
 export type SessionTypeFilter = 'all' | 'group' | 'private'
@@ -13,15 +13,6 @@ export interface ChatSession {
   lastTimestamp: number
 }
 
-export interface Contact {
-  username: string
-  displayName: string
-  remark?: string
-  nickname?: string
-  avatarUrl?: string
-  type: 'friend' | 'group' | 'official' | 'other'
-}
-
 export interface ExportOptions {
   format: 'chatlab' | 'chatlab-jsonl' | 'json' | 'html' | 'txt' | 'excel' | 'sql'
   startDate: string
@@ -31,35 +22,6 @@ export interface ExportOptions {
   exportVideos: boolean
   exportEmojis: boolean
   exportVoices: boolean
-}
-
-export interface ContactExportOptions {
-  format: 'json' | 'csv' | 'vcf'
-  exportAvatars: boolean
-  contactTypes: {
-    friends: boolean
-    groups: boolean
-    officials: boolean
-  }
-  selectedUsernames?: string[]
-}
-
-export interface MomentsExportOptions {
-  format: 'json' | 'html' | 'excel'
-  startDate: string
-  endDate: string
-}
-
-export interface MomentPost {
-  id: string
-  username: string
-  nickname: string
-  avatarUrl?: string
-  createTime: number
-  contentDesc: string
-  media?: { url: string }[]
-  likes?: string[]
-  comments?: unknown[]
 }
 
 export interface ExportResult {

@@ -29,5 +29,6 @@ const SYSTEM_ACCOUNTS = new Set([
 export function isExcludedSession(username: string): boolean {
   if (!username) return true
   if (username.startsWith('gh_')) return true // 公众号 / 服务号 / 订阅号
+  if (username === '@placeholder_foldgroup') return true // 「折叠的聊天」聚合虚拟会话，非真实会话
   return SYSTEM_ACCOUNTS.has(username)
 }
