@@ -10,6 +10,7 @@ import { registerChatHandlers } from './chatHandlers'
 import { registerConfigHandlers } from './configHandlers'
 import { registerDataManagementHandlers } from './dataManagementHandlers'
 import { registerDataHandlers } from './dataHandlers'
+import { registerDeviceConnectHandlers } from './deviceConnectHandlers'
 import { registerDbPathHandlers } from './dbPathHandlers'
 import { registerExportHandlers } from './exportHandlers'
 import { registerHttpApiHandlers } from './httpApiHandlers'
@@ -53,4 +54,5 @@ export function registerModularIpcHandlers(ctx: MainProcessContext): void {
   registerAiHandlers(ctx)
   registerPetHandlers(ctx)
   registerNotifyHandlers(ctx)
+  registerDeviceConnectHandlers(ctx)
 }

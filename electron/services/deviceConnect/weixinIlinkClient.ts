@@ -1,0 +1,283 @@
+/**
+ * 微信 iLink Bot API 裸调客户端 —— 直连 ilinkai.weixin.qq.com，不经 OpenClaw。
+ * 协议参考 Tencent/openclaw-weixin（开源插件）。本文件只做无状态 HTTP 调用，
+ * 连接状态/循环/token 持久化都在 weixinBotService。
+ */
+import crypto from 'crypto'
+
+export const ILINK_BASE_URL = 'https://ilinkai.weixin.qq.com'
+const BOT_TYPE = '3'
+// 与官方插件 @tencent-weixin/openclaw-weixin 对齐：服务器据此识别合法客户端并标记"已连接"
+const CHANNEL_VERSION = '2.4.4'
+const ILINK_APP_ID = 'bot' // 插件 package.json 的 ilink_appid 字段
+const BOT_AGENT = 'OpenClaw'
+
+/** iLink-App-ClientVersion：uint32 = major<<16 | minor<<8 | patch（高 8 位固定 0）。 */
+function buildClientVersion(version: string): number {
+  const parts = version.split('.').map((p) => parseInt(p, 10))
+  const major = parts[0] ?? 0
+  const minor = parts[1] ?? 0
+  const patch = parts[2] ?? 0
+  return ((major & 0xff) << 16) | ((minor & 0xff) << 8) | (patch & 0xff)
+}
+const ILINK_APP_CLIENT_VERSION = String(buildClientVersion(CHANNEL_VERSION))
+
+/** 每个请求都带的客户端标识头（GET/POST 通用） */
+function commonHeaders(): Record<string, string> {
+  return {
+    'iLink-App-Id': ILINK_APP_ID,
+    'iLink-App-ClientVersion': ILINK_APP_CLIENT_VERSION,
+  }
+}
+
+function buildBaseInfo(): Record<string, string> {
+  return { channel_version: CHANNEL_VERSION, bot_agent: BOT_AGENT }
+}
+
+export interface IlinkSession {
+  token: string
+  baseUrl: string
+  botId: string
+  userId: string
+}
+
+export interface IlinkQrcode {
+  /** 轮询状态用的二维码标识 */
+  qrcode: string
+  /** 待编码成二维码图片的内容（微信扫码连接用的 URL 字符串，不是图片本身） */
+  qrcodeContent: string
+}
+
+export type IlinkQrStatus = 'wait' | 'scaned' | 'expired' | 'confirmed'
+
+export interface IlinkQrStatusResp {
+  status: IlinkQrStatus
+  bot_token?: string
+  baseurl?: string
+  ilink_bot_id?: string
+  ilink_user_id?: string
+}
+
+export interface IlinkMessageItem {
+  type: number
+  text_item?: { text?: string }
+  voice_item?: { text?: string }
+  file_item?: { file_name?: string }
+}
+
+export interface IlinkMessage {
+  from_user_id?: string
+  to_user_id?: string
+  message_type?: number
+  context_token?: string
+  item_list?: IlinkMessageItem[]
+}
+
+export interface IlinkUpdates {
+  ret?: number
+  msgs?: IlinkMessage[]
+  get_updates_buf?: string
+}
+
+export interface IlinkConfigResp {
+  ret?: number
+  errmsg?: string
+  typing_ticket?: string
+}
+
+export type IlinkTypingStatus = 1 | 2
+
+/** X-WECHAT-UIN：随机 uint32 → 十进制字符串 → base64（每请求一变） */
+function randomWechatUin(): string {
+  const uint32 = crypto.randomBytes(4).readUInt32BE(0)
+  return Buffer.from(String(uint32), 'utf-8').toString('base64')
+}
+
+function buildHeaders(token?: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    AuthorizationType: 'ilink_bot_token',
+    'X-WECHAT-UIN': randomWechatUin(),
+    ...commonHeaders(),
+  }
+  // 注意：不要手动设 Content-Length，undici 会自动按 body 计算，手动设会报 invalid content-length
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  return headers
+}
+
+async function apiGet<T>(baseUrl: string, path: string): Promise<T> {
+  const url = `${baseUrl.replace(/\/$/, '')}/${path}`
+  const res = await fetch(url, { headers: commonHeaders() })
+  const text = await res.text()
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`)
+  return JSON.parse(text) as T
+}
+
+/** POST：自动包 base_info；返回 null 表示长轮询超时（正常）。 */
+async function apiPost<T>(
+  baseUrl: string,
+  endpoint: string,
+  body: Record<string, unknown>,
+  token?: string,
+  timeoutMs = 15_000,
+  signal?: AbortSignal,
+): Promise<T | null> {
+  const url = `${baseUrl.replace(/\/$/, '')}/${endpoint}`
+  const payload = { ...body, base_info: buildBaseInfo() }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const onAbort = () => controller.abort()
+  signal?.addEventListener('abort', onAbort)
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: buildHeaders(token),
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+    const text = await res.text()
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`)
+    return JSON.parse(text) as T
+  } catch (err) {
+    if ((err as Error)?.name === 'AbortError') return null
+    throw err
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', onAbort)
+  }
+}
+
+/** 获取扫码连接二维码 */
+export async function fetchQrcode(): Promise<IlinkQrcode> {
+  const resp = await apiGet<{ qrcode: string; qrcode_img_content: string }>(
+    ILINK_BASE_URL,
+    `ilink/bot/get_bot_qrcode?bot_type=${BOT_TYPE}`,
+  )
+  return { qrcode: resp.qrcode, qrcodeContent: resp.qrcode_img_content }
+}
+
+/** 轮询二维码状态 */
+export async function fetchQrcodeStatus(qrcode: string): Promise<IlinkQrStatusResp> {
+  return apiGet<IlinkQrStatusResp>(
+    ILINK_BASE_URL,
+    `ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`,
+  )
+}
+
+/** 通知微信：本通道客户端已上线（不调这个 bot 会显示"暂无法连接"）。 */
+export async function notifyStart(session: IlinkSession): Promise<{ ret?: number; errmsg?: string } | null> {
+  return apiPost<{ ret?: number; errmsg?: string }>(
+    session.baseUrl,
+    'ilink/bot/msg/notifystart',
+    {},
+    session.token,
+    10_000,
+  )
+}
+
+/** 通知微信：本通道客户端下线。 */
+export async function notifyStop(session: IlinkSession): Promise<{ ret?: number; errmsg?: string } | null> {
+  return apiPost<{ ret?: number; errmsg?: string }>(
+    session.baseUrl,
+    'ilink/bot/msg/notifystop',
+    {},
+    session.token,
+    10_000,
+  )
+}
+
+/** 长轮询取新消息（服务器最多 hold 35s，这里 38s 超时） */
+export async function getUpdates(session: IlinkSession, buf: string, signal?: AbortSignal): Promise<IlinkUpdates> {
+  const resp = await apiPost<IlinkUpdates>(
+    session.baseUrl,
+    'ilink/bot/getupdates',
+    { get_updates_buf: buf ?? '' },
+    session.token,
+    38_000,
+    signal,
+  )
+  return resp ?? { ret: 0, msgs: [], get_updates_buf: buf }
+}
+
+/** 获取账号配置，包含发送 typing 状态需要的 typing_ticket。 */
+export async function getConfig(
+  session: IlinkSession,
+  ilinkUserId: string,
+  contextToken?: string,
+): Promise<IlinkConfigResp | null> {
+  return apiPost<IlinkConfigResp>(
+    session.baseUrl,
+    'ilink/bot/getconfig',
+    {
+      ilink_user_id: ilinkUserId,
+      context_token: contextToken,
+    },
+    session.token,
+    10_000,
+  )
+}
+
+/** 发送或取消“正在输入中”状态：1=正在输入，2=取消。 */
+export async function sendTyping(
+  session: IlinkSession,
+  ilinkUserId: string,
+  typingTicket: string,
+  status: IlinkTypingStatus,
+): Promise<void> {
+  await apiPost(
+    session.baseUrl,
+    'ilink/bot/sendtyping',
+    {
+      ilink_user_id: ilinkUserId,
+      typing_ticket: typingTicket,
+      status,
+    },
+    session.token,
+    10_000,
+  )
+}
+
+/** 发送文本消息（必须回传 context_token，否则消息关联不上会话） */
+export async function sendText(
+  session: IlinkSession,
+  toUserId: string,
+  text: string,
+  contextToken?: string,
+): Promise<void> {
+  await apiPost(
+    session.baseUrl,
+    'ilink/bot/sendmessage',
+    {
+      msg: {
+        from_user_id: '',
+        to_user_id: toUserId,
+        client_id: `ct-${crypto.randomUUID()}`,
+        message_type: 2, // BOT
+        message_state: 2, // FINISH
+        context_token: contextToken,
+        item_list: [{ type: 1, text_item: { text } }],
+      },
+    },
+    session.token,
+  )
+}
+
+/** 从消息 item_list 提取可读文本（非文本类型给占位标记） */
+export function extractText(msg: IlinkMessage): string {
+  for (const item of msg.item_list ?? []) {
+    if (item.type === 1 && item.text_item?.text) return item.text_item.text
+    if (item.type === 3 && item.voice_item?.text) return `[语音] ${item.voice_item.text}`
+    if (item.type === 2) return '[图片]'
+    if (item.type === 4) return `[文件] ${item.file_item?.file_name ?? ''}`
+    if (item.type === 5) return '[视频]'
+  }
+  return ''
+}
+
+/** 判断是否为会话过期错误（需重新扫码连接） */
+export function isSessionExpiredError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.includes('session timeout') || msg.includes('-14')
+}

@@ -14,6 +14,10 @@ export interface AgentConversationRecord {
   title: string
   modelProvider: string
   modelId: string
+  /** 对话来源：'app'（应用内）| 'wechat'（微信接入）等 */
+  source: string
+  /** 外部来源的稳定标识（如微信 from_user_id），用于按来源会话归档 */
+  externalId: string | null
   createdAt: number
   updatedAt: number
 }
@@ -35,6 +39,8 @@ interface CreateConversationInput {
   title?: string
   modelProvider?: string
   modelId?: string
+  source?: string
+  externalId?: string | null
 }
 
 interface ListConversationOptions {
@@ -158,6 +164,17 @@ export class AgentConversationStore {
       CREATE INDEX IF NOT EXISTS idx_agent_msg_conv
         ON agent_messages(conversation_id, created_at ASC, id ASC);
     `)
+
+    // 增量迁移：旧库补上来源标志列
+    const cols = db.prepare('PRAGMA table_info(agent_conversations)').all() as Array<{ name: string }>
+    const names = new Set(cols.map((c) => c.name))
+    if (!names.has('source')) {
+      db.exec("ALTER TABLE agent_conversations ADD COLUMN source TEXT NOT NULL DEFAULT 'app'")
+    }
+    if (!names.has('external_id')) {
+      db.exec('ALTER TABLE agent_conversations ADD COLUMN external_id TEXT')
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_agent_conv_source ON agent_conversations(account_id, source, external_id)')
   }
 
   private mapConversation(row: any): AgentConversationRecord {
@@ -168,6 +185,8 @@ export class AgentConversationStore {
       title: String(row.title || '新对话'),
       modelProvider: String(row.model_provider || ''),
       modelId: String(row.model_id || ''),
+      source: String(row.source || 'app'),
+      externalId: row.external_id ? String(row.external_id) : null,
       createdAt: Number(row.created_at || 0),
       updatedAt: Number(row.updated_at || 0),
     }
@@ -207,8 +226,8 @@ export class AgentConversationStore {
     const result = db.prepare(`
       INSERT INTO agent_conversations (
         account_id, scope_kind, session_id, display_name, title,
-        model_provider, model_id, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        model_provider, model_id, source, external_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       accountId,
       scope.kind,
@@ -217,11 +236,27 @@ export class AgentConversationStore {
       String(input.title || '新对话').slice(0, 80),
       String(input.modelProvider || ''),
       String(input.modelId || ''),
+      String(input.source || 'app'),
+      input.externalId || null,
       now,
       now,
     )
 
     return this.loadMeta(Number(result.lastInsertRowid))
+  }
+
+  /** 按来源+外部标识找会话，没有就新建（用于微信等外部接入按联系人归档）。 */
+  getOrCreateExternal(input: { source: string; externalId: string; title?: string }): AgentConversationRecord {
+    const db = this.getDb()
+    const accountId = this.getAccountId()
+    const row = db.prepare(`
+      SELECT * FROM agent_conversations
+      WHERE account_id = ? AND source = ? AND external_id = ?
+      ORDER BY updated_at DESC, id DESC
+      LIMIT 1
+    `).get(accountId, input.source, input.externalId)
+    if (row) return this.mapConversation(row)
+    return this.create({ source: input.source, externalId: input.externalId, title: input.title })
   }
 
   load(id: number): AgentConversationLoaded | null {

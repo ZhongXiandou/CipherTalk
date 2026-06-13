@@ -98,6 +98,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
     activate: () => ipcRenderer.send('notify:activate'),
   },
 
+  // 设备连接（微信 iLink 直连）
+  deviceConnect: {
+    wechat: {
+      getStatus: () => ipcRenderer.invoke('deviceConnect:wechat:getStatus') as Promise<{ status: 'disconnected' | 'connecting' | 'connected' | 'error'; botId: string | null; userId: string | null; error: string | null }>,
+      connect: () => ipcRenderer.invoke('deviceConnect:wechat:connect') as Promise<{ success: boolean; qrcodeImage?: string; error?: string }>,
+      cancel: () => ipcRenderer.invoke('deviceConnect:wechat:cancel') as Promise<{ success: boolean }>,
+      disconnect: () => ipcRenderer.invoke('deviceConnect:wechat:disconnect') as Promise<{ success: boolean }>,
+      onStatus: (callback: (payload: { status: 'disconnected' | 'connecting' | 'connected' | 'error'; botId: string | null; userId: string | null; error: string | null }) => void) => {
+        const listener = (_: any, payload: any) => callback(payload)
+        ipcRenderer.on('deviceConnect:wechat:status', listener)
+        return () => { ipcRenderer.removeListener('deviceConnect:wechat:status', listener) }
+      },
+      onQrcode: (callback: (payload: { qrcodeImage: string }) => void) => {
+        const listener = (_: any, payload: any) => callback(payload)
+        ipcRenderer.on('deviceConnect:wechat:qrcode', listener)
+        return () => { ipcRenderer.removeListener('deviceConnect:wechat:qrcode', listener) }
+      },
+      onScanState: (callback: (payload: { state: 'scaned' | 'failed'; error?: string }) => void) => {
+        const listener = (_: any, payload: any) => callback(payload)
+        ipcRenderer.on('deviceConnect:wechat:scanState', listener)
+        return () => { ipcRenderer.removeListener('deviceConnect:wechat:scanState', listener) }
+      },
+    },
+  },
+
   accounts: {
     list: () => ipcRenderer.invoke('accounts:list') as Promise<AccountProfile[]>,
     getActive: () => ipcRenderer.invoke('accounts:getActive') as Promise<AccountProfile | null>,
