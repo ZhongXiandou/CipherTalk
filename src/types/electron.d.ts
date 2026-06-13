@@ -182,6 +182,20 @@ export interface AgentMemoryItem {
   updatedAt: number
 }
 
+export interface MemoryMigrationStatusInfo {
+  needed: boolean
+  legacyDbPath: string
+  memoryBankPath: string
+  itemCount: number
+  migratedItemCount: number
+  error?: string
+}
+
+export interface MemoryMigrationResultInfo extends MemoryMigrationStatusInfo {
+  success: boolean
+  deletedFiles: string[]
+}
+
 // 克隆好友（数字分身）：画像卡 + few-shot + 风格统计（与 electron/services/agent/persona/personaTypes.ts 对应）
 export interface PersonaCardInfo {
   tone: string
@@ -1189,6 +1203,8 @@ export interface ElectronAPI {
     onProgress: (runId: string, callback: (progress: unknown) => void) => () => void
   }
   memory: {
+    migrationStatus: () => Promise<{ success: boolean; status?: MemoryMigrationStatusInfo; error?: string }>
+    migrateLegacy: () => Promise<{ success: boolean; result?: MemoryMigrationResultInfo; error?: string }>
     list: (opts?: { sourceType?: 'profile' | 'fact' | 'relationship'; sourceTypes?: Array<'profile' | 'fact' | 'relationship'>; sessionId?: string; tags?: string[]; withoutTags?: string[]; minConfidence?: number; limit?: number }) => Promise<{ success: boolean; items?: AgentMemoryItem[]; stats?: { itemCount: number }; error?: string }>
     delete: (id: number) => Promise<{ success: boolean; error?: string }>
     update: (payload: { id: number; sourceType?: 'profile' | 'fact' | 'relationship'; content?: string; importance?: number; confidence?: number; tags?: string[] }) => Promise<{ success: boolean; item?: AgentMemoryItem; error?: string }>

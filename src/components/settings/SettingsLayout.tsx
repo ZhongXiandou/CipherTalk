@@ -683,8 +683,8 @@ function SettingsLayout() {
   const handleClearAIData = () => {
     setShowClearDialog({
       type: 'aiData',
-      title: '清除 AI 数据库',
-      message: '此操作将删除历史 AI 摘要、AI 记忆、语义索引等功能产生的本地数据库，不会删除 AI 接入配置、API Key、模型和服务地址。确定要继续吗？'
+      title: '清除 AI 数据',
+      message: '此操作将删除历史 AI 摘要、AI 记忆、语义索引等功能产生的本地数据，不会删除 AI 接入配置、API Key、模型和服务地址。确定要继续吗？'
     })
   }
 

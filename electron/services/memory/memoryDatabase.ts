@@ -1,12 +1,21 @@
 import Database from 'better-sqlite3'
-import { cosineSimilarity } from 'ai'
 import { createHash } from 'crypto'
-import { existsSync, mkdirSync, writeFileSync } from 'fs'
-import { dirname, join } from 'path'
+import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync
+} from 'fs'
+import { basename, dirname, join } from 'path'
 import { ConfigService } from '../config'
 import {
   MEMORY_DB_NAME,
-  MEMORY_SCHEMA_VERSION,
   MEMORY_SOURCE_TYPES,
   type MemoryDatabaseStats,
   type MemoryEvidenceRef,
@@ -48,6 +57,35 @@ export type MemoryMarkdownExportResult = {
   itemCount: number
 }
 
+export type MemoryMigrationStatus = {
+  needed: boolean
+  legacyDbPath: string
+  memoryBankPath: string
+  itemCount: number
+  migratedItemCount: number
+  error?: string
+}
+
+export type MemoryMigrationResult = MemoryMigrationStatus & {
+  success: boolean
+  deletedFiles: string[]
+}
+
+const MEMORY_BANK_DIR = 'memory-bank'
+const META_FILE = 'META.md'
+const ITEMS_DIR = 'items'
+const SELF_REFERENCE_DIR = 'ct-self-reference'
+const LEGACY_SELF_REFERENCE_DIR = `${'co'}${'la'}-self-reference`
+
+export type MarkdownMemoryRetrievalMode = 'fact' | 'recent' | 'topic'
+
+export type MarkdownMemoryRetrieval = {
+  mode: MarkdownMemoryRetrievalMode
+  context: string
+  itemIds: number[]
+  sourceFiles: string[]
+}
+
 function nowMs(): number {
   return Date.now()
 }
@@ -55,8 +93,7 @@ function nowMs(): number {
 function getCacheBasePath(): string {
   const configService = new ConfigService()
   try {
-    const cachePath = String(configService.get('cachePath') || '').trim()
-    return cachePath || join(process.cwd(), 'cache')
+    return configService.getCacheBasePath()
   } finally {
     configService.close()
   }
@@ -77,159 +114,112 @@ function clamp01(value: unknown, fallback: number): number {
   return Math.max(0, Math.min(1, numberValue))
 }
 
-function safeJsonStringify(value: unknown, fallback: unknown): string {
+function safeJsonParse<T>(value: string, fallback: T): T {
   try {
-    return JSON.stringify(value ?? fallback)
+    return JSON.parse(value) as T
   } catch {
-    return JSON.stringify(fallback)
+    return fallback
   }
 }
 
-function parseStringArrayJson(value: string): string[] {
-  try {
-    const parsed = JSON.parse(value || '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed
+function parseStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean)
+  }
+  if (typeof value === 'string') {
+    return safeJsonParse<string[]>(value, [])
       .map((item) => String(item || '').trim())
       .filter(Boolean)
-  } catch {
-    return []
   }
+  return []
 }
 
-function parseEvidenceRefsJson(value: string): MemoryEvidenceRef[] {
-  try {
-    const parsed = JSON.parse(value || '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .map((item): MemoryEvidenceRef | null => {
-        if (!item || typeof item !== 'object') return null
-        const source = item as Record<string, unknown>
-        const sessionId = String(source.sessionId || '').trim()
-        const localId = Number(source.localId)
-        const createTime = Number(source.createTime)
-        const sortSeq = Number(source.sortSeq)
-        if (!sessionId || !Number.isFinite(localId) || !Number.isFinite(createTime) || !Number.isFinite(sortSeq)) {
-          return null
-        }
-        const senderUsername = String(source.senderUsername || '').trim()
-        const excerpt = String(source.excerpt || '').trim()
-        return {
-          sessionId,
-          localId,
-          createTime,
-          sortSeq,
-          ...(senderUsername ? { senderUsername } : {}),
-          ...(excerpt ? { excerpt } : {})
-        }
-      })
-      .filter((item): item is MemoryEvidenceRef => Boolean(item))
-  } catch {
-    return []
-  }
-}
-
-function toTimestampSeconds(value?: number): number | null {
-  if (!Number.isFinite(Number(value)) || Number(value) <= 0) return null
-  const numberValue = Number(value)
-  return numberValue > 10_000_000_000 ? Math.floor(numberValue / 1000) : Math.floor(numberValue)
-}
-
-function escapeFtsPhrase(value: string): string {
-  return `"${String(value || '').replace(/"/g, '""')}"`
-}
-
-function buildMemoryFtsQuery(query: string): string {
-  const normalized = String(query || '')
-    .replace(/[\u200b-\u200f\ufeff]/g, '')
-    .replace(/[，。！？；：、“”‘’（）()[\]{}<>《》|\\/+=*_~`#$%^&-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-  if (!normalized) return ''
-
-  const terms = normalized
-    .split(/\s+/)
-    .map((term) => term.trim())
-    .filter(Boolean)
-  return terms.length > 1
-    ? terms.map(escapeFtsPhrase).join(' AND ')
-    : escapeFtsPhrase(normalized)
-}
-
-function buildMemoryFilterSql(
-  options: Pick<MemoryKeywordSearchOptions, 'sessionId' | 'sourceTypes' | 'startTimeMs' | 'endTimeMs'>,
-  params: Record<string, unknown>
-): string {
-  const clauses: string[] = []
-  if (options.sessionId) {
-    clauses.push('m.session_id = @sessionId')
-    params.sessionId = options.sessionId
-  }
-
-  const sourceTypes = Array.from(new Set((options.sourceTypes || []).filter((type) => MEMORY_SOURCE_TYPES.includes(type))))
-  if (sourceTypes.length > 0) {
-    const placeholders = sourceTypes.map((_, index) => `@sourceType${index}`)
-    sourceTypes.forEach((sourceType, index) => {
-      params[`sourceType${index}`] = sourceType
+function parseEvidenceRefs(value: unknown): MemoryEvidenceRef[] {
+  const parsed = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? safeJsonParse<unknown[]>(value, [])
+      : []
+  return parsed
+    .map((item): MemoryEvidenceRef | null => {
+      if (!item || typeof item !== 'object') return null
+      const source = item as Record<string, unknown>
+      const sessionId = String(source.sessionId || '').trim()
+      const localId = Number(source.localId)
+      const createTime = Number(source.createTime)
+      const sortSeq = Number(source.sortSeq)
+      if (!sessionId || !Number.isFinite(localId) || !Number.isFinite(createTime) || !Number.isFinite(sortSeq)) return null
+      const senderUsername = String(source.senderUsername || '').trim()
+      const excerpt = String(source.excerpt || '').trim()
+      return {
+        sessionId,
+        localId,
+        createTime,
+        sortSeq,
+        ...(senderUsername ? { senderUsername } : {}),
+        ...(excerpt ? { excerpt } : {})
+      }
     })
-    clauses.push(`m.source_type IN (${placeholders.join(', ')})`)
-  }
-
-  const startTime = toTimestampSeconds(options.startTimeMs)
-  if (startTime) {
-    clauses.push('COALESCE(m.time_end, m.time_start, 0) >= @startTime')
-    params.startTime = startTime
-  }
-
-  const endTime = toTimestampSeconds(options.endTimeMs)
-  if (endTime) {
-    clauses.push('COALESCE(m.time_start, m.time_end, 0) <= @endTime')
-    params.endTime = endTime
-  }
-
-  return clauses.length ? `AND ${clauses.join(' AND ')}` : ''
+    .filter((item): item is MemoryEvidenceRef => Boolean(item))
 }
 
-function safeSourceType(value: string): MemorySourceType {
+function safeSourceType(value: unknown): MemorySourceType {
   return MEMORY_SOURCE_TYPES.includes(value as MemorySourceType)
     ? value as MemorySourceType
-    : 'message'
+    : 'fact'
+}
+
+function safeFileSegment(value: string): string {
+  const text = String(value || 'memory').trim() || 'memory'
+  return text.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 120) || 'memory'
 }
 
 function markdownEscape(value: string): string {
   return String(value || '').replace(/\r\n/g, '\n').trim()
 }
 
-function safeFileSegment(value: string): string {
-  const text = String(value || 'global').trim() || 'global'
-  return text.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 120) || 'global'
+function formatDateTime(ms = nowMs()): string {
+  const date = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function formatDate(ms = nowMs()): string {
+  const date = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function frontMatterValue(value: unknown): string {
+  return JSON.stringify(value ?? null)
+}
+
+function parseFrontMatter(content: string): { meta: Record<string, unknown>; body: string } {
+  const normalized = content.replace(/\r\n/g, '\n')
+  if (!normalized.startsWith('---\n')) return { meta: {}, body: normalized }
+  const end = normalized.indexOf('\n---\n', 4)
+  if (end < 0) return { meta: {}, body: normalized }
+  const raw = normalized.slice(4, end)
+  const meta: Record<string, unknown> = {}
+  for (const line of raw.split('\n')) {
+    const idx = line.indexOf(':')
+    if (idx < 0) continue
+    const key = line.slice(0, idx).trim()
+    const rawValue = line.slice(idx + 1).trim()
+    meta[key] = safeJsonParse(rawValue, rawValue)
+  }
+  return { meta, body: normalized.slice(end + 5).trim() }
+}
+
+function extractBodyText(body: string): string {
+  return body
+    .replace(/^# .+$/m, '')
+    .replace(/^## 内容\s*/m, '')
+    .trim()
 }
 
 function memoryAbout(item: MemoryItem): string {
   return item.sessionId || item.contactId || item.groupId || 'global'
-}
-
-function toMemoryItem(row: MemoryItemRow): MemoryItem {
-  return {
-    id: Number(row.id),
-    memoryUid: row.memory_uid,
-    sourceType: safeSourceType(row.source_type),
-    sessionId: row.session_id,
-    contactId: row.contact_id,
-    groupId: row.group_id,
-    title: row.title,
-    content: row.content,
-    contentHash: row.content_hash,
-    entities: parseStringArrayJson(row.entities_json),
-    tags: parseStringArrayJson(row.tags_json),
-    importance: Number(row.importance || 0),
-    confidence: Number(row.confidence || 0),
-    timeStart: row.time_start == null ? null : Number(row.time_start),
-    timeEnd: row.time_end == null ? null : Number(row.time_end),
-    sourceRefs: parseEvidenceRefsJson(row.source_refs_json),
-    createdAt: Number(row.created_at || 0),
-    updatedAt: Number(row.updated_at || 0)
-  }
 }
 
 export function hashMemoryContent(title: string, content: string): string {
@@ -238,387 +228,596 @@ export function hashMemoryContent(title: string, content: string): string {
     .digest('hex')
 }
 
+function normalizeSearchText(value: string): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[\u200b-\u200f\ufeff]/g, '')
+    .replace(/[，。！？；：、“”‘’（）()[\]{}<>《》|\\/+=*_~`#$%^&-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function splitQuery(query: string): string[] {
+  const normalized = normalizeSearchText(query)
+  if (!normalized) return []
+  const parts = normalized.split(/\s+/).filter((part) => part.length >= 2)
+  return parts.length > 0 ? parts : [normalized]
+}
+
+function classifyQuery(query: string): MarkdownMemoryRetrievalMode {
+  const text = String(query || '')
+  const factKeywords = ['名字', '叫什么', '喜欢', '讨厌', '答应', '承诺', '偏好', '习惯', '我是谁', '了解我', '认识我']
+  const recentKeywords = ['今天', '昨天', '刚才', '刚刚', '最近', '上次', '前几天']
+  if (factKeywords.some((keyword) => text.includes(keyword))) return 'fact'
+  if (recentKeywords.some((keyword) => text.includes(keyword))) return 'recent'
+  return 'topic'
+}
+
+function toTimestampSeconds(value?: number): number | null {
+  if (!Number.isFinite(Number(value)) || Number(value) <= 0) return null
+  const numberValue = Number(value)
+  return numberValue > 10_000_000_000 ? Math.floor(numberValue / 1000) : Math.floor(numberValue)
+}
+
+function rowToInput(row: MemoryItemRow): MemoryItemInput {
+  return {
+    memoryUid: row.memory_uid,
+    sourceType: safeSourceType(row.source_type),
+    sessionId: row.session_id,
+    contactId: row.contact_id,
+    groupId: row.group_id,
+    title: row.title,
+    content: row.content,
+    contentHash: row.content_hash,
+    entities: parseStringArray(row.entities_json),
+    tags: parseStringArray(row.tags_json),
+    importance: Number(row.importance || 0),
+    confidence: Number(row.confidence || 0),
+    timeStart: row.time_start,
+    timeEnd: row.time_end,
+    sourceRefs: parseEvidenceRefs(row.source_refs_json)
+  }
+}
+
 export class MemoryDatabase {
-  private db: Database.Database | null = null
-  private dbPath: string | null = null
+  private rootPath: string | null = null
 
   getDbPath(): string {
     return join(getCacheBasePath(), MEMORY_DB_NAME)
   }
 
-  getDb(): Database.Database {
-    const nextDbPath = this.getDbPath()
-    const dir = dirname(nextDbPath)
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true })
-    }
-
-    if (this.db && this.dbPath === nextDbPath) {
-      return this.db
-    }
-
-    if (this.db) {
-      this.close()
-    }
-
-    const db = new Database(nextDbPath)
-    this.db = db
-    this.dbPath = nextDbPath
-    this.ensureSchema(db)
-    return db
+  getMemoryBankPath(): string {
+    return join(getCacheBasePath(), MEMORY_BANK_DIR)
   }
 
   ensureReady(): void {
-    this.getDb()
+    this.ensureBank()
   }
 
   close(): void {
-    if (!this.db) return
+    this.rootPath = null
+  }
+
+  private ensureBank(): string {
+    const root = this.getMemoryBankPath()
+    if (this.rootPath === root && existsSync(root)) return root
+    this.migrateLegacySelfReferenceDir(root)
+    mkdirSync(join(root, ITEMS_DIR), { recursive: true })
+    mkdirSync(join(root, SELF_REFERENCE_DIR, 'diaries'), { recursive: true })
+    mkdirSync(join(root, 'conversations'), { recursive: true })
+    mkdirSync(join(root, 'tasks'), { recursive: true })
+    mkdirSync(join(root, 'notes'), { recursive: true })
+    this.writeIfMissing(join(root, 'MEMORY.md'), [
+      '# Memory Bank Index',
+      '',
+      '## Key Pointers',
+      '- BOOKMARKS.md - 重要瞬间日志',
+      '- ct-self-reference/user-profile.md - 用户档案',
+      '- ct-self-reference/relationship.md - AI 与用户的关系',
+      '- ct-self-reference/diaries/ - 每日日记',
+      '- conversations/ - 对话日志',
+      '- tasks/ - 任务笔记',
+      '- notes/ - 知识笔记',
+      '',
+      '## Active Context',
+      'CipherTalk 使用纯 Markdown 长期记忆。',
+      ''
+    ].join('\n'))
+    this.writeIfMissing(join(root, 'BOOKMARKS.md'), '# Bookmarks\n\n')
+    this.writeIfMissing(join(root, SELF_REFERENCE_DIR, 'user-profile.md'), [
+      '# 用户档案',
+      '',
+      '## 基本信息',
+      '- 名字：（待填写）',
+      '- 首次对话：（日期）',
+      '',
+      '## 事实表',
+      '| Key | Value | 置信度 | 来源 | 更新日期 |',
+      '|-----|-------|--------|------|---------|',
+      '',
+      '## 性格画像',
+      '',
+      '## 当前状态',
+      ''
+    ].join('\n'))
+    this.writeIfMissing(join(root, SELF_REFERENCE_DIR, 'relationship.md'), '# 关系\n\n')
+    this.writeIfMissing(join(root, SELF_REFERENCE_DIR, 'soul.md'), '# CT Soul\n\n')
+    this.writeIfMissing(join(root, META_FILE), [
+      '# Memory Bank Meta',
+      '',
+      'lastId: 0',
+      'migratedLegacyDb: false',
+      ''
+    ].join('\n'))
+    this.rootPath = root
+    return root
+  }
+
+  private migrateLegacySelfReferenceDir(root: string): void {
+    const legacyDir = join(root, LEGACY_SELF_REFERENCE_DIR)
+    const nextDir = join(root, SELF_REFERENCE_DIR)
+    if (!existsSync(legacyDir)) return
+    mkdirSync(root, { recursive: true })
     try {
-      this.db.close()
-    } finally {
-      this.db = null
-      this.dbPath = null
+      if (!existsSync(nextDir)) {
+        renameSync(legacyDir, nextDir)
+      } else {
+        cpSync(legacyDir, nextDir, { recursive: true, force: false, errorOnExist: false })
+        rmSync(legacyDir, { recursive: true, force: true })
+      }
+    } catch {
+      try {
+        cpSync(legacyDir, nextDir, { recursive: true, force: false, errorOnExist: false })
+        rmSync(legacyDir, { recursive: true, force: true })
+      } catch {
+        // 目录迁移失败不阻塞记忆系统初始化；后续写入只使用 ct-self-reference。
+      }
     }
   }
 
-  private ensureSchema(db: Database.Database): void {
-    db.pragma('journal_mode = WAL')
-    db.pragma('synchronous = NORMAL')
-    db.pragma('foreign_keys = ON')
+  private writeIfMissing(filePath: string, content: string): void {
+    if (existsSync(filePath)) return
+    mkdirSync(dirname(filePath), { recursive: true })
+    writeFileSync(filePath, content, 'utf8')
+  }
 
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS memory_meta (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
+  private readMeta(): Record<string, string> {
+    const root = this.ensureBank()
+    const file = join(root, META_FILE)
+    const raw = existsSync(file) ? readFileSync(file, 'utf8') : ''
+    const meta: Record<string, string> = {}
+    for (const line of raw.replace(/\r\n/g, '\n').split('\n')) {
+      const idx = line.indexOf(':')
+      if (idx < 0 || line.trim().startsWith('#')) continue
+      meta[line.slice(0, idx).trim()] = line.slice(idx + 1).trim()
+    }
+    return meta
+  }
 
-      CREATE TABLE IF NOT EXISTS memory_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        memory_uid TEXT NOT NULL UNIQUE,
-        source_type TEXT NOT NULL,
-        session_id TEXT,
-        contact_id TEXT,
-        group_id TEXT,
-        title TEXT NOT NULL DEFAULT '',
-        content TEXT NOT NULL,
-        content_hash TEXT NOT NULL,
-        entities_json TEXT NOT NULL DEFAULT '[]',
-        tags_json TEXT NOT NULL DEFAULT '[]',
-        importance REAL NOT NULL DEFAULT 0,
-        confidence REAL NOT NULL DEFAULT 1,
-        time_start INTEGER,
-        time_end INTEGER,
-        source_refs_json TEXT NOT NULL DEFAULT '[]',
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
+  private writeMeta(patch: Record<string, unknown>): void {
+    const next = { ...this.readMeta(), ...Object.fromEntries(Object.entries(patch).map(([key, value]) => [key, String(value)])) }
+    writeFileSync(join(this.ensureBank(), META_FILE), [
+      '# Memory Bank Meta',
+      '',
+      ...Object.entries(next).map(([key, value]) => `${key}: ${value}`),
+      ''
+    ].join('\n'), 'utf8')
+  }
 
-      CREATE INDEX IF NOT EXISTS idx_memory_items_source_type
-        ON memory_items(source_type);
-      CREATE INDEX IF NOT EXISTS idx_memory_items_session_time
-        ON memory_items(session_id, time_start, time_end);
-      CREATE INDEX IF NOT EXISTS idx_memory_items_contact
-        ON memory_items(contact_id);
-      CREATE INDEX IF NOT EXISTS idx_memory_items_group
-        ON memory_items(group_id);
-      CREATE INDEX IF NOT EXISTS idx_memory_items_hash
-        ON memory_items(content_hash);
-    `)
+  private nextId(): number {
+    const meta = this.readMeta()
+    const lastId = Math.max(0, Math.floor(Number(meta.lastId || 0)))
+    const next = Math.max(lastId, ...this.listMemoryItems({ limit: 10000 }).map((item) => item.id), 0) + 1
+    this.writeMeta({ lastId: next })
+    return next
+  }
 
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS memory_embeddings (
-        memory_id    INTEGER NOT NULL,
-        model_id     TEXT NOT NULL,
-        dim          INTEGER NOT NULL,
-        content_hash TEXT NOT NULL,
-        embedding    BLOB NOT NULL,
-        indexed_at   INTEGER NOT NULL,
-        PRIMARY KEY (memory_id, model_id)
-      );
-    `)
+  private itemFileName(item: Pick<MemoryItem, 'id' | 'memoryUid' | 'sourceType'>): string {
+    return `${String(item.id).padStart(6, '0')}-${safeFileSegment(item.sourceType)}-${safeFileSegment(item.memoryUid)}.md`
+  }
 
-    db.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS memory_items_fts USING fts5(
+  private itemFilePath(item: Pick<MemoryItem, 'id' | 'memoryUid' | 'sourceType'>): string {
+    return join(this.ensureBank(), ITEMS_DIR, this.itemFileName(item))
+  }
+
+  private parseItemFile(filePath: string): MemoryItem | null {
+    try {
+      const raw = readFileSync(filePath, 'utf8')
+      const { meta, body } = parseFrontMatter(raw)
+      const content = String(meta.content || extractBodyText(body) || '')
+      const title = String(meta.title || content.slice(0, 40))
+      const createdAt = Number(meta.createdAt || nowMs())
+      const updatedAt = Number(meta.updatedAt || createdAt)
+      const sourceType = safeSourceType(meta.sourceType)
+      return {
+        id: Number(meta.id || 0),
+        memoryUid: String(meta.memoryUid || basename(filePath, '.md')),
+        sourceType,
+        sessionId: normalizeNullableText(meta.sessionId as string | null),
+        contactId: normalizeNullableText(meta.contactId as string | null),
+        groupId: normalizeNullableText(meta.groupId as string | null),
         title,
         content,
-        entities,
-        tags,
-        tokenize = 'unicode61 remove_diacritics 2'
-      );
-    `)
-    this.syncMemoryFtsIndex(db)
-
-    db.prepare(`
-      INSERT OR REPLACE INTO memory_meta(key, value, updated_at)
-      VALUES ('schema_version', ?, ?)
-    `).run(MEMORY_SCHEMA_VERSION, nowMs())
+        contentHash: String(meta.contentHash || hashMemoryContent(title, content)),
+        entities: parseStringArray(meta.entities),
+        tags: parseStringArray(meta.tags),
+        importance: normalizeNumber(meta.importance, 0),
+        confidence: clamp01(meta.confidence, 1),
+        timeStart: meta.timeStart == null ? null : Number(meta.timeStart),
+        timeEnd: meta.timeEnd == null ? null : Number(meta.timeEnd),
+        sourceRefs: parseEvidenceRefs(meta.sourceRefs),
+        createdAt,
+        updatedAt
+      }
+    } catch {
+      return null
+    }
   }
 
-  private syncMemoryFtsIndex(db: Database.Database): void {
-    const row = db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM memory_items m
-      LEFT JOIN memory_items_fts f ON f.rowid = m.id
-      WHERE f.rowid IS NULL
-    `).get() as { count: number } | undefined
-    if (!Number(row?.count || 0)) return
-
-    db.prepare(`
-      INSERT INTO memory_items_fts(rowid, title, content, entities, tags)
-      SELECT id, title, content, entities_json, tags_json
-      FROM memory_items
-      WHERE id NOT IN (SELECT rowid FROM memory_items_fts)
-    `).run()
-  }
-
-  private upsertMemoryFtsRow(item: MemoryItem): void {
-    const db = this.getDb()
-    db.prepare('DELETE FROM memory_items_fts WHERE rowid = ?').run(item.id)
-    db.prepare(`
-      INSERT INTO memory_items_fts(rowid, title, content, entities, tags)
-      VALUES (@id, @title, @content, @entities, @tags)
-    `).run({
+  private writeItem(item: MemoryItem): void {
+    const filePath = this.itemFilePath(item)
+    const existing = this.findItemFileById(item.id)
+    if (existing && existing !== filePath) unlinkSync(existing)
+    const meta: Record<string, unknown> = {
       id: item.id,
+      memoryUid: item.memoryUid,
+      sourceType: item.sourceType,
+      sessionId: item.sessionId,
+      contactId: item.contactId,
+      groupId: item.groupId,
       title: item.title,
       content: item.content,
-      entities: safeJsonStringify(item.entities || [], []),
-      tags: safeJsonStringify(item.tags || [], [])
-    })
+      contentHash: item.contentHash,
+      entities: item.entities,
+      tags: item.tags,
+      importance: item.importance,
+      confidence: item.confidence,
+      timeStart: item.timeStart,
+      timeEnd: item.timeEnd,
+      sourceRefs: item.sourceRefs,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt
+    }
+    mkdirSync(dirname(filePath), { recursive: true })
+    writeFileSync(filePath, [
+      '---',
+      ...Object.entries(meta).map(([key, value]) => `${key}: ${frontMatterValue(value)}`),
+      '---',
+      '',
+      `# ${item.title || item.sourceType}`,
+      '',
+      '## 内容',
+      item.content.trim(),
+      ''
+    ].join('\n'), 'utf8')
+    this.syncDerivedMarkdown()
+  }
+
+  private findItemFileById(id: number): string | null {
+    const itemsDir = join(this.ensureBank(), ITEMS_DIR)
+    const prefix = `${String(id).padStart(6, '0')}-`
+    const found = readdirSync(itemsDir).find((name) => name.startsWith(prefix) && name.endsWith('.md'))
+    return found ? join(itemsDir, found) : null
+  }
+
+  private findItemByUid(memoryUid: string): MemoryItem | null {
+    return this.listMemoryItems({ limit: 10000 }).find((item) => item.memoryUid === memoryUid) || null
+  }
+
+  private syncDerivedMarkdown(): void {
+    const root = this.ensureBank()
+    const items = this.listMemoryItems({ limit: 10000 })
+      .sort((a, b) => b.importance - a.importance || b.confidence - a.confidence || b.updatedAt - a.updatedAt)
+    const formatItem = (item: MemoryItem) => (
+      `- [${item.id}] ${markdownEscape(item.content)} ` +
+      `(type=${item.sourceType}, confidence=${item.confidence.toFixed(2)}, importance=${item.importance.toFixed(2)}, about=${memoryAbout(item)})`
+    )
+    writeFileSync(join(root, 'MEMORY.md'), [
+      '# Memory Bank Index',
+      '',
+      '## Key Pointers',
+      '- BOOKMARKS.md - 重要瞬间日志',
+      '- ct-self-reference/user-profile.md - 用户档案',
+      '- ct-self-reference/relationship.md - AI 与用户的关系',
+      '- ct-self-reference/diaries/ - 每日日记',
+      '- conversations/ - 对话日志',
+      '- tasks/ - 任务笔记',
+      '- notes/ - 知识笔记',
+      '',
+      '## Active Context',
+      ...items.slice(0, 80).map(formatItem),
+      ''
+    ].join('\n'), 'utf8')
+
+    const profileRows = items
+      .filter((item) => item.sourceType === 'profile' || item.sourceType === 'fact' || item.sourceType === 'relationship')
+      .map((item) => `| ${item.sourceType}-${item.id} | ${markdownEscape(item.content).replace(/\|/g, '\\|')} | ${item.confidence.toFixed(2)} | ${item.tags.join(',') || 'memory-bank'} | ${formatDate(item.updatedAt)} |`)
+    writeFileSync(join(root, SELF_REFERENCE_DIR, 'user-profile.md'), [
+      '# 用户档案',
+      '',
+      '## 基本信息',
+      '- 名字：（待填写）',
+      '- 首次对话：（日期）',
+      '',
+      '## 事实表',
+      '| Key | Value | 置信度 | 来源 | 更新日期 |',
+      '|-----|-------|--------|------|---------|',
+      ...profileRows,
+      '',
+      '## 性格画像',
+      ...items.filter((item) => item.sourceType === 'profile').slice(0, 20).map(formatItem),
+      '',
+      '## 当前状态',
+      ...items.slice(0, 20).map(formatItem),
+      ''
+    ].join('\n'), 'utf8')
   }
 
   upsertMemoryItem(input: MemoryItemInput): MemoryItem {
-    const db = this.getDb()
-    const timestamp = nowMs()
     const memoryUid = String(input.memoryUid || '').trim()
-    const content = String(input.content || '')
-    const title = String(input.title || '')
+    const content = String(input.content || '').trim()
+    const title = String(input.title || content.slice(0, 40))
     if (!memoryUid) throw new Error('memoryUid is required')
-    if (!content.trim()) throw new Error('memory content is required')
-    if (!MEMORY_SOURCE_TYPES.includes(input.sourceType)) {
-      throw new Error(`Unsupported memory source type: ${input.sourceType}`)
-    }
-
-    const existing = db.prepare('SELECT created_at FROM memory_items WHERE memory_uid = ?')
-      .get(memoryUid) as { created_at: number } | undefined
-    const createdAt = Number(existing?.created_at || timestamp)
-    const contentHash = input.contentHash || hashMemoryContent(title, content)
-
-    db.prepare(`
-      INSERT INTO memory_items (
-        memory_uid, source_type, session_id, contact_id, group_id,
-        title, content, content_hash, entities_json, tags_json,
-        importance, confidence, time_start, time_end, source_refs_json,
-        created_at, updated_at
-      ) VALUES (
-        @memoryUid, @sourceType, @sessionId, @contactId, @groupId,
-        @title, @content, @contentHash, @entitiesJson, @tagsJson,
-        @importance, @confidence, @timeStart, @timeEnd, @sourceRefsJson,
-        @createdAt, @updatedAt
-      )
-      ON CONFLICT(memory_uid) DO UPDATE SET
-        source_type = excluded.source_type,
-        session_id = excluded.session_id,
-        contact_id = excluded.contact_id,
-        group_id = excluded.group_id,
-        title = excluded.title,
-        content = excluded.content,
-        content_hash = excluded.content_hash,
-        entities_json = excluded.entities_json,
-        tags_json = excluded.tags_json,
-        importance = excluded.importance,
-        confidence = excluded.confidence,
-        time_start = excluded.time_start,
-        time_end = excluded.time_end,
-        source_refs_json = excluded.source_refs_json,
-        updated_at = excluded.updated_at
-    `).run({
+    if (!content) throw new Error('memory content is required')
+    const sourceType = safeSourceType(input.sourceType)
+    const existing = this.findItemByUid(memoryUid)
+    const timestamp = nowMs()
+    const item: MemoryItem = {
+      id: existing?.id ?? this.nextId(),
       memoryUid,
-      sourceType: input.sourceType,
+      sourceType,
       sessionId: normalizeNullableText(input.sessionId),
       contactId: normalizeNullableText(input.contactId),
       groupId: normalizeNullableText(input.groupId),
       title,
       content,
-      contentHash,
-      entitiesJson: safeJsonStringify(input.entities || [], []),
-      tagsJson: safeJsonStringify(input.tags || [], []),
+      contentHash: input.contentHash || hashMemoryContent(title, content),
+      entities: parseStringArray(input.entities),
+      tags: parseStringArray(input.tags),
       importance: normalizeNumber(input.importance, 0),
       confidence: clamp01(input.confidence, 1),
       timeStart: input.timeStart ?? null,
       timeEnd: input.timeEnd ?? null,
-      sourceRefsJson: safeJsonStringify(input.sourceRefs || [], []),
-      createdAt,
+      sourceRefs: parseEvidenceRefs(input.sourceRefs),
+      createdAt: existing?.createdAt ?? timestamp,
       updatedAt: timestamp
-    })
-
-    const item = this.getMemoryItemByUid(memoryUid)
-    if (!item) throw new Error('Failed to load upserted memory item')
-    this.upsertMemoryFtsRow(item)
+    }
+    this.writeItem(item)
     return item
   }
 
   getMemoryItemById(id: number): MemoryItem | null {
-    const row = this.getDb().prepare('SELECT * FROM memory_items WHERE id = ?').get(id) as MemoryItemRow | undefined
-    return row ? toMemoryItem(row) : null
+    const filePath = this.findItemFileById(Number(id))
+    return filePath ? this.parseItemFile(filePath) : null
   }
 
   getMemoryItemByUid(memoryUid: string): MemoryItem | null {
-    const row = this.getDb().prepare('SELECT * FROM memory_items WHERE memory_uid = ?').get(memoryUid) as MemoryItemRow | undefined
-    return row ? toMemoryItem(row) : null
+    return this.findItemByUid(memoryUid)
   }
 
   listMemoryItems(options: MemoryListOptions = {}): MemoryItem[] {
-    const clauses: string[] = []
-    const params: Record<string, unknown> = {}
-
+    const itemsDir = join(this.ensureBank(), ITEMS_DIR)
     const sourceTypes = options.sourceTypes?.length
       ? Array.from(new Set(options.sourceTypes.filter((type) => MEMORY_SOURCE_TYPES.includes(type))))
       : options.sourceType
         ? [options.sourceType]
         : []
-    if (sourceTypes.length > 0) {
-      const placeholders = sourceTypes.map((_, index) => `@sourceType${index}`)
-      sourceTypes.forEach((sourceType, index) => {
-        params[`sourceType${index}`] = sourceType
-      })
-      clauses.push(`source_type IN (${placeholders.join(', ')})`)
-    }
-    if (options.sessionId) {
-      clauses.push('session_id = @sessionId')
-      params.sessionId = options.sessionId
-    }
-    if (options.minConfidence !== undefined) {
-      clauses.push('confidence >= @minConfidence')
-      params.minConfidence = clamp01(options.minConfidence, 0)
-    }
-    for (const tag of options.tags || []) {
-      const key = `tag${Object.keys(params).length}`
-      clauses.push(`tags_json LIKE @${key}`)
-      params[key] = `%"${String(tag).trim()}"%`
-    }
-    for (const tag of options.withoutTags || []) {
-      const key = `withoutTag${Object.keys(params).length}`
-      clauses.push(`tags_json NOT LIKE @${key}`)
-      params[key] = `%"${String(tag).trim()}"%`
-    }
-
-    const limit = Math.max(1, Math.min(Math.floor(options.limit || 100), 1000))
+    const tags = (options.tags || []).map((tag) => String(tag).trim()).filter(Boolean)
+    const withoutTags = (options.withoutTags || []).map((tag) => String(tag).trim()).filter(Boolean)
+    const minConfidence = options.minConfidence === undefined ? null : clamp01(options.minConfidence, 0)
+    const limit = Math.max(1, Math.min(Math.floor(options.limit || 100), 10000))
     const offset = Math.max(0, Math.floor(options.offset || 0))
-    params.limit = limit
-    params.offset = offset
-
-    const whereSql = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
-    const rows = this.getDb().prepare(`
-      SELECT * FROM memory_items
-      ${whereSql}
-      ORDER BY COALESCE(time_end, time_start, updated_at) DESC, id DESC
-      LIMIT @limit OFFSET @offset
-    `).all(params) as MemoryItemRow[]
-    return rows.map(toMemoryItem)
+    return readdirSync(itemsDir)
+      .filter((name) => name.endsWith('.md'))
+      .map((name) => this.parseItemFile(join(itemsDir, name)))
+      .filter((item): item is MemoryItem => Boolean(item && item.id > 0))
+      .filter((item) => sourceTypes.length === 0 || sourceTypes.includes(item.sourceType))
+      .filter((item) => !options.sessionId || item.sessionId === options.sessionId)
+      .filter((item) => minConfidence == null || item.confidence >= minConfidence)
+      .filter((item) => tags.every((tag) => item.tags.includes(tag)))
+      .filter((item) => withoutTags.every((tag) => !item.tags.includes(tag)))
+      .sort((a, b) => (b.timeEnd || b.timeStart || b.updatedAt) - (a.timeEnd || a.timeStart || a.updatedAt) || b.id - a.id)
+      .slice(offset, offset + limit)
   }
 
-  countMemoryItems(options: {
-    sourceType?: MemorySourceType
-    sessionId?: string
-  } = {}): number {
-    const clauses: string[] = []
-    const params: Record<string, unknown> = {}
-
-    if (options.sourceType) {
-      clauses.push('source_type = @sourceType')
-      params.sourceType = options.sourceType
-    }
-    if (options.sessionId) {
-      clauses.push('session_id = @sessionId')
-      params.sessionId = options.sessionId
-    }
-
-    const whereSql = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
-    const row = this.getDb().prepare(`
-      SELECT COUNT(*) AS count FROM memory_items
-      ${whereSql}
-    `).get(params) as { count: number } | undefined
-    return Number(row?.count || 0)
+  countMemoryItems(options: { sourceType?: MemorySourceType; sessionId?: string } = {}): number {
+    return this.listMemoryItems({ ...options, limit: 10000 }).length
   }
 
   searchMemoryItemsByKeyword(options: MemoryKeywordSearchOptions): MemoryKeywordSearchHit[] {
     const query = String(options.query || '').trim()
     if (!query) return []
-
-    const db = this.getDb()
+    const terms = splitQuery(query)
+    const startTime = toTimestampSeconds(options.startTimeMs)
+    const endTime = toTimestampSeconds(options.endTimeMs)
     const limit = Math.max(1, Math.min(Math.floor(options.limit || 80), 500))
-    const rowsById = new Map<number, MemoryKeywordSearchHit>()
-    const params: Record<string, unknown> = { limit }
-    const filterSql = buildMemoryFilterSql(options, params)
-    const ftsQuery = buildMemoryFtsQuery(query)
-
-    if (ftsQuery) {
-      const ftsRows = db.prepare(`
-        SELECT m.*, bm25(memory_items_fts) AS fts_rank
-        FROM memory_items_fts
-        JOIN memory_items m ON m.id = memory_items_fts.rowid
-        WHERE memory_items_fts MATCH @ftsQuery
-          ${filterSql}
-        ORDER BY fts_rank ASC, COALESCE(m.time_end, m.time_start, m.updated_at) DESC, m.id DESC
-        LIMIT @limit
-      `).all({
-        ...params,
-        ftsQuery
-      }) as Array<MemoryItemRow & { fts_rank: number }>
-
-      ftsRows.forEach((row, index) => {
-        rowsById.set(Number(row.id), {
-          item: toMemoryItem(row),
-          rank: index + 1,
-          score: Number((1000 + Math.max(0, 100 - Number(row.fts_rank || 0))).toFixed(4)),
-          retrievalSource: 'memory_fts'
-        })
+    const items = this.listMemoryItems({
+      ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+      ...(options.sourceTypes ? { sourceTypes: options.sourceTypes } : {}),
+      limit: 10000
+    })
+      .filter((item) => {
+        const time = item.timeEnd || item.timeStart || Math.floor(item.updatedAt / 1000)
+        if (startTime && time < startTime) return false
+        if (endTime && time > endTime) return false
+        return true
       })
-    }
-
-    const likeParams: Record<string, unknown> = { ...params, likeQuery: `%${query}%` }
-    const likeFilterSql = buildMemoryFilterSql(options, likeParams)
-    const likeRows = db.prepare(`
-      SELECT m.*
-      FROM memory_items m
-      WHERE (
-        m.title LIKE @likeQuery
-        OR m.content LIKE @likeQuery
-        OR m.entities_json LIKE @likeQuery
-        OR m.tags_json LIKE @likeQuery
-      )
-        ${likeFilterSql}
-      ORDER BY COALESCE(m.time_end, m.time_start, m.updated_at) DESC, m.id DESC
-      LIMIT @limit
-    `).all(likeParams) as MemoryItemRow[]
-
-    let likeRank = 1
-    for (const row of likeRows) {
-      const id = Number(row.id)
-      if (rowsById.has(id)) continue
-      rowsById.set(id, {
-        item: toMemoryItem(row),
-        rank: likeRank,
-        score: 500,
-        retrievalSource: 'memory_like'
+      .map((item) => {
+        const haystack = normalizeSearchText([
+          item.title,
+          item.content,
+          item.entities.join(' '),
+          item.tags.join(' '),
+          memoryAbout(item)
+        ].join('\n'))
+        const exact = haystack.includes(normalizeSearchText(query))
+        const termHits = terms.filter((term) => haystack.includes(term)).length
+        const score = (exact ? 800 : 0) + termHits * 120 + item.importance * 80 + item.confidence * 40
+        return { item, score }
       })
-      likeRank += 1
-    }
-
-    return Array.from(rowsById.values())
-      .sort((a, b) => b.score - a.score || b.item.importance - a.item.importance || b.item.updatedAt - a.item.updatedAt)
+      .filter((hit) => hit.score > 0)
+      .sort((a, b) => b.score - a.score || b.item.updatedAt - a.item.updatedAt)
       .slice(0, limit)
-      .map((hit, index) => ({ ...hit, rank: index + 1 }))
+    return items.map((hit, index) => ({
+      item: hit.item,
+      rank: index + 1,
+      score: Number(hit.score.toFixed(4)),
+      retrievalSource: 'memory_like'
+    }))
+  }
+
+  readWakeupContext(scope?: { kind?: string; sessionId?: string }): string {
+    const root = this.ensureBank()
+    const files: Array<{ title: string; path: string }> = [
+      { title: 'MEMORY.md', path: join(root, 'MEMORY.md') },
+      { title: 'user-profile.md', path: join(root, SELF_REFERENCE_DIR, 'user-profile.md') },
+      { title: 'relationship.md', path: join(root, SELF_REFERENCE_DIR, 'relationship.md') },
+    ]
+    const parts: string[] = ['# 记忆唤醒']
+    for (const file of files) {
+      const content = this.readTextFile(file.path, 12_000)
+      if (!content) continue
+      parts.push(`\n## ${file.title}\n${content}`)
+    }
+
+    const diaries = this.listRecentFiles(join(root, SELF_REFERENCE_DIR, 'diaries'), 2)
+    if (diaries.length > 0) {
+      parts.push('\n## 最近日记')
+      for (const file of diaries) {
+        const content = this.readTextFile(file, 6000)
+        if (content) parts.push(`\n### ${basename(file)}\n${content}`)
+      }
+    }
+
+    const tasks = this.listRecentFiles(join(root, 'tasks'), 5)
+    if (tasks.length > 0) {
+      parts.push('\n## 任务笔记')
+      for (const file of tasks) {
+        const content = this.readTextFile(file, 3000)
+        if (content) parts.push(`\n### ${basename(file)}\n${content}`)
+      }
+    }
+
+    const scopedItems = this.listMemoryItems({
+      sourceTypes: ['profile', 'fact', 'relationship'],
+      minConfidence: 0.7,
+      withoutTags: ['pending'],
+      limit: 50,
+    }).filter((item) => !scope?.sessionId || !item.sessionId || item.sessionId === scope.sessionId)
+    if (scopedItems.length > 0) {
+      parts.push('\n## 高置信结构化记忆')
+      parts.push(...scopedItems.slice(0, 40).map((item) => (
+        `- [id=${item.id} type=${item.sourceType} confidence=${item.confidence.toFixed(2)} about=${memoryAbout(item)}] ${item.content}`
+      )))
+    }
+
+    return parts.join('\n').slice(0, 30_000)
+  }
+
+  retrieveMarkdownContext(query: string, opts: { sessionId?: string; limit?: number } = {}): MarkdownMemoryRetrieval {
+    const mode = classifyQuery(query)
+    if (mode === 'fact') return this.retrieveFactContext(opts)
+    if (mode === 'recent') return this.retrieveRecentContext(opts.limit ?? 3)
+    return this.retrieveTopicContext(query, opts.limit ?? 8)
+  }
+
+  private retrieveFactContext(opts: { sessionId?: string }): MarkdownMemoryRetrieval {
+    const root = this.ensureBank()
+    const sourceFiles = [
+      join(root, SELF_REFERENCE_DIR, 'user-profile.md'),
+      join(root, SELF_REFERENCE_DIR, 'relationship.md'),
+      join(root, 'MEMORY.md')
+    ]
+    const context = sourceFiles
+      .map((file) => {
+        const content = this.readTextFile(file, 10_000)
+        return content ? `## ${basename(file)}\n${content}` : ''
+      })
+      .filter(Boolean)
+      .join('\n\n')
+    const items = this.listMemoryItems({
+      sourceTypes: ['profile', 'fact', 'relationship'],
+      minConfidence: 0.5,
+      limit: 80,
+    }).filter((item) => !opts.sessionId || !item.sessionId || item.sessionId === opts.sessionId)
+    return { mode: 'fact', context, itemIds: items.map((item) => item.id), sourceFiles }
+  }
+
+  private retrieveRecentContext(days: number): MarkdownMemoryRetrieval {
+    const root = this.ensureBank()
+    const files = this.listRecentFiles(join(root, 'conversations'), Math.max(1, Math.min(days, 7)))
+    const context = files
+      .map((file) => {
+        const content = this.readTextFile(file, 10_000)
+        return content ? `## ${basename(file)}\n${content}` : ''
+      })
+      .filter(Boolean)
+      .join('\n\n')
+      .slice(0, 24_000)
+    return { mode: 'recent', context, itemIds: [], sourceFiles: files }
+  }
+
+  private retrieveTopicContext(query: string, limit: number): MarkdownMemoryRetrieval {
+    const root = this.ensureBank()
+    const files = this.listRecentFiles(join(root, 'conversations'), 365)
+    const terms = splitQuery(query)
+    const snippets: Array<{ file: string; score: number; text: string }> = []
+    for (const file of files) {
+      const content = this.readTextFile(file, 80_000)
+      if (!content) continue
+      const normalized = normalizeSearchText(content)
+      const exact = normalized.includes(normalizeSearchText(query))
+      const termHits = terms.filter((term) => normalized.includes(term)).length
+      if (!exact && termHits === 0) continue
+      const firstTerm = terms.find((term) => normalized.includes(term))
+      const rawIndex = firstTerm ? normalized.indexOf(firstTerm) : 0
+      const start = Math.max(0, rawIndex - 500)
+      const end = Math.min(content.length, rawIndex + 1200)
+      snippets.push({
+        file,
+        score: (exact ? 1000 : 0) + termHits * 100,
+        text: `[${basename(file)}]\n${content.slice(start, end).trim()}`
+      })
+    }
+    const selected = snippets
+      .sort((a, b) => b.score - a.score || basename(b.file).localeCompare(basename(a.file)))
+      .slice(0, Math.max(1, Math.min(limit, 20)))
+    return {
+      mode: 'topic',
+      context: selected.map((item) => item.text).join('\n\n---\n\n').slice(0, 20_000),
+      itemIds: [],
+      sourceFiles: selected.map((item) => item.file)
+    }
+  }
+
+  private readTextFile(filePath: string, charLimit = 20_000): string {
+    try {
+      if (!existsSync(filePath)) return ''
+      return readFileSync(filePath, 'utf8').slice(0, charLimit)
+    } catch {
+      return ''
+    }
+  }
+
+  private listRecentFiles(dirPath: string, limit: number): string[] {
+    try {
+      if (!existsSync(dirPath)) return []
+      return readdirSync(dirPath)
+        .filter((name) => name.endsWith('.md') && !name.startsWith('_'))
+        .sort((a, b) => b.localeCompare(a))
+        .slice(0, Math.max(0, limit))
+        .map((name) => join(dirPath, name))
+    } catch {
+      return []
+    }
   }
 
   deleteMemoryItem(id: number): boolean {
-    const db = this.getDb()
-    db.prepare('DELETE FROM memory_items_fts WHERE rowid = ?').run(id)
-    db.prepare('DELETE FROM memory_embeddings WHERE memory_id = ?').run(id)
-    const result = db.prepare('DELETE FROM memory_items WHERE id = ?').run(id)
-    return result.changes > 0
+    const filePath = this.findItemFileById(Number(id))
+    if (!filePath) return false
+    unlinkSync(filePath)
+    this.syncDerivedMarkdown()
+    return true
   }
 
   updateMemoryItem(id: number, input: {
@@ -631,257 +830,215 @@ export class MemoryDatabase {
   }): MemoryItem | null {
     const existing = this.getMemoryItemById(id)
     if (!existing) return null
-
-    const sourceType = input.sourceType ?? existing.sourceType
-    if (!MEMORY_SOURCE_TYPES.includes(sourceType)) {
-      throw new Error(`Unsupported memory source type: ${sourceType}`)
-    }
-
-    const content = input.content !== undefined ? String(input.content) : existing.content
+    const content = input.content !== undefined ? String(input.content).trim() : existing.content
+    if (!content) throw new Error('memory content is required')
     const title = input.title !== undefined ? String(input.title) : existing.title
-    if (!content.trim()) throw new Error('memory content is required')
-
-    const nextTags = input.tags ?? existing.tags
-    const contentHash = hashMemoryContent(title, content)
-    const updatedAt = nowMs()
-
-    this.getDb().prepare(`
-      UPDATE memory_items SET
-        source_type = @sourceType,
-        title = @title,
-        content = @content,
-        content_hash = @contentHash,
-        tags_json = @tagsJson,
-        importance = @importance,
-        confidence = @confidence,
-        updated_at = @updatedAt
-      WHERE id = @id
-    `).run({
-      id,
-      sourceType,
+    const item: MemoryItem = {
+      ...existing,
+      sourceType: input.sourceType ? safeSourceType(input.sourceType) : existing.sourceType,
       title,
       content,
-      contentHash,
-      tagsJson: safeJsonStringify(nextTags, []),
+      contentHash: hashMemoryContent(title, content),
+      tags: input.tags ?? existing.tags,
       importance: clamp01(input.importance, existing.importance),
       confidence: clamp01(input.confidence, existing.confidence),
-      updatedAt
-    })
-
-    this.getDb().prepare('DELETE FROM memory_embeddings WHERE memory_id = ?').run(id)
-    const item = this.getMemoryItemById(id)
-    if (item) this.upsertMemoryFtsRow(item)
+      updatedAt: nowMs()
+    }
+    this.writeItem(item)
     return item
   }
 
-  /**
-   * 巩固：先语义去重（给了 semantic.modelId 时，用已建向量把同组里意思相近的合并为保留最优一条），
-   * 再分组（session_id × source_type）超量淘汰（每组按 importance×新近度保留前 cap 条）。返回删除数。
-   */
-  consolidate(
-    capPerGroup = 50,
-    semantic?: { modelId: string; threshold?: number }
-  ): { removed: number; semanticRemoved: number; groups: number; scanned: number } {
-    const semanticRemoved = semantic?.modelId
-      ? this.dedupeBySemantic(semantic.modelId, semantic.threshold ?? 0.93)
-      : 0
-
-    const all = this.listMemoryItems({ limit: 1000 })
+  consolidate(capPerGroup = 50): { removed: number; semanticRemoved: number; groups: number; scanned: number } {
+    const all = this.listMemoryItems({ limit: 10000 })
     const groups = new Map<string, MemoryItem[]>()
-    for (const m of all) {
-      const key = `${m.sessionId ?? ''}::${m.sourceType}`
+    for (const item of all) {
+      const key = `${item.sessionId ?? ''}::${item.sourceType}`
       const bucket = groups.get(key)
-      if (bucket) bucket.push(m)
-      else groups.set(key, [m])
+      if (bucket) bucket.push(item)
+      else groups.set(key, [item])
     }
-    let capRemoved = 0
-    for (const items of groups.values()) {
-      if (items.length <= capPerGroup) continue
-      const sorted = [...items].sort((a, b) => b.importance - a.importance || b.updatedAt - a.updatedAt)
-      for (const victim of sorted.slice(capPerGroup)) {
-        if (this.deleteMemoryItem(victim.id)) capRemoved += 1
-      }
-    }
-    return { removed: semanticRemoved + capRemoved, semanticRemoved, groups: groups.size, scanned: all.length }
-  }
-
-  /**
-   * 语义去重：同（session_id × source_type）组内，向量 cosine > threshold 视为同义；
-   * 按 importance×confidence 排序保留最优、删其余。只用已建向量（缺向量的不参与）。返回删除数。
-   * threshold 偏高（默认 0.93），宁可漏合并不误删——不同事实（如"喜欢咖啡"/"喜欢茶"）达不到该相似度。
-   */
-  private dedupeBySemantic(modelId: string, threshold: number): number {
-    const db = this.getDb()
-    const rows = db.prepare(`
-      SELECT m.id AS id, m.session_id AS session_id, m.source_type AS source_type,
-             m.importance AS importance, m.confidence AS confidence, m.updated_at AS updated_at,
-             e.embedding AS embedding
-      FROM memory_embeddings e
-      JOIN memory_items m ON m.id = e.memory_id
-      WHERE e.model_id = ?
-    `).all(modelId) as Array<{
-      id: number; session_id: string | null; source_type: string
-      importance: number; confidence: number; updated_at: number; embedding: Buffer
-    }>
-
-    type Node = { id: number; vec: number[]; rankScore: number; updatedAt: number }
-    const groups = new Map<string, Node[]>()
-    for (const r of rows) {
-      const buf = r.embedding
-      const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
-      const node: Node = {
-        id: Number(r.id),
-        vec: Array.from(new Float32Array(ab)),
-        rankScore: Number(r.importance || 0) * 0.5 + Number(r.confidence || 0) * 0.5,
-        updatedAt: Number(r.updated_at || 0),
-      }
-      const key = `${r.session_id ?? ''}::${r.source_type}`
-      const bucket = groups.get(key)
-      if (bucket) bucket.push(node)
-      else groups.set(key, [node])
-    }
-
     let removed = 0
-    for (const nodes of groups.values()) {
-      if (nodes.length < 2) continue
-      nodes.sort((a, b) => b.rankScore - a.rankScore || b.updatedAt - a.updatedAt)
-      const kept: Node[] = []
-      for (const n of nodes) {
-        const isDup = kept.some((k) => k.vec.length === n.vec.length && cosineSimilarity(k.vec, n.vec) > threshold)
-        if (isDup) {
-          if (this.deleteMemoryItem(n.id)) removed += 1
-        } else {
-          kept.push(n)
-        }
-      }
-    }
-    return removed
-  }
-
-  // ===== 语义检索：记忆向量（memory_embeddings，Float32 blob，与 messageVectorService 同套存取）=====
-
-  /** 写入/更新某记忆在某嵌入模型下的向量。 */
-  upsertMemoryVector(memoryId: number, modelId: string, dim: number, contentHash: string, embedding: Buffer): void {
-    this.getDb().prepare(`
-      INSERT INTO memory_embeddings (memory_id, model_id, dim, content_hash, embedding, indexed_at)
-      VALUES (@memoryId, @modelId, @dim, @contentHash, @embedding, @indexedAt)
-      ON CONFLICT(memory_id, model_id) DO UPDATE SET
-        dim = excluded.dim,
-        content_hash = excluded.content_hash,
-        embedding = excluded.embedding,
-        indexed_at = excluded.indexed_at
-    `).run({ memoryId, modelId, dim, contentHash, embedding, indexedAt: nowMs() })
-  }
-
-  /** 某模型下已建向量的元信息（memory_id → {contentHash, dim}），供懒构建判断哪些缺失/过期。 */
-  getVectorMeta(modelId: string): Map<number, { contentHash: string; dim: number }> {
-    const rows = this.getDb().prepare(
-      'SELECT memory_id, content_hash, dim FROM memory_embeddings WHERE model_id = ?'
-    ).all(modelId) as Array<{ memory_id: number; content_hash: string; dim: number }>
-    const map = new Map<number, { contentHash: string; dim: number }>()
-    for (const row of rows) map.set(Number(row.memory_id), { contentHash: row.content_hash, dim: Number(row.dim) })
-    return map
-  }
-
-  /** 向量 KNN：对候选记忆算 cosine，降序返回 {item, score}。维度不符的旧向量跳过。 */
-  searchMemoryVectors(
-    queryVec: number[],
-    modelId: string,
-    opts: { sourceTypes?: MemorySourceType[]; sessionId?: string; limit?: number } = {}
-  ): Array<{ item: MemoryItem; score: number }> {
-    const db = this.getDb()
-    const clauses: string[] = ['e.model_id = @modelId']
-    const params: Record<string, unknown> = { modelId }
-    if (opts.sessionId) {
-      clauses.push('m.session_id = @sessionId')
-      params.sessionId = opts.sessionId
-    }
-    const sourceTypes = Array.from(new Set((opts.sourceTypes || []).filter((t) => MEMORY_SOURCE_TYPES.includes(t))))
-    if (sourceTypes.length > 0) {
-      const placeholders = sourceTypes.map((_, i) => `@st${i}`)
-      sourceTypes.forEach((t, i) => { params[`st${i}`] = t })
-      clauses.push(`m.source_type IN (${placeholders.join(', ')})`)
-    }
-    const rows = db.prepare(`
-      SELECT m.*, e.dim AS e_dim, e.embedding AS e_embedding
-      FROM memory_embeddings e
-      JOIN memory_items m ON m.id = e.memory_id
-      WHERE ${clauses.join(' AND ')}
-    `).all(params) as Array<MemoryItemRow & { e_dim: number; e_embedding: Buffer }>
-
-    const scored: Array<{ item: MemoryItem; score: number }> = []
-    for (const row of rows) {
-      if (Number(row.e_dim) !== queryVec.length) continue
-      const buf = row.e_embedding
-      const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
-      const vec = Array.from(new Float32Array(ab))
-      let score = 0
-      try {
-        score = cosineSimilarity(queryVec, vec)
-      } catch {
+    const seenHashes = new Set<string>()
+    for (const item of all) {
+      const key = `${item.sessionId ?? ''}::${item.sourceType}::${item.contentHash}`
+      if (!seenHashes.has(key)) {
+        seenHashes.add(key)
         continue
       }
-      scored.push({ item: toMemoryItem(row), score })
+      if (this.deleteMemoryItem(item.id)) removed += 1
     }
-    scored.sort((a, b) => b.score - a.score)
-    return scored.slice(0, Math.max(1, Math.floor(opts.limit || 10)))
+    for (const items of groups.values()) {
+      const live = items.filter((item) => this.getMemoryItemById(item.id))
+      if (live.length <= capPerGroup) continue
+      const sorted = [...live].sort((a, b) => b.importance - a.importance || b.updatedAt - a.updatedAt)
+      for (const victim of sorted.slice(capPerGroup)) {
+        if (this.deleteMemoryItem(victim.id)) removed += 1
+      }
+    }
+    return { removed, semanticRemoved: 0, groups: groups.size, scanned: all.length }
+  }
+
+  getVectorMeta(_modelId: string): Map<number, { contentHash: string; dim: number }> {
+    return new Map()
+  }
+
+  upsertMemoryVector(_memoryId: number, _modelId: string, _dim: number, _contentHash: string, _embedding: Buffer): void {
+    return
+  }
+
+  searchMemoryVectors(
+    _queryVec?: number[],
+    _modelId?: string,
+    _opts: { sourceTypes?: MemorySourceType[]; sessionId?: string; limit?: number } = {}
+  ): Array<{ item: MemoryItem; score: number }> {
+    return []
   }
 
   getStats(): MemoryDatabaseStats {
-    const db = this.getDb()
-    const itemRow = db.prepare('SELECT COUNT(*) AS count FROM memory_items').get() as { count: number }
-
-    return {
-      itemCount: Number(itemRow.count || 0)
-    }
+    return { itemCount: this.listMemoryItems({ limit: 10000 }).length }
   }
 
   exportMarkdown(outputDir: string): MemoryMarkdownExportResult {
     const targetDir = String(outputDir || '').trim()
     if (!targetDir) throw new Error('outputDir is required')
     mkdirSync(targetDir, { recursive: true })
-    const sessionsDir = join(targetDir, 'sessions')
-    mkdirSync(sessionsDir, { recursive: true })
-
-    const items = this.listMemoryItems({ limit: 1000 })
-      .sort((a, b) => b.importance - a.importance || b.confidence - a.confidence || b.updatedAt - a.updatedAt)
     const files: string[] = []
-    const write = (relativePath: string, content: string) => {
-      const filePath = join(targetDir, relativePath)
-      mkdirSync(dirname(filePath), { recursive: true })
-      writeFileSync(filePath, content, 'utf8')
-      files.push(filePath)
+    const copyRecursive = (sourceDir: string, destDir: string) => {
+      mkdirSync(destDir, { recursive: true })
+      for (const name of readdirSync(sourceDir, { withFileTypes: true })) {
+        const source = join(sourceDir, name.name)
+        const dest = join(destDir, name.name)
+        if (name.isDirectory()) {
+          copyRecursive(source, dest)
+        } else if (name.isFile() && name.name.endsWith('.md')) {
+          copyFileSync(source, dest)
+          files.push(dest)
+        }
+      }
     }
-    const formatItem = (item: MemoryItem) => (
-      `- [${item.id}] ${markdownEscape(item.content)} ` +
-      `(type=${item.sourceType}, confidence=${item.confidence.toFixed(2)}, importance=${item.importance.toFixed(2)}, about=${memoryAbout(item)})`
-    )
+    copyRecursive(this.ensureBank(), targetDir)
+    return { files, itemCount: this.getStats().itemCount }
+  }
 
-    write('MEMORY.md', [
-      '# CipherTalk Memory Index',
+  appendBookmark(event: string, timestamp = nowMs()): void {
+    const file = join(this.ensureBank(), 'BOOKMARKS.md')
+    const line = `- ${formatDateTime(timestamp)} +08:00 ${event.trim()}\n`
+    const current = existsSync(file) ? readFileSync(file, 'utf8') : '# Bookmarks\n\n'
+    writeFileSync(file, current.endsWith('\n') ? current + line : `${current}\n${line}`, 'utf8')
+  }
+
+  appendConversationTurn(userText: string, assistantText: string, topic?: string, timestamp = nowMs()): void {
+    const date = formatDate(timestamp)
+    const file = join(this.ensureBank(), 'conversations', `${date}.md`)
+    this.writeIfMissing(file, `# ${date} 对话日志\n\n`)
+    const time = formatDateTime(timestamp).slice(11)
+    const safeTopic = (topic || userText.slice(0, 28) || '对话').replace(/\s+/g, ' ').trim()
+    const block = [
+      `## ${time} +08:00 - ${safeTopic}`,
+      `**用户：** ${userText.trim()}`,
+      `**AI：** ${assistantText.trim()}`,
+      ''
+    ].join('\n')
+    const current = readFileSync(file, 'utf8')
+    writeFileSync(file, current.endsWith('\n') ? current + block : `${current}\n${block}`, 'utf8')
+  }
+
+  getDailyConsolidationTarget(timestamp = nowMs()): string | null {
+    const hour = new Date(timestamp).getHours()
+    if (hour < 2) return null
+    const date = formatDate(timestamp)
+    const meta = this.readMeta()
+    return meta.lastConsolidatedDate === date ? null : date
+  }
+
+  readDailyConsolidationSource(date: string): { conversations: string; bookmarks: string } {
+    const root = this.ensureBank()
+    const conversations = this.readTextFile(join(root, 'conversations', `${date}.md`), 40_000)
+    const bookmarks = this.readTextFile(join(root, 'BOOKMARKS.md'), 20_000)
+      .split(/\r?\n/)
+      .filter((line) => line.includes(date))
+      .join('\n')
+    return { conversations, bookmarks }
+  }
+
+  writeDiary(date: string, content: string): void {
+    const root = this.ensureBank()
+    const file = join(root, SELF_REFERENCE_DIR, 'diaries', `${date}.md`)
+    const text = content.trim() || [
+      `# ${date} 日记`,
       '',
-      ...items.slice(0, 200).map(formatItem),
-      '',
-    ].join('\n'))
+      '## 今日摘要',
+      '暂无可整理内容。',
+      ''
+    ].join('\n')
+    writeFileSync(file, text.endsWith('\n') ? text : `${text}\n`, 'utf8')
+    this.writeMeta({ lastConsolidatedDate: date, lastConsolidatedAt: new Date().toISOString() })
+    this.syncDerivedMarkdown()
+  }
 
-    for (const type of ['profile', 'fact', 'relationship', 'timeline_summary'] as MemorySourceType[]) {
-      const typed = items.filter((item) => item.sourceType === type)
-      if (typed.length === 0) continue
-      write(`${type}.md`, [`# ${type}`, '', ...typed.map(formatItem), ''].join('\n'))
+  getMigrationStatus(): MemoryMigrationStatus {
+    const legacyDbPath = this.getDbPath()
+    const memoryBankPath = this.getMemoryBankPath()
+    if (!existsSync(legacyDbPath)) {
+      return { needed: false, legacyDbPath, memoryBankPath, itemCount: 0, migratedItemCount: this.getStats().itemCount }
+    }
+    try {
+      const db = new Database(legacyDbPath, { readonly: true, fileMustExist: true })
+      try {
+        const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_items'").get()
+        if (!row) return { needed: false, legacyDbPath, memoryBankPath, itemCount: 0, migratedItemCount: this.getStats().itemCount }
+        const countRow = db.prepare('SELECT COUNT(*) AS count FROM memory_items').get() as { count: number } | undefined
+        const itemCount = Number(countRow?.count || 0)
+        return { needed: itemCount > 0, legacyDbPath, memoryBankPath, itemCount, migratedItemCount: this.getStats().itemCount }
+      } finally {
+        db.close()
+      }
+    } catch (e) {
+      return { needed: false, legacyDbPath, memoryBankPath, itemCount: 0, migratedItemCount: this.getStats().itemCount, error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  migrateLegacyDatabase(): MemoryMigrationResult {
+    const status = this.getMigrationStatus()
+    const deletedFiles: string[] = []
+    if (!status.needed) return { ...status, success: true, deletedFiles }
+
+    const db = new Database(status.legacyDbPath, { readonly: true, fileMustExist: true })
+    try {
+      const rows = db.prepare('SELECT * FROM memory_items ORDER BY created_at ASC, id ASC').all() as MemoryItemRow[]
+      for (const row of rows) {
+        const input = rowToInput(row)
+        const item = this.upsertMemoryItem(input)
+        const createdAt = Number(row.created_at || item.createdAt)
+        const updatedAt = Number(row.updated_at || item.updatedAt)
+        this.writeItem({ ...item, createdAt, updatedAt })
+      }
+      this.writeMeta({ migratedLegacyDb: true, migratedAt: new Date().toISOString() })
+      this.appendBookmark(`从旧版 ${MEMORY_DB_NAME} 迁移 ${rows.length} 条长期记忆。`)
+    } finally {
+      db.close()
     }
 
-    const bySession = new Map<string, MemoryItem[]>()
-    for (const item of items) {
-      if (!item.sessionId) continue
-      const bucket = bySession.get(item.sessionId)
-      if (bucket) bucket.push(item)
-      else bySession.set(item.sessionId, [item])
-    }
-    for (const [sessionId, sessionItems] of bySession) {
-      write(`sessions/${safeFileSegment(sessionId)}.md`, [`# ${sessionId}`, '', ...sessionItems.map(formatItem), ''].join('\n'))
+    for (const file of [
+      status.legacyDbPath,
+      `${status.legacyDbPath}-wal`,
+      `${status.legacyDbPath}-shm`,
+      `${status.legacyDbPath}-journal`
+    ]) {
+      if (!existsSync(file)) continue
+      rmSync(file, { force: true })
+      deletedFiles.push(file)
     }
 
-    return { files, itemCount: items.length }
+    const next = this.getMigrationStatus()
+    return {
+      ...next,
+      success: true,
+      needed: false,
+      itemCount: status.itemCount,
+      migratedItemCount: this.getStats().itemCount,
+      deletedFiles
+    }
   }
 }
 

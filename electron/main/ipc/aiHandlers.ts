@@ -800,7 +800,25 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     }
   })
 
-  // ========= AI 长期记忆管理（agent_memory.db；纯 DB，无 LLM 依赖）=========
+  // ========= AI 长期记忆管理（cachePath/memory-bank；纯 Markdown）=========
+  ipcMain.handle('memory:migrationStatus', async () => {
+    try {
+      const { memoryDatabase } = await import('../../services/memory/memoryDatabase')
+      return { success: true, status: memoryDatabase.getMigrationStatus() }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('memory:migrateLegacy', async () => {
+    try {
+      const { memoryDatabase } = await import('../../services/memory/memoryDatabase')
+      return { success: true, result: memoryDatabase.migrateLegacyDatabase() }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
   ipcMain.handle('memory:list', async (_event, opts?: {
     sourceType?: 'profile' | 'fact' | 'relationship'
     sourceTypes?: Array<'profile' | 'fact' | 'relationship'>
@@ -867,11 +885,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
   ipcMain.handle('memory:consolidate', async () => {
     try {
       const { memoryDatabase } = await import('../../services/memory/memoryDatabase')
-      const { getEmbeddingConfig } = await import('../../services/ai/embeddingService')
-      const cfg = getEmbeddingConfig()
-      // 管理界面整理：用已建向量做语义去重（不现场补嵌入）+ 超量淘汰；未配嵌入则仅超量淘汰
-      const semantic = cfg.enabled && cfg.apiKey && cfg.model ? { modelId: cfg.model } : undefined
-      return { success: true, result: memoryDatabase.consolidate(50, semantic) }
+      return { success: true, result: memoryDatabase.consolidate(50) }
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) }
     }

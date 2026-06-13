@@ -184,9 +184,9 @@ function DataManagementTab({ showMessage, reloadConfig }: DataManagementTabProps
   const handleClearEmojis = () => setShowClearDialog({ type: 'emojis', title: '清除表情包', message: '此操作将删除所有解密后的表情包缓存文件，清除后无法恢复。确定要继续吗？', confirmLabel: '清除表情包', confirmVariant: 'danger' })
   const handleClearAIData = () => setShowClearDialog({
     type: 'aiData',
-    title: '清除 AI 数据库',
-    message: '此操作将删除历史 AI 摘要、AI 记忆、语义索引等功能产生的本地数据库，不会删除 AI 接入配置、API Key、模型和服务地址。确定要继续吗？',
-    confirmLabel: '清除 AI 数据库',
+    title: '清除 AI 数据',
+    message: '此操作将删除历史 AI 摘要、AI 记忆、语义索引等功能产生的本地数据，不会删除 AI 接入配置、API Key、模型和服务地址。确定要继续吗？',
+    confirmLabel: '清除 AI 数据',
     confirmVariant: 'danger'
   })
   const handleClearAllCache = () => setShowClearDialog({ type: 'all', title: '清除所有缓存', message: '此操作将删除所有缓存数据（包括解密后的图片、表情包、日志和历史 AI 功能数据库），清除后无法恢复。确定要继续吗？', confirmLabel: '清除所有缓存', confirmVariant: 'danger' })
@@ -378,10 +378,10 @@ function DataManagementTab({ showMessage, reloadConfig }: DataManagementTabProps
           })}
           {renderCacheCard({
             icon: <Database size={20} />,
-            title: 'AI 数据库',
+            title: 'AI 数据',
             size: cacheSize.aiData,
             description: '历史摘要、记忆、语义索引',
-            actionLabel: '清除 AI 数据库',
+            actionLabel: '清除 AI 数据',
             onAction: handleClearAIData
           })}
           {renderCacheCard({

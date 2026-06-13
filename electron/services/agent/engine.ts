@@ -10,7 +10,7 @@ import { isWebSearchAvailable } from '../ai/webSearchService'
 import { isImageGenAvailable } from '../ai/imageGenService'
 import { applyAnthropicCacheControl, buildPromptCacheKey, buildProviderOptions } from './cache'
 import { buildPlanModeTools, buildTools } from './tools'
-import { buildMemoryContext, extractMemories } from './tools/memory'
+import { afterTurnMemory, buildMemoryContext, preloadRelevantMemories } from './tools/memory'
 import { compactMessages } from './compaction'
 import { runFinalReview, summarizeToolOutput, type ToolOutputSummary } from './finalReview'
 import { loopGuardCondition, withToolTimeouts } from './guards'
@@ -111,12 +111,6 @@ function shouldRunFinalReview(userText: string, assistantText: string, summaries
   return /聊天|消息|记录|朋友圈|群|联系人|谁|哪个|哪里|什么时候|时间|提到|说过|统计|排行|最近|今天|昨天|\d{4}[-/年]\d{1,2}/.test(text)
 }
 
-function shouldExtractAutoMemory(userText: string): boolean {
-  const text = userText.replace(/\s+/g, ' ').trim()
-  if (text.length < 6) return false
-  return /(我是|我叫|我的名字|我喜欢|我不喜欢|我偏好|我习惯|我是.*(人|用户|开发|学生|老师|设计|工程|产品|运营)|.+是我的(朋友|同事|家人|对象|伴侣|同学|老板|客户)|记住|以后.*记得)/.test(text)
-}
-
 function withCacheHitRate(usage: unknown): unknown {
   if (!usage || typeof usage !== 'object') return usage
   const inputTokens = Number((usage as { inputTokens?: unknown }).inputTokens)
@@ -174,11 +168,11 @@ async function injectAutoMemories(
   signal?: AbortSignal,
 ): Promise<void> {
   try {
-    if (!shouldExtractAutoMemory(lastUserText(input.messages))) return
-    const auto = await extractMemories({
+    const userText = lastUserText(input.messages)
+    const auto = await afterTurnMemory({
       scope: input.scope,
       providerConfig: input.providerConfig,
-      userText: lastUserText(input.messages),
+      userText,
       assistantText,
       signal,
     })
@@ -217,7 +211,7 @@ export async function runAgent(
       warmStartupMemory(input.scope, () => buildMemoryContext(input.scope))
     }
     perf('记忆上下文', cachedMemoryContext === null ? '未命中缓存，后台补建' : '缓存命中')
-    const relevantMemoryContext = ''
+    const relevantMemoryContext = await preloadRelevantMemories(userText, input.scope)
     const toolsDisabled = input.toolMode === 'disabled'
     const webSearchOn = !toolsDisabled && isWebSearchAvailable()
     const imageGenOn = !toolsDisabled && isImageGenAvailable()

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
-import { Toast, toast } from '@heroui/react'
+import { Button, Chip, Modal, Toast, toast, Typography } from '@heroui/react'
 
 import TitleBar from './components/TitleBar'
 import Sidebar from './components/Sidebar'
@@ -37,8 +37,9 @@ import * as configService from './services/config'
 import { initTldList } from './utils/linkify'
 import LockScreen from './pages/LockScreen'
 import { useAuthStore } from './stores/authStore'
-import { Shield, Loader2 } from 'lucide-react'
+import { Brain, Loader2, Shield } from 'lucide-react'
 import { applyWindowChromeToDocument, syncWindowControlsOverlayToDocument } from './utils/windowChrome'
+import type { MemoryMigrationStatusInfo } from './types/electron'
 import './App.css'
 
 type AppUpdateInfo = {
@@ -96,6 +97,9 @@ function App() {
   const [downloadProgress, setDownloadProgress] = useState<UpdateDownloadProgressPayload | null>(null)
   const updateToastIdRef = useRef<string | null>(null)
   const suppressUpdateToastCloseRef = useRef(false)
+  const [memoryMigrationStatus, setMemoryMigrationStatus] = useState<MemoryMigrationStatusInfo | null>(null)
+  const [memoryMigrating, setMemoryMigrating] = useState(false)
+  const [memoryMigrationError, setMemoryMigrationError] = useState('')
 
   const formatSpeed = (bytesPerSecond: number) => {
     if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return '计算中'
@@ -369,6 +373,43 @@ function App() {
   const isMomentsWindow = location.pathname === '/moments-window'
   const isAgreementWindow = location.pathname === '/agreement-window'
   const isWelcomeWindow = location.pathname === '/welcome-window'
+
+  useEffect(() => {
+    if (isChatWindow || isMomentsWindow || isAgreementWindow || isWelcomeWindow || location.pathname === '/splash') return
+    let cancelled = false
+    const checkMemoryMigration = async () => {
+      try {
+        const res = await window.electronAPI.memory.migrationStatus()
+        if (cancelled) return
+        if (res.success && res.status?.needed) {
+          setMemoryMigrationStatus(res.status)
+          setMemoryMigrationError(res.status.error || '')
+        }
+      } catch (error) {
+        if (!cancelled) setMemoryMigrationError(error instanceof Error ? error.message : String(error))
+      }
+    }
+    void checkMemoryMigration()
+    return () => { cancelled = true }
+  }, [isAgreementWindow, isChatWindow, isMomentsWindow, isWelcomeWindow, location.pathname])
+
+  const handleMigrateMemory = async () => {
+    setMemoryMigrating(true)
+    setMemoryMigrationError('')
+    try {
+      const res = await window.electronAPI.memory.migrateLegacy()
+      if (res.success && res.result?.success) {
+        setMemoryMigrationStatus(null)
+        toast.success(`已迁移 ${res.result.itemCount} 条记忆`)
+      } else {
+        setMemoryMigrationError(res.error || '迁移失败')
+      }
+    } catch (error) {
+      setMemoryMigrationError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setMemoryMigrating(false)
+    }
+  }
 
   // 启动时自动检查配置并连接数据库
   useEffect(() => {
@@ -650,6 +691,48 @@ function App() {
       {navLayout === 'sidebar' && <Sidebar />}
       <div className="app-shell">
       <TitleBar showTitle={false} />
+      {memoryMigrationStatus?.needed && (
+        <Modal.Backdrop
+          isDismissable={false}
+          isKeyboardDismissDisabled
+          isOpen
+          variant="blur"
+          onOpenChange={() => undefined}
+        >
+          <Modal.Container placement="center" scroll="inside" size="lg">
+            <Modal.Dialog className="sm:max-w-170">
+              <Modal.Header>
+                <Modal.Icon className="bg-accent-soft text-accent-soft-foreground">
+                  <Brain className="size-5" />
+                </Modal.Icon>
+                <div className="flex min-w-0 flex-col gap-2">
+                  <Chip color="accent" size="sm" variant="soft">记忆系统迁移</Chip>
+                  <Modal.Heading>需要迁移旧版 AI 记忆</Modal.Heading>
+                </div>
+              </Modal.Header>
+              <Modal.Body>
+                <Typography.Paragraph color="muted" size="sm">
+                  检测到旧版记忆库里有 {memoryMigrationStatus.itemCount} 条记忆。新版会迁移到缓存目录下的 memory-bank Markdown 文件夹，迁移完成后自动删除旧版记忆数据库文件。
+                </Typography.Paragraph>
+                <div className="grid gap-2 rounded-lg bg-surface p-3 text-xs text-muted">
+                  <div className="break-all">旧库：{memoryMigrationStatus.legacyDbPath}</div>
+                  <div className="break-all">新目录：{memoryMigrationStatus.memoryBankPath}</div>
+                </div>
+                {memoryMigrationError && (
+                  <Typography.Paragraph className="rounded-lg bg-danger-soft p-3 text-danger-soft-foreground" size="sm">
+                    {memoryMigrationError}
+                  </Typography.Paragraph>
+                )}
+              </Modal.Body>
+              <Modal.Footer className="justify-end">
+                <Button isPending={memoryMigrating} type="button" variant="primary" onPress={() => void handleMigrateMemory()}>
+                  {memoryMigrating ? '迁移中...' : '开始迁移'}
+                </Button>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      )}
       {updateInfo?.forceUpdate && (
         <div className="force-update-overlay">
           <div className="force-update-card">

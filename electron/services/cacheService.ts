@@ -350,7 +350,6 @@ export class CacheService {
 
     const dbNames = [
       'ai_summary.db',
-      'agent_memory.db',
       'chat_search_index.db',
       'chat_vectors.db',
       'agent_conversations.db',
@@ -399,6 +398,7 @@ export class CacheService {
     return Array.from(new Set(
       [
         ...basePaths.flatMap(basePath => [
+          join(basePath, 'memory-bank'),
           join(basePath, 'tts-audio'),
           join(basePath, 'ai-images')
         ]),

@@ -232,8 +232,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
-  // AI 长期记忆管理（agent_memory.db）
+  // AI 长期记忆管理（cachePath/memory-bank）
   memory: {
+    migrationStatus: () =>
+      ipcRenderer.invoke('memory:migrationStatus') as Promise<{ success: boolean; status?: unknown; error?: string }>,
+    migrateLegacy: () =>
+      ipcRenderer.invoke('memory:migrateLegacy') as Promise<{ success: boolean; result?: unknown; error?: string }>,
     list: (opts?: {
       sourceType?: 'profile' | 'fact' | 'relationship'
       sourceTypes?: Array<'profile' | 'fact' | 'relationship'>

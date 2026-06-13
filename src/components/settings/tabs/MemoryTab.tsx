@@ -210,7 +210,7 @@ export default function MemoryTab({ showMessage }: MemoryTabProps) {
           <Chip color="accent" size="sm" variant="soft">{count} 条</Chip>
           <Chip size="sm" variant="soft">画像 / 事实</Chip>
           <Description>
-            AI 跨对话记住的关于你的画像、偏好和事实。由 AI 在对话中自动记录，可在此查看、修改或删除。
+            AI 跨对话记住的关于你的画像、偏好和事实。内容存放在缓存目录的 memory-bank Markdown 文件夹，可在此查看、修改或删除。
           </Description>
         </div>
         <Toolbar aria-label="记忆操作">

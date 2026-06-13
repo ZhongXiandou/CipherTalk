@@ -1,21 +1,18 @@
 /**
- * 长期记忆工具 —— remember / recall（L2 用户级语义记忆，Letta/LangMem 式「agent 自编辑」范式）。
+ * 长期记忆工具 —— remember / recall（纯 Markdown memory-bank，Letta/LangMem 式「agent 自编辑」范式）。
  *
- * agent 在 ReAct 循环里自己决定记什么、查什么，写进 agent_memory.db 的 memory_items（FTS 关键词检索）。
+ * agent 在 ReAct 循环里自己决定记什么、查什么，写进 cachePath/memory-bank 的 Markdown 文件。
  * 只存稳定的「用户画像 profile」与「长期事实 fact」，带 importance；高重要度的会在下次开场注入系统提示。
- * 复用 memoryDatabase 现成读写层——子进程经 ConfigService + better-sqlite3 直连 app 派生库（同 messageVectorService）。
  * 故意只挂在主 Agent（buildTools），子 Agent（delegate）不带，避免子任务乱写记忆。
  */
-import { tool, generateObject } from 'ai'
+import { tool, generateObject, generateText } from 'ai'
 import { z } from 'zod'
 import type { AgentScope, AgentProviderConfig } from '../types'
 import type { MemoryItem, MemorySourceType } from '../../memory/memorySchema'
 import { memoryDatabase, hashMemoryContent } from '../../memory/memoryDatabase'
 import { createLanguageModel } from '../provider'
 import { invalidateMemoryCache } from '../runtimeCache'
-import { embedQuery, embedTexts, getEmbeddingConfig, type EmbeddingConfig } from '../../ai/embeddingService'
 import { rerankCandidates, type RerankMeta } from '../../ai/rerankService'
-import { reciprocalRankFusion } from '../../retrieval/rrf'
 
 /** 开场注入的画像/会话事实条数上限；先取 SCAN_LIMIT 再按 importance 排序截断。 */
 const STARTUP_MEMORY_ITEM_LIMIT = 40
@@ -37,71 +34,35 @@ function resolveAbout(about: string | undefined, scope: AgentScope): string | nu
   return null
 }
 
-/** recall 走语义检索的两类记忆。 */
-const VECTOR_KINDS: Array<'profile' | 'fact' | 'relationship'> = ['profile', 'fact', 'relationship']
-type RecallMode = 'keyword' | 'hybrid'
-type RecallMatchedBy = 'keyword' | 'vector' | 'both'
-
-function isEmbeddingReady(cfg: EmbeddingConfig): boolean {
-  return !!(cfg.enabled && cfg.apiKey && cfg.model)
-}
-
-/** 懒构建：给缺向量 / 内容已变 / 维度不符的记忆补嵌入（限定 scope 与 recall 一致）。失败由调用方兜底回退关键词。 */
-async function ensureMemoryVectors(cfg: EmbeddingConfig, sessionId: string | null): Promise<void> {
-  const items = memoryDatabase
-    .listMemoryItems({ ...(sessionId ? { sessionId } : {}), limit: 1000 })
-    .filter((m) => m.sourceType === 'profile' || m.sourceType === 'fact')
-  if (items.length === 0) return
-  const meta = memoryDatabase.getVectorMeta(cfg.model)
-  const stale = items.filter((m) => {
-    const v = meta.get(m.id)
-    return !v || v.contentHash !== m.contentHash || (cfg.dimension > 0 && v.dim !== cfg.dimension)
-  })
-  if (stale.length === 0) return
-  const BATCH = 64
-  for (let i = 0; i < stale.length; i += BATCH) {
-    const batch = stale.slice(i, i + BATCH)
-    const vectors = await embedTexts(batch.map((m) => m.content), cfg)
-    batch.forEach((m, idx) => {
-      const vec = vectors[idx]
-      if (!vec || vec.length === 0) return
-      memoryDatabase.upsertMemoryVector(m.id, cfg.model, vec.length, m.contentHash, Buffer.from(Float32Array.from(vec).buffer))
-    })
-  }
-}
-
-function recallMatchedBy(item: MemoryItem, keywordIds: Set<number>, vectorIds: Set<number>): RecallMatchedBy {
-  const keyword = keywordIds.has(item.id)
-  const vector = vectorIds.has(item.id)
-  if (keyword && vector) return 'both'
-  return vector ? 'vector' : 'keyword'
-}
+const MEMORY_KINDS: Array<'profile' | 'fact' | 'relationship'> = ['profile', 'fact', 'relationship']
+type RecallMode = 'markdown'
+type RecallMatchedBy = 'keyword'
 
 function formatRecall(
   items: MemoryItem[],
   mode: RecallMode,
   opts: {
-    embeddingReady: boolean
     fallbackReason?: string
     keywordIds?: Set<number>
-    vectorIds?: Set<number>
     keywordCount?: number
-    vectorCount?: number
     rerank?: RerankMeta
+    markdownContext?: ReturnType<typeof memoryDatabase.retrieveMarkdownContext>
   },
 ) {
   const keywordIds = opts.keywordIds || new Set<number>()
-  const vectorIds = opts.vectorIds || new Set<number>()
   return {
     mode,
     retrieval: {
       mode,
-      embeddingReady: opts.embeddingReady,
+      embeddingReady: false,
       fallbackReason: opts.fallbackReason,
       keywordCount: opts.keywordCount ?? keywordIds.size,
-      vectorCount: opts.vectorCount ?? vectorIds.size,
+      vectorCount: 0,
       rerank: opts.rerank,
+      markdownMode: opts.markdownContext?.mode,
+      sourceFiles: opts.markdownContext?.sourceFiles,
     },
+    context: opts.markdownContext?.context || '',
     count: items.length,
     memories: items.map((m) => ({
       id: m.id,
@@ -110,7 +71,7 @@ function formatRecall(
       about: m.sessionId,
       importance: m.importance,
       tags: m.tags,
-      matchedBy: recallMatchedBy(m, keywordIds, vectorIds),
+      matchedBy: 'keyword' as RecallMatchedBy,
     })),
   }
 }
@@ -175,6 +136,7 @@ export function createRemember(scope: AgentScope) {
           importance,
           tags: nextTags,
         })
+        memoryDatabase.appendBookmark(`Agent 主动保存记忆：${text.slice(0, 120)}`)
         invalidateMemoryCache(sessionId ? { kind: 'session', sessionId } : { kind: 'global' })
         return { remembered: true, id: item.id, kind: item.sourceType, importance: item.importance, about: sessionId || 'global' }
       } catch (e) {
@@ -196,53 +158,11 @@ export function createRecall(scope: AgentScope) {
     execute: async ({ query, about, limit }) => {
       try {
         const sessionId = resolveAbout(about, scope)
+        const markdownContext = memoryDatabase.retrieveMarkdownContext(query, { ...(sessionId ? { sessionId } : {}), limit })
         const candidateLimit = Math.min(50, Math.max(limit, limit * 3))
-        const filter = { ...(sessionId ? { sessionId } : {}), sourceTypes: VECTOR_KINDS }
-        // 关键词路：始终算（也作为向量不可用时的回退）
+        const filter = { ...(sessionId ? { sessionId } : {}), sourceTypes: MEMORY_KINDS }
         const keywordHits = memoryDatabase.searchMemoryItemsByKeyword({ query, ...filter, limit: candidateLimit })
         const keywordIds = new Set(keywordHits.map((h) => h.item.id))
-
-        const cfg = getEmbeddingConfig()
-        const embeddingReady = isEmbeddingReady(cfg)
-        let fallbackReason = embeddingReady ? 'vector_no_hits' : 'embedding_not_ready'
-        if (embeddingReady) {
-          try {
-            await ensureMemoryVectors(cfg, sessionId)
-            const queryVec = await embedQuery(query, cfg)
-            const vectorHits = memoryDatabase.searchMemoryVectors(queryVec, cfg.model, { ...filter, limit: candidateLimit })
-            const vectorIds = new Set(vectorHits.map((h) => h.item.id))
-            if (vectorHits.length > 0) {
-              // 向量 + 关键词按排名 RRF 融合（key=记忆 id）
-              const merged = reciprocalRankFusion<MemoryItem>(
-                [
-                  vectorHits.map((h, i) => ({ item: h.item, rank: i + 1 })),
-                  keywordHits.map((h, i) => ({ item: h.item, rank: i + 1 })),
-                ],
-                (item) => String(item.id),
-              )
-              const mergedItems = merged.slice(0, candidateLimit).map((m) => m.item)
-              const { items, meta: rerankMeta } = await rerankCandidates(
-                query,
-                mergedItems.map((item) => ({
-                  item,
-                  text: [item.title, item.content, item.tags?.join(' ')].filter(Boolean).join('\n'),
-                })),
-                { topN: limit },
-              )
-              return formatRecall(items, 'hybrid', {
-                embeddingReady,
-                keywordIds,
-                vectorIds,
-                keywordCount: keywordHits.length,
-                vectorCount: vectorHits.length,
-                rerank: rerankMeta,
-              })
-            }
-          } catch {
-            /* 向量任一步失败（未建/API 错）→ 落回关键词 */
-            fallbackReason = 'vector_error'
-          }
-        }
         const keywordItems = keywordHits.slice(0, candidateLimit).map((h) => h.item)
         const { items, meta: rerankMeta } = await rerankCandidates(
           query,
@@ -252,14 +172,12 @@ export function createRecall(scope: AgentScope) {
           })),
           { topN: limit },
         )
-        return formatRecall(items, 'keyword', {
-          embeddingReady,
-          fallbackReason,
+        return formatRecall(items, 'markdown', {
+          fallbackReason: keywordHits.length === 0 ? 'no_keyword_hits' : undefined,
           keywordIds,
-          vectorIds: new Set<number>(),
           keywordCount: keywordHits.length,
-          vectorCount: 0,
           rerank: rerankMeta,
+          markdownContext,
         })
       } catch (e) {
         return { error: e instanceof Error ? e.message : String(e) }
@@ -326,18 +244,12 @@ export function createForget() {
 export function createConsolidate() {
   return tool({
     description:
-      '整理记忆：按"关于谁 × 类型"分组，每组只保留最重要的若干条，删掉低价值冗余，防止记忆库越积越乱。' +
+      '整理 Markdown 记忆：按"关于谁 × 类型"分组，每组只保留最重要的若干条，删掉低价值冗余，防止记忆库越积越乱。' +
       '记了很多条、或用户让你"整理一下记忆"时调用。',
     inputSchema: z.object({}),
     execute: async () => {
       try {
-        const cfg = getEmbeddingConfig()
-        const semantic = isEmbeddingReady(cfg) ? { modelId: cfg.model } : undefined
-        // 先尽量补全向量，让语义去重覆盖更全（失败/未配嵌入就用已有向量或只做超量淘汰）
-        if (semantic) {
-          try { await ensureMemoryVectors(cfg, null) } catch { /* 建不了就用已有向量 */ }
-        }
-        const result = memoryDatabase.consolidate(50, semantic)
+        const result = memoryDatabase.consolidate(50)
         invalidateMemoryCache()
         return result
       } catch (e) {
@@ -350,6 +262,7 @@ export function createConsolidate() {
 /** 读高重要度长期记忆拼成启动摘要；无记忆返回空串，读失败不影响 agent。 */
 export async function buildMemoryContext(scope: AgentScope): Promise<string> {
   try {
+    const wakeup = memoryDatabase.readWakeupContext(scope)
     const globalProfiles = memoryDatabase.listMemoryItems({
       sourceTypes: ['profile'],
       minConfidence: STARTUP_MEMORY_MIN_CONFIDENCE,
@@ -373,9 +286,9 @@ export async function buildMemoryContext(scope: AgentScope): Promise<string> {
         }).filter((m) => !m.sessionId)
 
     const lines = limitMemoryLines(rankContextMemories([...globalProfiles, ...scoped]))
-    if (lines.length === 0) return ''
+    if (lines.length === 0) return wakeup
 
-    return `\n\n# 启动记忆摘要\n这些是经过筛选的高置信长期记忆，只作为上下文参考；若与当前对话冲突，以当前对话为准。每条保留 id/type/confidence/about，细节不足时用 recall 检索。\n${lines.join('\n')}`
+    return `${wakeup}\n\n# 启动记忆摘要\n这些是经过筛选的高置信长期记忆，只作为上下文参考；若与当前对话冲突，以当前对话为准。每条保留 id/type/confidence/about，细节不足时用 recall 检索。\n${lines.join('\n')}`
   } catch {
     return ''
   }
@@ -386,6 +299,10 @@ export async function preloadRelevantMemories(query: string, scope: AgentScope):
   const text = query.trim()
   if (text.length < 2) return ''
   try {
+    const markdown = memoryDatabase.retrieveMarkdownContext(text, {
+      ...(scope.kind === 'session' ? { sessionId: scope.sessionId } : {}),
+      limit: PRELOAD_MEMORY_LIMIT,
+    })
     const hits = memoryDatabase.searchMemoryItemsByKeyword({
       query: text,
       sourceTypes: CONTEXT_SOURCE_TYPES,
@@ -402,10 +319,59 @@ export async function preloadRelevantMemories(query: string, scope: AgentScope):
       seen.add(m.id)
       return true
     }).slice(0, PRELOAD_MEMORY_LIMIT)
-    if (items.length === 0) return ''
-    return `\n\n# 本轮相关记忆\n以下记忆与用户当前问题可能相关；仍需以当前对话与工具查询结果为准。\n${items.map(formatMemoryLine).join('\n')}`
+    const itemContext = items.length > 0
+      ? `\n\n# 本轮相关记忆\n以下记忆与用户当前问题可能相关；仍需以当前对话与工具查询结果为准。\n${items.map(formatMemoryLine).join('\n')}`
+      : ''
+    const fileContext = markdown.context
+      ? `\n\n# 本轮文件记忆（${markdown.mode}）\n${markdown.context.slice(0, 12_000)}`
+      : ''
+    return `${itemContext}${fileContext}`
   } catch {
     return ''
+  }
+}
+
+export async function afterTurnMemory(opts: {
+  scope: AgentScope
+  providerConfig: AgentProviderConfig
+  userText: string
+  assistantText: string
+  signal?: AbortSignal
+}): Promise<AutoMemoryResult[]> {
+  const { scope, providerConfig, userText, assistantText, signal } = opts
+  memoryDatabase.appendConversationTurn(userText, assistantText)
+  const auto = await extractMemories({ scope, providerConfig, userText, assistantText, signal })
+  await maybeRunDailyConsolidation(providerConfig, signal)
+  return auto
+}
+
+async function maybeRunDailyConsolidation(providerConfig: AgentProviderConfig, signal?: AbortSignal): Promise<void> {
+  const date = memoryDatabase.getDailyConsolidationTarget()
+  if (!date) return
+  const source = memoryDatabase.readDailyConsolidationSource(date)
+  if (!source.conversations.trim() && !source.bookmarks.trim()) {
+    memoryDatabase.writeDiary(date, `# ${date} 日记\n\n## 今日摘要\n暂无可整理内容。\n`)
+    return
+  }
+  try {
+    const result = await generateText({
+      model: createLanguageModel(providerConfig),
+      abortSignal: signal,
+      system: '你是 CipherTalk 的记忆整理器。根据当天对话和 BOOKMARKS 写一份简洁中文日记，包含：今日摘要、了解的新信息、我做的事、用户状态。不要编造未出现的信息。',
+      prompt: `日期：${date}\n\n对话日志：\n${source.conversations.slice(0, 16_000)}\n\nBOOKMARKS：\n${source.bookmarks.slice(0, 6000)}`,
+    })
+    memoryDatabase.writeDiary(date, result.text)
+  } catch {
+    memoryDatabase.writeDiary(date, [
+      `# ${date} 日记`,
+      '',
+      '## 今日摘要',
+      source.conversations.split(/\r?\n/).filter((line) => line.startsWith('## ')).slice(-12).join('\n') || '暂无对话摘要。',
+      '',
+      '## 重要记录',
+      source.bookmarks || '暂无重要记录。',
+      ''
+    ].join('\n'))
   }
 }
 
@@ -487,6 +453,7 @@ export async function extractMemories(opts: {
         confidence,
         tags,
       })
+      memoryDatabase.appendBookmark(`AI 自动记忆：${content.slice(0, 120)}`)
       invalidateMemoryCache(m.kind === 'profile' ? { kind: 'global' } : scope)
       out.push({ id: item.id, content, kind: m.kind, importance: item.importance })
     }
