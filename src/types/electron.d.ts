@@ -162,6 +162,8 @@ export interface MemoryMigrationStatusInfo {
 export interface MemoryMigrationResultInfo extends MemoryMigrationStatusInfo {
   success: boolean
   deletedFiles: string[]
+  deleteErrors?: string[]
+  skippedItemCount?: number
 }
 
 export interface MemoryDiaryEntryInfo {
