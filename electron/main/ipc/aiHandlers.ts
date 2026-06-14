@@ -52,6 +52,11 @@ function lastUserTextFromUiMessages(messages: UIMessage[] = []): string {
   return ''
 }
 
+function localDateKey(date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
 function scopeToLogData(scope?: AgentScope): Record<string, unknown> {
   if (!scope || scope.kind === 'global') return { scopeKind: 'global' }
   return {
@@ -840,6 +845,50 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
         limit: opts?.limit ?? 300,
       })
       return { success: true, items, stats: memoryDatabase.getStats() }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('memory:listDiaries', async (_event, limit?: number) => {
+    try {
+      const { memoryDatabase } = await import('../../services/memory/memoryDatabase')
+      return { success: true, diaries: memoryDatabase.listDiaries(limit) }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('memory:readDiary', async (_event, date: string) => {
+    try {
+      const { memoryDatabase } = await import('../../services/memory/memoryDatabase')
+      const diary = memoryDatabase.readDiary(String(date || ''))
+      return diary ? { success: true, diary } : { success: false, error: '未找到该日记' }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle('memory:summarizeTodayDiary', async () => {
+    try {
+      const date = localDateKey()
+      const { memoryDatabase } = await import('../../services/memory/memoryDatabase')
+      const existing = memoryDatabase.readDiary(date)
+      if (existing) return { success: true, alreadyExists: true, diary: existing }
+
+      const [
+        { resolveProviderConfig },
+        { runDailyDiaryConsolidation },
+        { readUnreadDiarySource }
+      ] = await Promise.all([
+        import('../../services/agent/resolveProviderConfig'),
+        import('../../services/agent/tools/memory'),
+        import('../../services/memory/nightlyMemoryService')
+      ])
+      const unreadMessages = await readUnreadDiarySource().catch(() => '')
+      await runDailyDiaryConsolidation(date, resolveProviderConfig(), undefined, { unreadMessages })
+      const diary = memoryDatabase.readDiary(date)
+      return diary ? { success: true, alreadyExists: false, diary } : { success: false, error: '日记生成后未找到文件' }
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) }
     }

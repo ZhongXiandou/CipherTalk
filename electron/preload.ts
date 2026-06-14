@@ -248,6 +248,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       limit?: number
     }) =>
       ipcRenderer.invoke('memory:list', opts) as Promise<{ success: boolean; items?: unknown[]; stats?: { itemCount: number }; error?: string }>,
+    listDiaries: (limit?: number) =>
+      ipcRenderer.invoke('memory:listDiaries', limit) as Promise<{ success: boolean; diaries?: unknown[]; error?: string }>,
+    readDiary: (date: string) =>
+      ipcRenderer.invoke('memory:readDiary', date) as Promise<{ success: boolean; diary?: unknown; error?: string }>,
+    summarizeTodayDiary: () =>
+      ipcRenderer.invoke('memory:summarizeTodayDiary') as Promise<{ success: boolean; alreadyExists?: boolean; diary?: unknown; error?: string }>,
     create: (payload: {
       memoryUid?: string
       sourceType?: 'profile' | 'fact' | 'relationship'

@@ -9,6 +9,7 @@ import {
   renameSync,
   readFileSync,
   rmSync,
+  statSync,
   unlinkSync,
   writeFileSync
 } from 'fs'
@@ -55,6 +56,14 @@ export type MemoryListOptions = {
 export type MemoryMarkdownExportResult = {
   files: string[]
   itemCount: number
+}
+
+export type MemoryDiaryEntry = {
+  date: string
+  title: string
+  excerpt: string
+  content?: string
+  updatedAt: number
 }
 
 export type MemoryMigrationStatus = {
@@ -204,6 +213,25 @@ function extractMemoryValue(content: string, prefix: string, quotedPattern?: Reg
 
 function tableCell(value: string): string {
   return inlineMarkdown(value).replace(/\|/g, '\\|')
+}
+
+function diaryTitle(content: string, date: string): string {
+  const heading = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.startsWith('# '))
+  return heading ? heading.replace(/^#\s+/, '').trim() || `${date} 日记` : `${date} 日记`
+}
+
+function diaryExcerpt(content: string): string {
+  return content
+    .replace(/\n## 记忆线索[\s\S]*$/u, '')
+    .replace(/^# .+$/gm, '')
+    .replace(/^## .+$/gm, '')
+    .replace(/^[-*]\s+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 260)
 }
 
 function normalizeUserProfileMarkdown(value: string): string {
@@ -1059,6 +1087,41 @@ export class MemoryDatabase {
     writeFileSync(file, text.endsWith('\n') ? text : `${text}\n`, 'utf8')
     this.writeMeta({ lastConsolidatedDate: date, lastConsolidatedAt: new Date().toISOString() })
     this.syncDerivedMarkdown()
+  }
+
+  listDiaries(limit = 100): MemoryDiaryEntry[] {
+    const root = this.ensureBank()
+    const diaryDir = join(root, SELF_REFERENCE_DIR, 'diaries')
+    return readdirSync(diaryDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && /^\d{4}-\d{2}-\d{2}\.md$/.test(entry.name))
+      .map((entry) => {
+        const date = basename(entry.name, '.md')
+        const filePath = join(diaryDir, entry.name)
+        const content = readFileSync(filePath, 'utf8')
+        return {
+          date,
+          title: diaryTitle(content, date),
+          excerpt: diaryExcerpt(content),
+          updatedAt: statSync(filePath).mtimeMs
+        }
+      })
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, Math.max(1, Math.min(500, Math.floor(Number(limit) || 100))))
+  }
+
+  readDiary(date: string): MemoryDiaryEntry | null {
+    const safeDate = String(date || '').trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(safeDate)) return null
+    const filePath = join(this.ensureBank(), SELF_REFERENCE_DIR, 'diaries', `${safeDate}.md`)
+    if (!existsSync(filePath)) return null
+    const content = readFileSync(filePath, 'utf8')
+    return {
+      date: safeDate,
+      title: diaryTitle(content, safeDate),
+      excerpt: diaryExcerpt(content),
+      content,
+      updatedAt: statSync(filePath).mtimeMs
+    }
   }
 
   getMigrationStatus(): MemoryMigrationStatus {

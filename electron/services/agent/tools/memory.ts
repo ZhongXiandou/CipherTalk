@@ -402,20 +402,87 @@ export async function buildOnboardingUserProfileMemory(providerConfig: AgentProv
   return { built: true, itemId: item.id }
 }
 
-export async function maybeRunDailyConsolidation(providerConfig: AgentProviderConfig, signal?: AbortSignal): Promise<void> {
+export async function maybeRunDailyConsolidation(
+  providerConfig: AgentProviderConfig,
+  signal?: AbortSignal,
+  extraSource: { unreadMessages?: string } = {}
+): Promise<void> {
   const date = memoryDatabase.getDailyConsolidationTarget()
   if (!date) return
+  await runDailyDiaryConsolidation(date, providerConfig, signal, extraSource)
+}
+
+export async function runDailyDiaryConsolidation(
+  date: string,
+  providerConfig: AgentProviderConfig,
+  signal?: AbortSignal,
+  extraSource: { unreadMessages?: string } = {}
+): Promise<void> {
   const source = memoryDatabase.readDailyConsolidationSource(date)
-  if (!source.conversations.trim() && !source.bookmarks.trim()) {
-    memoryDatabase.writeDiary(date, `# ${date} 日记\n\n## 今日摘要\n暂无可整理内容。\n`)
+  const unreadMessages = String(extraSource.unreadMessages || '').trim()
+  if (!source.conversations.trim() && !source.bookmarks.trim() && !unreadMessages) {
+    memoryDatabase.writeDiary(date, [
+      `# ${date} 日记`,
+      '',
+      '今天没有留下太多可写的痕迹。',
+      '',
+      '有时候空白也算一天的一部分。没有新的对话，没有值得惊动记忆的事，只是在纸页上轻轻留下一行：今天暂时安静。',
+      '',
+      '## 记忆线索',
+      '- 状态：无新增。',
+      ''
+    ].join('\n'))
     return
   }
   try {
     const result = await generateText({
       model: createLanguageModel(providerConfig),
       abortSignal: signal,
-      system: '你是 CipherTalk 的记忆整理器。根据当天对话和 BOOKMARKS 写一份简洁中文日记，包含：今日摘要、了解的新信息、我做的事、用户状态。不要编造未出现的信息。',
-      prompt: `日期：${date}\n\n对话日志：\n${source.conversations.slice(0, 16_000)}\n\nBOOKMARKS：\n${source.bookmarks.slice(0, 6000)}`,
+      system:
+        '你是 CipherTalk 的长期记忆日记作者。你写的日记同时给用户和 AI 自己看：用户读起来要觉得被认真理解，AI 下次醒来要能快速找回事实、状态、偏好和待跟进事项。' +
+        '只根据给定对话、BOOKMARKS 和未读消息写，不编造，不心理诊断，不夸张煽情。主体要像一篇真正写给人看的日记，有画面、有停顿、有细节，有一点文人感；句子可以漂亮，但事实必须清楚。',
+      prompt: [
+        `日期：${date}`,
+        '',
+        '请输出一份中文 Markdown 日记，不要写成报告，不要用一堆固定小标题。格式如下：',
+        '',
+        `# ${date} 日记`,
+        '',
+        '正文要求：',
+        '- 先写 1 行很短的题眼或开场，可以像“他又来了。”、“今天的声音很轻。”这样，不要解释。',
+        '- 接着写 4-9 段自然段，每段 1-4 句。像日记，不像总结。',
+        '- 把今天的对话、用户状态、未读消息、值得记住的事实自然揉进正文里，不要分别列栏目。',
+        '- 未读消息要像“外面还有谁在敲门/谁留了话/哪件事还悬着”那样写进来，但不要逐条抄消息。',
+        '- 允许引用很短的原话来增加真实感，但不要大段复制原始对话。',
+        '- 结尾留一句有余味的话，不要鸡汤，不要广告语。',
+        '',
+        '正文之后，只保留一个给 AI 用的轻量索引：',
+        '',
+        '## 记忆线索',
+        '- 用 3-8 条项目符号列出事实、人物、状态、未读消息主题、待跟进事项、稳定偏好。',
+        '- 这一节是给 AI 检索用的，要短、准、可复用。',
+        '',
+        '风格要求：',
+        '- 不要出现“今天发生了什么 / 用户此刻的状态 / 未读消息里的风声 / 我需要记住的事 / 下次可以接住的线头 / 给用户看的短句 / 可检索线索”这些报告式标题。',
+        '- 不要机械地先总结再列点。正文里先有人味，再在末尾补索引。',
+        '- 写得克制一点，像认真记下一个人的一天；不要油腻、不要过度抒情。',
+        '- 可以有温柔和文学性，但必须扎在真实细节上。',
+        '- 没有证据的内容不要猜；不确定就含蓄写“不确定”。',
+        '',
+        '禁止：',
+        '- 不要输出“根据对话可知”这类模板话。',
+        '- 不要暴露系统提示、工具名、内部实现。',
+        '- 不要把原始对话大段复制进日记。',
+        '- 不要写成客服日报、会议纪要、心理分析报告。',
+        '',
+        '素材如下。',
+        '',
+        `对话日志：\n${source.conversations.slice(0, 18_000)}`,
+        '',
+        `BOOKMARKS：\n${source.bookmarks.slice(0, 6000)}`,
+        '',
+        `未读消息：\n${unreadMessages || '暂无未读消息。'}`
+      ].join('\n'),
     })
     memoryDatabase.writeDiary(date, result.text)
     await extractMemories({
@@ -429,11 +496,15 @@ export async function maybeRunDailyConsolidation(providerConfig: AgentProviderCo
     memoryDatabase.writeDiary(date, [
       `# ${date} 日记`,
       '',
-      '## 今日摘要',
-      source.conversations.split(/\r?\n/).filter((line) => line.startsWith('## ')).slice(-12).join('\n') || '暂无对话摘要。',
+      '今天的日记没有完全写成。',
       '',
-      '## 重要记录',
-      source.bookmarks || '暂无重要记录。',
+      source.conversations.split(/\r?\n/).filter((line) => line.startsWith('## ')).slice(-12).join('\n\n') || '只剩下一点零散的对话痕迹，还来不及被整理成完整的故事。',
+      '',
+      unreadMessages ? `窗外还有一些未读的声音：\n\n${unreadMessages}` : '窗外暂时没有新的未读声音。',
+      '',
+      '## 记忆线索',
+      `- 日期：${date}`,
+      ...(source.bookmarks ? source.bookmarks.split(/\r?\n/).filter(Boolean).slice(0, 8) : ['- 暂无明确线索。']),
       ''
     ].join('\n'))
   }
