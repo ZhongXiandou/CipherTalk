@@ -1,10 +1,14 @@
 /**
- * 数字分身声音复刻：从好友历史语音取样，调用豆包声音复刻 V3，并把 speaker 绑定到 persona。
+ * 数字分身声音复刻：从好友历史语音取样，按当前 TTS 服务商绑定专属音色。
+ * 豆包会创建远端 speaker；小米 MiMo 按官方 voiceclone 方式保存本地样本，合成时作为 audio.voice Data URL 传入。
  */
 import { createHash, randomUUID } from 'crypto'
+import { mkdirSync, writeFileSync } from 'fs'
+import { join } from 'path'
 import { chatService } from '../../chatService'
 import { createProxyFetch, getResolvedProxyUrl } from '../../ai/proxyFetch'
-import { getTtsConfig } from '../../ai/ttsService'
+import { getTtsConfig, type TtsConfig } from '../../ai/ttsService'
+import { ConfigService } from '../../config'
 import { VOLCENGINE_DEFAULT_TTS_ENDPOINT } from '../../ai/volcengineTtsProtocol'
 import type { PersonaRecord, PersonaTtsVoiceBinding } from './personaTypes'
 import { personaStore } from './personaStore'
@@ -34,6 +38,7 @@ interface ParsedWav {
 
 interface VoiceSample {
   audioBase64: string
+  audioBytes: number
   sampleCount: number
   sampleSeconds: number
 }
@@ -53,11 +58,18 @@ const VOLCENGINE_VOICE_CLONE_ENDPOINT = 'https://openspeech.bytedance.com/api/v3
 const VOLCENGINE_VOICE_STATUS_ENDPOINT = 'https://openspeech.bytedance.com/api/v3/tts/get_voice'
 const VOLCENGINE_VOICE_RESOURCE_ID = 'seed-icl-2.0'
 const VOLCENGINE_VOICE_MODEL_TYPE = 4
+const XIAOMI_MIMO_DEFAULT_BASE_URL = 'https://api.xiaomimimo.com/v1'
+const XIAOMI_MIMO_VOICE_CLONE_MODEL = 'mimo-v2.5-tts-voiceclone'
+const XIAOMI_MIMO_VOICE_SAMPLE_DIR = 'persona-voices'
+const XIAOMI_MIMO_VOICE_SAMPLE_MIME = 'audio/wav'
+const XIAOMI_MIMO_MAX_SAMPLE_BASE64_BYTES = 10 * 1024 * 1024
 const VOICE_CLONE_MIN_SECONDS = 8
 const VOICE_CLONE_TARGET_SECONDS = 18
 const VOICE_CLONE_MAX_MESSAGES = 30
 const VOICE_CLONE_POLL_INTERVAL_MS = 2_000
 const VOICE_CLONE_TIMEOUT_MS = 180_000
+
+type VoiceCloneProvider = 'xiaomi' | 'volcengine'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -66,6 +78,46 @@ function sleep(ms: number): Promise<void> {
 function makeCustomSpeakerId(sessionId: string): string {
   const digest = createHash('sha1').update(sessionId).digest('hex').slice(0, 16)
   return `custom_zh_ciphertalk_${digest}`
+}
+
+function makeXiaomiVoiceId(sessionId: string, sampleHash: string): string {
+  const sessionDigest = createHash('sha1').update(sessionId).digest('hex').slice(0, 12)
+  return `mimo_clone_${sessionDigest}_${sampleHash.slice(0, 10)}`
+}
+
+function getPersonaVoiceSampleDir(): string {
+  const cs = new ConfigService()
+  try {
+    const dir = join(cs.getCacheBasePath(), XIAOMI_MIMO_VOICE_SAMPLE_DIR)
+    mkdirSync(dir, { recursive: true })
+    return dir
+  } finally {
+    cs.close()
+  }
+}
+
+function persistXiaomiVoiceSample(sessionId: string, sample: VoiceSample): {
+  voiceId: string
+  samplePath: string
+  sampleHash: string
+  sampleBytes: number
+} {
+  if (Buffer.byteLength(sample.audioBase64, 'utf8') > XIAOMI_MIMO_MAX_SAMPLE_BASE64_BYTES) {
+    throw new Error('小米音色复刻样本超过 10 MB，请减少采样语音长度后重试')
+  }
+
+  const audio = Buffer.from(sample.audioBase64, 'base64')
+  const sampleHash = createHash('sha256').update(audio).digest('hex')
+  const voiceId = makeXiaomiVoiceId(sessionId, sampleHash)
+  const samplePath = join(getPersonaVoiceSampleDir(), `${voiceId}.wav`)
+  writeFileSync(samplePath, audio)
+  return { voiceId, samplePath, sampleHash, sampleBytes: audio.length }
+}
+
+function pickVoiceCloneProvider(cfg: TtsConfig): VoiceCloneProvider | null {
+  const active = cfg.activeProvider === 'volcengine' ? 'volcengine' : 'xiaomi'
+  const order: VoiceCloneProvider[] = active === 'xiaomi' ? ['xiaomi', 'volcengine'] : ['volcengine', 'xiaomi']
+  return order.find((provider) => Boolean(String(cfg.providers[provider]?.apiKey || '').trim())) || null
 }
 
 function parseWav(base64: string): ParsedWav {
@@ -188,8 +240,10 @@ async function collectVoiceSample(sessionId: string): Promise<VoiceSample> {
     pcmParts.push(sample.pcm)
   })
 
+  const audio = buildWav(base, Buffer.concat(pcmParts))
   return {
-    audioBase64: buildWav(base, Buffer.concat(pcmParts)).toString('base64'),
+    audioBase64: audio.toString('base64'),
+    audioBytes: audio.length,
     sampleCount: samples.length,
     sampleSeconds: Number(totalSeconds.toFixed(1)),
   }
@@ -302,38 +356,67 @@ export async function clonePersonaVoiceFromSession(input: PersonaVoiceCloneInput
     const current = personaStore.get(sessionId)
     if (!current) return { success: false, error: '请先克隆数字分身，再克隆声音' }
 
+    const displayName = String(input.displayName || current.displayName || sessionId).trim()
     const cfg = getTtsConfig()
-    const volcengine = cfg.providers.volcengine
-    if (!volcengine?.apiKey) {
-      return { success: false, error: '未配置火山引擎/豆包 API Key，请先在 TTS 设置里填写豆包密钥' }
+    const provider = pickVoiceCloneProvider(cfg)
+    if (!provider) {
+      return { success: false, error: '未配置小米或豆包 TTS API Key，请先在 TTS 设置里填写至少一个服务商密钥' }
     }
 
-    const displayName = String(input.displayName || current.displayName || sessionId).trim()
-    const speakerId = makeCustomSpeakerId(sessionId)
     const sample = await collectVoiceSample(sessionId)
-    const clone = await cloneVolcengineVoice(volcengine.apiKey, speakerId, displayName, sample)
     const now = Date.now()
-    const voice: PersonaTtsVoiceBinding = {
-      provider: 'volcengine',
-      protocol: 'volcengine-bidirectional',
-      source: 'volcengine-voice-clone',
-      baseURL: volcengine.baseURL || VOLCENGINE_DEFAULT_TTS_ENDPOINT,
-      model: VOLCENGINE_VOICE_RESOURCE_ID,
-      voice: clone.speakerId,
-      displayName,
-      sampleCount: sample.sampleCount,
-      sampleSeconds: sample.sampleSeconds,
-      modelType: clone.status.modelType || VOLCENGINE_VOICE_MODEL_TYPE,
-      createdAt: current.ttsVoice?.createdAt || now,
-      updatedAt: now,
+
+    let voice: PersonaTtsVoiceBinding
+    if (provider === 'xiaomi') {
+      const xiaomi = cfg.providers.xiaomi
+      const storedSample = persistXiaomiVoiceSample(sessionId, sample)
+      voice = {
+        provider: 'xiaomi',
+        protocol: 'xiaomi-mimo-tts',
+        source: 'xiaomi-mimo-voice-clone',
+        baseURL: xiaomi.baseURL || XIAOMI_MIMO_DEFAULT_BASE_URL,
+        model: XIAOMI_MIMO_VOICE_CLONE_MODEL,
+        voice: storedSample.voiceId,
+        displayName,
+        sampleCount: sample.sampleCount,
+        sampleSeconds: sample.sampleSeconds,
+        sampleBytes: storedSample.sampleBytes,
+        sampleMimeType: XIAOMI_MIMO_VOICE_SAMPLE_MIME,
+        samplePath: storedSample.samplePath,
+        sampleHash: storedSample.sampleHash,
+        createdAt: current.ttsVoice?.provider === 'xiaomi' ? current.ttsVoice.createdAt : now,
+        updatedAt: now,
+      }
+    } else {
+      const volcengine = cfg.providers.volcengine
+      const speakerId = makeCustomSpeakerId(sessionId)
+      const clone = await cloneVolcengineVoice(volcengine.apiKey, speakerId, displayName, sample)
+      voice = {
+        provider: 'volcengine',
+        protocol: 'volcengine-bidirectional',
+        source: 'volcengine-voice-clone',
+        baseURL: volcengine.baseURL || VOLCENGINE_DEFAULT_TTS_ENDPOINT,
+        model: VOLCENGINE_VOICE_RESOURCE_ID,
+        voice: clone.speakerId,
+        displayName,
+        sampleCount: sample.sampleCount,
+        sampleSeconds: sample.sampleSeconds,
+        sampleBytes: sample.audioBytes,
+        sampleMimeType: XIAOMI_MIMO_VOICE_SAMPLE_MIME,
+        modelType: clone.status.modelType || VOLCENGINE_VOICE_MODEL_TYPE,
+        createdAt: current.ttsVoice?.provider === 'volcengine' ? current.ttsVoice.createdAt : now,
+        updatedAt: now,
+      }
     }
+
     const updated = personaStore.patch(sessionId, { ttsVoice: voice })
     if (!updated) return { success: false, error: '保存分身音色失败' }
 
     logger?.warn?.('PersonaVoice', '声音复刻完成并绑定到数字分身', {
       sessionId,
       displayName,
-      speakerId: clone.speakerId,
+      provider,
+      voiceId: voice.voice,
       sampleCount: sample.sampleCount,
       sampleSeconds: sample.sampleSeconds,
       modelType: voice.modelType,

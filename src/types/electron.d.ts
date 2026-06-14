@@ -203,15 +203,18 @@ export interface PersonaProfileInfo {
 }
 
 export interface PersonaTtsVoiceBindingInfo {
-  provider: 'volcengine'
-  protocol: 'volcengine-bidirectional'
-  source: 'volcengine-voice-clone'
+  provider: 'volcengine' | 'xiaomi'
+  protocol: 'volcengine-bidirectional' | 'xiaomi-mimo-tts'
+  source: 'volcengine-voice-clone' | 'xiaomi-mimo-voice-clone'
   baseURL: string
   model: string
   voice: string
   displayName?: string
   sampleCount?: number
   sampleSeconds?: number
+  sampleBytes?: number
+  sampleMimeType?: string
+  sampleHash?: string
   modelType?: number
   createdAt: number
   updatedAt: number

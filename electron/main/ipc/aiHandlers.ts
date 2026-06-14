@@ -4,7 +4,7 @@ import { join } from 'path'
 import type { UIMessage } from 'ai'
 import type { MainProcessContext } from '../context'
 import type { AgentProviderConfig, AgentProviderConfigOverride, AgentScope } from '../../services/agent/types'
-import type { PersonaNotes } from '../../services/agent/persona/personaTypes'
+import type { PersonaNotes, PersonaRecord, PersonaTtsVoiceBinding } from '../../services/agent/persona/personaTypes'
 
 /** 进行中的 agent 运行：runId → AbortController，用于取消。 */
 const agentAborters = new Map<string, AbortController>()
@@ -55,6 +55,20 @@ function lastUserTextFromUiMessages(messages: UIMessage[] = []): string {
 function localDateKey(date = new Date()): string {
   const pad = (value: number) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function sanitizePersonaVoiceForRenderer(ttsVoice: PersonaTtsVoiceBinding | null | undefined): PersonaTtsVoiceBinding | null {
+  if (!ttsVoice) return null
+  const { samplePath: _samplePath, ...safeVoice } = ttsVoice
+  return safeVoice as PersonaTtsVoiceBinding
+}
+
+function sanitizePersonaForRenderer(persona: PersonaRecord | null | undefined): PersonaRecord | null {
+  if (!persona) return null
+  return {
+    ...persona,
+    ttsVoice: sanitizePersonaVoiceForRenderer(persona.ttsVoice),
+  }
 }
 
 function scopeToLogData(scope?: AgentScope): Record<string, unknown> {
@@ -1043,7 +1057,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
   ipcMain.handle('persona:get', async (_event, sessionId: string) => {
     try {
       const { personaStore } = await import('../../services/agent/persona/personaStore')
-      return { success: true, persona: personaStore.get(String(sessionId || '').trim()) }
+      return { success: true, persona: sanitizePersonaForRenderer(personaStore.get(String(sessionId || '').trim())) }
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) }
     }
@@ -1052,7 +1066,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
   ipcMain.handle('persona:list', async () => {
     try {
       const { personaStore } = await import('../../services/agent/persona/personaStore')
-      return { success: true, personas: personaStore.list() }
+      return { success: true, personas: personaStore.list().map((persona) => sanitizePersonaForRenderer(persona)) }
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) }
     }
@@ -1063,11 +1077,17 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
       const { refreshResolvedProxyUrl } = await import('../../services/ai/proxyFetch')
       const { clonePersonaVoiceFromSession } = await import('../../services/agent/persona/personaVoiceCloneService')
       await refreshResolvedProxyUrl()
-      return await clonePersonaVoiceFromSession({
+      const result = await clonePersonaVoiceFromSession({
         sessionId: String(payload?.sessionId || '').trim(),
         displayName: String(payload?.displayName || '').trim(),
         logger: ctx.getLogService(),
       })
+      if (!result.success) return result
+      return {
+        ...result,
+        persona: sanitizePersonaForRenderer(result.persona),
+        voice: sanitizePersonaVoiceForRenderer(result.voice),
+      }
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) }
     }
@@ -1170,7 +1190,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
         freshFriendMessages: freshCorpus.stats.friendMessageCount,
         newFewShots: revised.newFewShots.length,
       })
-      return { success: true, refreshed: true, persona: updated }
+      return { success: true, refreshed: true, persona: sanitizePersonaForRenderer(updated) }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       logger?.error('Persona', '画像增量进化失败', { sessionId, ...errorToLogData(e) })
@@ -1267,7 +1287,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     const displayName = String(payload?.displayName || '').trim() || sessionId
     const logger = ctx.getLogService()
     const { buildPersonaFromSession } = await import('../../services/agent/persona/personaBuildService')
-    return buildPersonaFromSession({
+    const result = await buildPersonaFromSession({
       sessionId,
       displayName,
       logger,
@@ -1275,6 +1295,10 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
         if (!sender.isDestroyed()) sender.send('persona:buildProgress', progress)
       },
     })
+    if (result.success && result.persona) {
+      return { ...result, persona: sanitizePersonaForRenderer(result.persona) }
+    }
+    return result
   })
 
   ipcMain.handle('agent:generateTitle', async (_event, payload: {

@@ -165,6 +165,11 @@ function PersonaAvatar({ name, avatarUrl, size }: { name: string; avatarUrl?: st
   )
 }
 
+function getPersonaVoiceLabel(persona: PersonaRecordInfo | null): string {
+  if (!persona?.ttsVoice) return ''
+  return persona.ttsVoice.provider === 'xiaomi' ? '专属小米音色' : '专属豆包音色'
+}
+
 export default function PersonaChatPage() {
   const location = useLocation()
   const sessionId = useMemo(() => {
@@ -413,7 +418,8 @@ export default function PersonaChatPage() {
       const res = await window.electronAPI.persona.cloneVoice({ sessionId, displayName })
       if (res.success && res.persona) {
         setPersona(res.persona)
-        setVoiceCloneStatus({ ok: true, text: '已绑定专属豆包音色' })
+        const providerText = res.voice?.provider === 'xiaomi' ? '小米音色样本' : '豆包音色'
+        setVoiceCloneStatus({ ok: true, text: `已绑定专属${providerText}` })
       } else {
         setVoiceCloneStatus({ ok: false, text: res.error || '声音复刻失败' })
       }
@@ -564,7 +570,7 @@ export default function PersonaChatPage() {
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-foreground">{headerTitle}</div>
           <div className="truncate text-xs text-muted">
-            数字分身{persona ? ` · 基于 ${persona.stats.friendMessageCount + (persona.stats.groupMessageCount || 0)} 条消息${persona.stats.groupMessageCount ? `（含群聊发言 ${persona.stats.groupMessageCount} 条）` : ''}${persona.ttsVoice ? ' · 专属豆包音色' : ''}` : ''}
+            数字分身{persona ? ` · 基于 ${persona.stats.friendMessageCount + (persona.stats.groupMessageCount || 0)} 条消息${persona.stats.groupMessageCount ? `（含群聊发言 ${persona.stats.groupMessageCount} 条）` : ''}${persona.ttsVoice ? ` · ${getPersonaVoiceLabel(persona)}` : ''}` : ''}
           </div>
         </div>
         <Tooltip delay={0}>

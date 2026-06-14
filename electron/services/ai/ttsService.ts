@@ -77,6 +77,7 @@ const VOLCENGINE_RESOURCE_DEFAULT_SPEAKERS: Record<string, string> = {
 const XIAOMI_MIMO_DEFAULT_BASE_URL = 'https://api.xiaomimimo.com/v1'
 const XIAOMI_MIMO_DEFAULT_MODEL = 'mimo-v2.5-tts'
 const XIAOMI_MIMO_DEFAULT_VOICE = 'mimo_default'
+const PERSONA_VOICE_SAMPLE_DIR = 'persona-voices'
 
 const XIAOMI_MIMO_MODEL_DEFAULT_VOICES: Record<string, string> = {
   'mimo-v2.5-tts': XIAOMI_MIMO_DEFAULT_VOICE,
@@ -255,23 +256,70 @@ export function getTtsConfig(): TtsConfig {
   }
 }
 
-/** persona 专属音色是否可用：绑定存在，且全局豆包 provider 留有 API Key。 */
+function getPersonaXiaomiVoiceDataUrl(ttsVoice: PersonaTtsVoiceBinding): string {
+  const voice = String(ttsVoice.voice || '').trim()
+  if (isXiaomiMimoVoiceCloneSample(voice)) return voice
+
+  const samplePath = getPersonaXiaomiSamplePath(ttsVoice)
+  if (!samplePath || !existsSync(samplePath)) return voice
+
+  const mimeType = String(ttsVoice.sampleMimeType || 'audio/wav').trim() || 'audio/wav'
+  return `data:${mimeType};base64,${readFileSync(samplePath).toString('base64')}`
+}
+
+function getPersonaXiaomiSamplePath(ttsVoice: PersonaTtsVoiceBinding): string {
+  const explicitPath = String(ttsVoice.samplePath || '').trim()
+  if (explicitPath) return explicitPath
+
+  const voiceId = String(ttsVoice.voice || '').trim()
+  if (!/^[a-zA-Z0-9_-]+$/.test(voiceId)) return ''
+  return join(getTtsCacheBasePath(), PERSONA_VOICE_SAMPLE_DIR, `${voiceId}.wav`)
+}
+
+/** persona 专属音色是否可用：绑定存在，且对应全局 provider 留有 API Key。 */
 export function isPersonaTtsVoiceAvailable(ttsVoice?: PersonaTtsVoiceBinding | null): boolean {
-  if (!ttsVoice?.voice || ttsVoice.provider !== 'volcengine') return false
+  if (!ttsVoice?.voice) return false
   const cfg = getTtsConfig()
+  if (ttsVoice.provider === 'xiaomi') {
+    const xiaomi = cfg.providers.xiaomi
+    const hasSample = isXiaomiMimoVoiceCloneSample(ttsVoice.voice) ||
+      Boolean(getPersonaXiaomiSamplePath(ttsVoice) && existsSync(getPersonaXiaomiSamplePath(ttsVoice)))
+    return Boolean(xiaomi?.apiKey && hasSample)
+  }
+  if (ttsVoice.provider !== 'volcengine') return false
   const volcengine = cfg.providers.volcengine
   return Boolean(volcengine?.apiKey && (ttsVoice.model || 'seed-icl-2.0'))
 }
 
 /**
  * 把 persona 专属音色转换为一次性 TTS 配置。
- * 不保存密钥到 persona；这里从全局豆包 provider 取 key，保证切到小米后分身仍能显式走豆包。
+ * 不保存密钥到 persona；这里从全局对应 provider 取 key，保证分身不跟随全局当前服务商漂移。
  */
 export function resolvePersonaVoiceTtsConfig(
   ttsVoice: PersonaTtsVoiceBinding,
   overrides: Partial<TtsConfig> = {},
 ): Partial<TtsConfig> {
   const cfg = getTtsConfig()
+  if (ttsVoice.provider === 'xiaomi') {
+    const xiaomi = cfg.providers.xiaomi
+    const instructions = String(overrides.instructions ?? '').trim() || xiaomi.instructions
+    const speed = Number.isFinite(Number(overrides.speed)) && Number(overrides.speed) > 0
+      ? Number(overrides.speed)
+      : xiaomi.speed
+
+    return {
+      enabled: true,
+      activeProvider: 'xiaomi',
+      protocol: 'xiaomi-mimo-tts',
+      apiKey: xiaomi.apiKey,
+      baseURL: String(ttsVoice.baseURL || xiaomi.baseURL || XIAOMI_MIMO_DEFAULT_BASE_URL),
+      model: String(ttsVoice.model || 'mimo-v2.5-tts-voiceclone'),
+      voice: getPersonaXiaomiVoiceDataUrl(ttsVoice),
+      instructions,
+      speed,
+    }
+  }
+
   const volcengine = cfg.providers.volcengine
   const instructions = String(overrides.instructions ?? '').trim() || volcengine.instructions
   const speed = Number.isFinite(Number(overrides.speed)) && Number(overrides.speed) > 0
