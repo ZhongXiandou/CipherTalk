@@ -20,6 +20,7 @@ import {
   checkForUpdatesOnStartup,
   startBackgroundSync,
   startLocalIntegrationServices,
+  startNightlyMemoryConsolidation,
   stopLocalIntegrationServices,
   warmupAgentProcess
 } from './main/startup'
@@ -273,6 +274,9 @@ if (gotSingleInstanceLock) {
 
     // 后台预热 AI Agent 子进程，消除首次提问的冷启动等待
     warmupAgentProcess(ctx)
+
+    // 独立夜间记忆整理：无对话也会在应用运行时按小时检查一次。
+    startNightlyMemoryConsolidation(ctx)
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

@@ -248,6 +248,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       limit?: number
     }) =>
       ipcRenderer.invoke('memory:list', opts) as Promise<{ success: boolean; items?: unknown[]; stats?: { itemCount: number }; error?: string }>,
+    create: (payload: {
+      memoryUid?: string
+      sourceType?: 'profile' | 'fact' | 'relationship'
+      content?: string
+      title?: string
+      importance?: number
+      confidence?: number
+      tags?: string[]
+    }) =>
+      ipcRenderer.invoke('memory:create', payload) as Promise<{ success: boolean; item?: unknown; error?: string }>,
     delete: (id: number) =>
       ipcRenderer.invoke('memory:delete', id) as Promise<{ success: boolean; error?: string }>,
     update: (payload: { id: number; sourceType?: 'profile' | 'fact' | 'relationship'; content?: string; importance?: number; confidence?: number; tags?: string[] }) =>

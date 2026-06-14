@@ -9,7 +9,7 @@ import { tool, generateObject, generateText } from 'ai'
 import { z } from 'zod'
 import type { AgentScope, AgentProviderConfig } from '../types'
 import type { MemoryItem, MemorySourceType } from '../../memory/memorySchema'
-import { memoryDatabase, hashMemoryContent } from '../../memory/memoryDatabase'
+import { AI_USER_PROFILE_UID, ONBOARDING_PROFILE_UIDS, memoryDatabase, hashMemoryContent } from '../../memory/memoryDatabase'
 import { createLanguageModel } from '../provider'
 import { invalidateMemoryCache } from '../runtimeCache'
 import { rerankCandidates, type RerankMeta } from '../../ai/rerankService'
@@ -345,7 +345,64 @@ export async function afterTurnMemory(opts: {
   return auto
 }
 
-async function maybeRunDailyConsolidation(providerConfig: AgentProviderConfig, signal?: AbortSignal): Promise<void> {
+export type OnboardingProfileBuildResult = {
+  built: boolean
+  itemId?: number
+  reason?: string
+}
+
+export async function buildOnboardingUserProfileMemory(providerConfig: AgentProviderConfig, signal?: AbortSignal): Promise<OnboardingProfileBuildResult> {
+  const onboardingItems = ONBOARDING_PROFILE_UIDS
+    .map((uid) => memoryDatabase.getMemoryItemByUid(uid))
+    .filter((item): item is MemoryItem => Boolean(item))
+  if (onboardingItems.length === 0) return { built: false, reason: 'no_onboarding_memory' }
+
+  const source = onboardingItems
+    .map((item) => `- ${item.title || item.memoryUid}：${item.content}`)
+    .join('\n')
+  const previous = memoryDatabase.getMemoryItemByUid(AI_USER_PROFILE_UID)
+  const previousProfile = previous?.content.trim()
+    ? `\n\n已有画像草稿（如有冲突，以最新回答为准）：\n${previous.content.slice(0, 8000)}`
+    : ''
+
+  const result = await generateText({
+    model: createLanguageModel(providerConfig),
+    abortSignal: signal,
+    temperature: 0.2,
+    system:
+      '你是 CipherTalk 的用户长期记忆画像整理器。只根据给定资料更新用户档案，不编造、不扩写没有证据的内容。' +
+      '输出中文 Markdown，第一行必须是「# 用户档案」。只输出档案正文，不要解释。',
+    prompt: [
+      '根据下面的首次记忆引导回答，整理成长期可用的用户画像。',
+      '',
+      '格式要求：',
+      '- 必须包含这些二级标题：## 基本信息、## 日常状态、## 性格与应对、## 交互偏好。',
+      '- 每个标题下用 1-3 条项目符号。',
+      '- 写法参考“名字：……（首次对话中主动告知）。”这种清晰句式。',
+      '- 不要输出事实表、当前状态、其他画像线索，这些会由系统自动追加。',
+      '- 缺失的信息不要猜，可以写“暂未明确”。',
+      '',
+      `首次记忆引导回答：\n${source}${previousProfile}`
+    ].join('\n')
+  })
+
+  const content = result.text.trim()
+  if (!content || !content.includes('## 基本信息')) return { built: false, reason: 'invalid_ai_profile' }
+  const item = memoryDatabase.upsertMemoryItem({
+    memoryUid: AI_USER_PROFILE_UID,
+    sourceType: 'profile',
+    title: 'AI 用户画像',
+    content,
+    importance: 0.95,
+    confidence: 0.9,
+    tags: ['onboarding', 'ai-profile', 'profile']
+  })
+  memoryDatabase.appendBookmark('AI 构建首次用户画像')
+  invalidateMemoryCache({ kind: 'global' })
+  return { built: true, itemId: item.id }
+}
+
+export async function maybeRunDailyConsolidation(providerConfig: AgentProviderConfig, signal?: AbortSignal): Promise<void> {
   const date = memoryDatabase.getDailyConsolidationTarget()
   if (!date) return
   const source = memoryDatabase.readDailyConsolidationSource(date)
@@ -361,6 +418,13 @@ async function maybeRunDailyConsolidation(providerConfig: AgentProviderConfig, s
       prompt: `日期：${date}\n\n对话日志：\n${source.conversations.slice(0, 16_000)}\n\nBOOKMARKS：\n${source.bookmarks.slice(0, 6000)}`,
     })
     memoryDatabase.writeDiary(date, result.text)
+    await extractMemories({
+      scope: { kind: 'global' },
+      providerConfig,
+      userText: `当天对话日志：\n${source.conversations.slice(0, 18_000)}`,
+      assistantText: `当天日记：\n${result.text.slice(0, 6000)}`,
+      signal
+    })
   } catch {
     memoryDatabase.writeDiary(date, [
       `# ${date} 日记`,

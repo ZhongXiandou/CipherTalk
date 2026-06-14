@@ -845,6 +845,36 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     }
   })
 
+  ipcMain.handle('memory:create', async (_event, payload: {
+    memoryUid?: string
+    sourceType?: 'profile' | 'fact' | 'relationship'
+    content?: string
+    title?: string
+    importance?: number
+    confidence?: number
+    tags?: string[]
+  }) => {
+    try {
+      const { memoryDatabase } = await import('../../services/memory/memoryDatabase')
+      const content = String(payload?.content || '').trim()
+      if (!content) return { success: false, error: '记忆内容不能为空' }
+      const sourceType = payload?.sourceType || 'profile'
+      const memoryUid = String(payload?.memoryUid || `${sourceType}:${Date.now()}`).trim()
+      const item = memoryDatabase.upsertMemoryItem({
+        memoryUid,
+        sourceType,
+        title: String(payload?.title || content.slice(0, 40)),
+        content,
+        ...(payload?.importance !== undefined ? { importance: payload.importance } : {}),
+        ...(payload?.confidence !== undefined ? { confidence: payload.confidence } : {}),
+        ...(Array.isArray(payload?.tags) ? { tags: payload.tags } : {}),
+      })
+      return { success: true, item }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
   ipcMain.handle('memory:delete', async (_event, id: number) => {
     try {
       const { memoryDatabase } = await import('../../services/memory/memoryDatabase')
@@ -884,8 +914,22 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
 
   ipcMain.handle('memory:consolidate', async () => {
     try {
-      const { memoryDatabase } = await import('../../services/memory/memoryDatabase')
-      return { success: true, result: memoryDatabase.consolidate(50) }
+      const { ONBOARDING_PROFILE_UIDS, memoryDatabase } = await import('../../services/memory/memoryDatabase')
+      let profileBuilt = false
+      let profileBuildError = ''
+      const hasOnboardingProfile = ONBOARDING_PROFILE_UIDS.some((uid) => memoryDatabase.getMemoryItemByUid(uid))
+      if (hasOnboardingProfile) {
+        try {
+          const { resolveProviderConfig } = await import('../../services/agent/resolveProviderConfig')
+          const { buildOnboardingUserProfileMemory } = await import('../../services/agent/tools/memory')
+          const buildResult = await buildOnboardingUserProfileMemory(resolveProviderConfig())
+          profileBuilt = buildResult.built
+          profileBuildError = buildResult.reason || ''
+        } catch (error) {
+          profileBuildError = error instanceof Error ? error.message : String(error)
+        }
+      }
+      return { success: true, result: { ...memoryDatabase.consolidate(50), profileBuilt, ...(profileBuildError ? { profileBuildError } : {}) } }
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) }
     }

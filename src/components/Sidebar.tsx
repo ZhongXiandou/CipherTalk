@@ -1,4 +1,4 @@
-import { useState, type ReactElement, type CSSProperties, type Key } from 'react'
+import { useEffect, useState, type ReactElement, type CSSProperties, type Key } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Avatar, Button, ScrollShadow, Separator, Tabs, Tooltip } from '@heroui/react'
 import { Home, MessageSquare, Database, Settings, SquareChevronLeft, SquareChevronRight, Download, Aperture, Network, FileAudio, Bot, PawPrint } from 'lucide-react'
@@ -35,7 +35,7 @@ type ActionItem = {
 
 type NavItemConfig = RouteItem | ActionItem
 
-function Sidebar() {
+function Sidebar({ autoCollapse = false }: { autoCollapse?: boolean }) {
   const location = useLocation()
   const navigate = useNavigate()
   const userInfo = useAppStore(state => state.userInfo)
@@ -46,6 +46,10 @@ function Sidebar() {
   const userInitial = userDisplayName.slice(0, 1).toUpperCase()
 
   const isActive = (path: string) => location.pathname === path
+
+  useEffect(() => {
+    if (autoCollapse) setCollapsed(true)
+  }, [autoCollapse])
 
   const openChatWindow = async () => {
     try {

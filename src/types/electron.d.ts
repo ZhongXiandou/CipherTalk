@@ -1206,9 +1206,10 @@ export interface ElectronAPI {
     migrationStatus: () => Promise<{ success: boolean; status?: MemoryMigrationStatusInfo; error?: string }>
     migrateLegacy: () => Promise<{ success: boolean; result?: MemoryMigrationResultInfo; error?: string }>
     list: (opts?: { sourceType?: 'profile' | 'fact' | 'relationship'; sourceTypes?: Array<'profile' | 'fact' | 'relationship'>; sessionId?: string; tags?: string[]; withoutTags?: string[]; minConfidence?: number; limit?: number }) => Promise<{ success: boolean; items?: AgentMemoryItem[]; stats?: { itemCount: number }; error?: string }>
+    create: (payload: { memoryUid?: string; sourceType?: 'profile' | 'fact' | 'relationship'; content?: string; title?: string; importance?: number; confidence?: number; tags?: string[] }) => Promise<{ success: boolean; item?: AgentMemoryItem; error?: string }>
     delete: (id: number) => Promise<{ success: boolean; error?: string }>
     update: (payload: { id: number; sourceType?: 'profile' | 'fact' | 'relationship'; content?: string; importance?: number; confidence?: number; tags?: string[] }) => Promise<{ success: boolean; item?: AgentMemoryItem; error?: string }>
-    consolidate: () => Promise<{ success: boolean; result?: { removed: number; groups: number; scanned: number }; error?: string }>
+    consolidate: () => Promise<{ success: boolean; result?: { removed: number; groups: number; scanned: number; profileBuilt?: boolean; profileBuildError?: string }; error?: string }>
     exportMarkdown: (outputDir: string) => Promise<{ success: boolean; result?: { files: string[]; itemCount: number }; error?: string }>
   }
   embedding: {

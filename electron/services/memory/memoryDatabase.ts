@@ -76,6 +76,14 @@ const META_FILE = 'META.md'
 const ITEMS_DIR = 'items'
 const SELF_REFERENCE_DIR = 'ct-self-reference'
 const LEGACY_SELF_REFERENCE_DIR = `${'co'}${'la'}-self-reference`
+export const AI_USER_PROFILE_UID = 'profile:ai-user-profile'
+export const ONBOARDING_PROFILE_UIDS = [
+  'profile:user-name',
+  'profile:energy-focus',
+  'profile:coping-pattern',
+  'profile:interaction-preference'
+]
+const ONBOARDING_PROFILE_UID_SET = new Set(ONBOARDING_PROFILE_UIDS)
 
 export type MarkdownMemoryRetrievalMode = 'fact' | 'recent' | 'topic'
 
@@ -176,6 +184,36 @@ function safeFileSegment(value: string): string {
 
 function markdownEscape(value: string): string {
   return String(value || '').replace(/\r\n/g, '\n').trim()
+}
+
+function inlineMarkdown(value: string): string {
+  return markdownEscape(value).replace(/\s+/g, ' ').trim()
+}
+
+function stripSentenceEnd(value: string): string {
+  return inlineMarkdown(value).replace(/[。！？.!?]+$/g, '').trim()
+}
+
+function extractMemoryValue(content: string, prefix: string, quotedPattern?: RegExp): string {
+  const text = stripSentenceEnd(content)
+  const quoted = quotedPattern?.exec(text)
+  if (quoted?.[1]) return inlineMarkdown(quoted[1])
+  if (text.startsWith(prefix)) return stripSentenceEnd(text.slice(prefix.length))
+  return text
+}
+
+function tableCell(value: string): string {
+  return inlineMarkdown(value).replace(/\|/g, '\\|')
+}
+
+function normalizeUserProfileMarkdown(value: string): string {
+  const text = markdownEscape(value)
+    .replace(/\n## 事实表[\s\S]*$/u, '')
+    .replace(/\n## 其他画像线索[\s\S]*$/u, '')
+    .replace(/\n## 当前状态[\s\S]*$/u, '')
+    .trim()
+  if (!text) return ''
+  return text.startsWith('# ') ? text : `# 用户档案\n\n${text}`
 }
 
 function formatDateTime(ms = nowMs()): string {
@@ -529,26 +567,71 @@ export class MemoryDatabase {
       ''
     ].join('\n'), 'utf8')
 
-    const profileRows = items
+    const aiProfileItem = items.find((item) => item.memoryUid === AI_USER_PROFILE_UID)
+    const aiProfileMarkdown = aiProfileItem ? normalizeUserProfileMarkdown(aiProfileItem.content) : ''
+    const visibleItems = items.filter((item) => item.memoryUid !== AI_USER_PROFILE_UID)
+    const profileItems = visibleItems
       .filter((item) => item.sourceType === 'profile' || item.sourceType === 'fact' || item.sourceType === 'relationship')
-      .map((item) => `| ${item.sourceType}-${item.id} | ${markdownEscape(item.content).replace(/\|/g, '\\|')} | ${item.confidence.toFixed(2)} | ${item.tags.join(',') || 'memory-bank'} | ${formatDate(item.updatedAt)} |`)
+    const profileByUid = new Map(profileItems.map((item) => [item.memoryUid, item]))
+    const nameItem = profileByUid.get('profile:user-name')
+    const energyItem = profileByUid.get('profile:energy-focus')
+    const copingItem = profileByUid.get('profile:coping-pattern')
+    const interactionItem = profileByUid.get('profile:interaction-preference')
+    const onboardingItems = [nameItem, energyItem, copingItem, interactionItem].filter((item): item is MemoryItem => Boolean(item))
+    const firstProfileAt = onboardingItems.length
+      ? Math.min(...onboardingItems.map((item) => item.createdAt))
+      : null
+    const name = nameItem
+      ? extractMemoryValue(nameItem.content, '用户的名字是')
+      : '（待填写）'
+    const energy = energyItem
+      ? extractMemoryValue(energyItem.content, '', /主要被「(.+)」占着/)
+      : '（待填写）'
+    const coping = copingItem
+      ? extractMemoryValue(copingItem.content, '用户遇到计划被打乱、期待落空等脱轨时刻时，常见应对方式是：')
+      : '（待填写）'
+    const interaction = interactionItem
+      ? extractMemoryValue(interactionItem.content, '用户希望与 AI 的互动感觉是：')
+      : '（待填写）'
+    const profileRows = profileItems
+      .map((item) => `| ${item.sourceType}-${item.id} | ${tableCell(item.content)} | ${item.confidence.toFixed(2)} | ${tableCell(item.tags.join(',') || 'memory-bank')} | ${formatDate(item.updatedAt)} |`)
+    const otherProfileClues = profileItems
+      .filter((item) => !ONBOARDING_PROFILE_UID_SET.has(item.memoryUid))
+      .slice(0, 20)
+      .map(formatItem)
+    const structuredProfile = aiProfileMarkdown
+      ? aiProfileMarkdown.split('\n')
+      : [
+          '# 用户档案',
+          '',
+          '## 基本信息',
+          `- 名字：${name}${nameItem ? '（首次记忆引导中主动告知）。' : '。'}`,
+          `- 首次建档：${firstProfileAt ? formatDate(firstProfileAt) : '（日期）'}。`,
+          '- 记忆来源：AI 助手首次记忆引导。',
+          '',
+          '## 日常状态',
+          `- 精力去向：${energy}${energyItem ? '。' : ''}`,
+          '',
+          '## 性格与应对',
+          `- 应对模式：${coping}${copingItem ? '。' : ''}`,
+          '',
+          '## 交互偏好',
+          `- 偏好：${interaction}${interactionItem ? '。' : ''}`,
+          ''
+        ]
     writeFileSync(join(root, SELF_REFERENCE_DIR, 'user-profile.md'), [
-      '# 用户档案',
-      '',
-      '## 基本信息',
-      '- 名字：（待填写）',
-      '- 首次对话：（日期）',
+      ...structuredProfile,
       '',
       '## 事实表',
       '| Key | Value | 置信度 | 来源 | 更新日期 |',
       '|-----|-------|--------|------|---------|',
       ...profileRows,
       '',
-      '## 性格画像',
-      ...items.filter((item) => item.sourceType === 'profile').slice(0, 20).map(formatItem),
+      '## 其他画像线索',
+      ...(otherProfileClues.length ? otherProfileClues : ['暂无。']),
       '',
       '## 当前状态',
-      ...items.slice(0, 20).map(formatItem),
+      ...visibleItems.slice(0, 20).map(formatItem),
       ''
     ].join('\n'), 'utf8')
   }
@@ -672,6 +755,7 @@ export class MemoryDatabase {
       { title: 'MEMORY.md', path: join(root, 'MEMORY.md') },
       { title: 'user-profile.md', path: join(root, SELF_REFERENCE_DIR, 'user-profile.md') },
       { title: 'relationship.md', path: join(root, SELF_REFERENCE_DIR, 'relationship.md') },
+      { title: 'soul.md', path: join(root, SELF_REFERENCE_DIR, 'soul.md') },
     ]
     const parts: string[] = ['# 记忆唤醒']
     for (const file of files) {
@@ -875,6 +959,7 @@ export class MemoryDatabase {
         if (this.deleteMemoryItem(victim.id)) removed += 1
       }
     }
+    this.syncDerivedMarkdown()
     return { removed, semanticRemoved: 0, groups: groups.size, scanned: all.length }
   }
 
