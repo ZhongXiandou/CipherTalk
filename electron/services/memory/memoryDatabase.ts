@@ -78,6 +78,15 @@ export type MemoryMigrationStatus = {
 export type MemoryMigrationResult = MemoryMigrationStatus & {
   success: boolean
   deletedFiles: string[]
+  deleteErrors?: string[]
+  skippedItemCount?: number
+}
+
+type MemoryItemIndex = {
+  byUid: Map<string, MemoryItem>
+  fileById: Map<number, string>
+  maxId: number
+  itemCount: number
 }
 
 const MEMORY_BANK_DIR = 'memory-bank'
@@ -486,6 +495,33 @@ export class MemoryDatabase {
     return join(this.ensureBank(), ITEMS_DIR, this.itemFileName(item))
   }
 
+  private itemFiles(): string[] {
+    const itemsDir = join(this.ensureBank(), ITEMS_DIR)
+    return readdirSync(itemsDir)
+      .filter((name) => name.endsWith('.md'))
+      .map((name) => join(itemsDir, name))
+  }
+
+  private countItemFiles(): number {
+    return this.itemFiles().length
+  }
+
+  private readItemIndex(): MemoryItemIndex {
+    const byUid = new Map<string, MemoryItem>()
+    const fileById = new Map<number, string>()
+    let maxId = 0
+    let itemCount = 0
+    for (const filePath of this.itemFiles()) {
+      const item = this.parseItemFile(filePath)
+      if (!item || item.id <= 0) continue
+      itemCount += 1
+      maxId = Math.max(maxId, item.id)
+      byUid.set(item.memoryUid, item)
+      fileById.set(item.id, filePath)
+    }
+    return { byUid, fileById, maxId, itemCount }
+  }
+
   private parseItemFile(filePath: string): MemoryItem | null {
     try {
       const raw = readFileSync(filePath, 'utf8')
@@ -520,10 +556,9 @@ export class MemoryDatabase {
     }
   }
 
-  private writeItem(item: MemoryItem): void {
+  private writeItemFile(item: MemoryItem, existingFilePath?: string | null): string {
     const filePath = this.itemFilePath(item)
-    const existing = this.findItemFileById(item.id)
-    if (existing && existing !== filePath) unlinkSync(existing)
+    if (existingFilePath && existingFilePath !== filePath && existsSync(existingFilePath)) unlinkSync(existingFilePath)
     const meta: Record<string, unknown> = {
       id: item.id,
       memoryUid: item.memoryUid,
@@ -556,6 +591,12 @@ export class MemoryDatabase {
       item.content.trim(),
       ''
     ].join('\n'), 'utf8')
+    return filePath
+  }
+
+  private writeItem(item: MemoryItem): void {
+    const existing = this.findItemFileById(item.id)
+    this.writeItemFile(item, existing)
     this.syncDerivedMarkdown()
   }
 
@@ -1008,7 +1049,7 @@ export class MemoryDatabase {
   }
 
   getStats(): MemoryDatabaseStats {
-    return { itemCount: this.listMemoryItems({ limit: 10000 }).length }
+    return { itemCount: this.countItemFiles() }
   }
 
   exportMarkdown(outputDir: string): MemoryMarkdownExportResult {
@@ -1137,42 +1178,93 @@ export class MemoryDatabase {
   getMigrationStatus(): MemoryMigrationStatus {
     const legacyDbPath = this.getDbPath()
     const memoryBankPath = this.getMemoryBankPath()
+    const migratedItemCount = this.getStats().itemCount
     if (!existsSync(legacyDbPath)) {
-      return { needed: false, legacyDbPath, memoryBankPath, itemCount: 0, migratedItemCount: this.getStats().itemCount }
+      return { needed: false, legacyDbPath, memoryBankPath, itemCount: 0, migratedItemCount }
     }
     try {
       const db = new Database(legacyDbPath, { readonly: true, fileMustExist: true })
       try {
         const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_items'").get()
-        if (!row) return { needed: false, legacyDbPath, memoryBankPath, itemCount: 0, migratedItemCount: this.getStats().itemCount }
+        if (!row) return { needed: false, legacyDbPath, memoryBankPath, itemCount: 0, migratedItemCount }
         const countRow = db.prepare('SELECT COUNT(*) AS count FROM memory_items').get() as { count: number } | undefined
         const itemCount = Number(countRow?.count || 0)
-        return { needed: itemCount > 0, legacyDbPath, memoryBankPath, itemCount, migratedItemCount: this.getStats().itemCount }
+        const meta = this.readMeta()
+        const migratedLegacyCount = Number(meta.migratedLegacyItemCount || 0)
+        const migratedSameDb = !meta.migratedLegacyDbPath || meta.migratedLegacyDbPath === legacyDbPath
+        const completedMigration = meta.migratedLegacyDb === 'true' && migratedSameDb && (
+          migratedLegacyCount >= itemCount || (!migratedLegacyCount && migratedItemCount >= itemCount)
+        )
+        return { needed: itemCount > 0 && !completedMigration, legacyDbPath, memoryBankPath, itemCount, migratedItemCount }
       } finally {
         db.close()
       }
     } catch (e) {
-      return { needed: false, legacyDbPath, memoryBankPath, itemCount: 0, migratedItemCount: this.getStats().itemCount, error: e instanceof Error ? e.message : String(e) }
+      return { needed: false, legacyDbPath, memoryBankPath, itemCount: 0, migratedItemCount, error: e instanceof Error ? e.message : String(e) }
     }
   }
 
   migrateLegacyDatabase(): MemoryMigrationResult {
     const status = this.getMigrationStatus()
     const deletedFiles: string[] = []
+    const deleteErrors: string[] = []
+    let skippedItemCount = 0
     if (!status.needed) return { ...status, success: true, deletedFiles }
 
     const db = new Database(status.legacyDbPath, { readonly: true, fileMustExist: true })
     try {
       const rows = db.prepare('SELECT * FROM memory_items ORDER BY created_at ASC, id ASC').all() as MemoryItemRow[]
+      const index = this.readItemIndex()
+      const meta = this.readMeta()
+      let lastId = Math.max(index.maxId, Math.floor(Number(meta.lastId || 0)))
+
       for (const row of rows) {
         const input = rowToInput(row)
-        const item = this.upsertMemoryItem(input)
-        const createdAt = Number(row.created_at || item.createdAt)
-        const updatedAt = Number(row.updated_at || item.updatedAt)
-        this.writeItem({ ...item, createdAt, updatedAt })
+        const memoryUid = String(input.memoryUid || '').trim()
+        const content = String(input.content || '').trim()
+        if (!memoryUid || !content) {
+          skippedItemCount += 1
+          continue
+        }
+        const existing = index.byUid.get(memoryUid)
+        const id = existing?.id ?? ++lastId
+        const title = String(input.title || content.slice(0, 40))
+        const timestamp = nowMs()
+        const item: MemoryItem = {
+          id,
+          memoryUid,
+          sourceType: safeSourceType(input.sourceType),
+          sessionId: normalizeNullableText(input.sessionId),
+          contactId: normalizeNullableText(input.contactId),
+          groupId: normalizeNullableText(input.groupId),
+          title,
+          content,
+          contentHash: input.contentHash || hashMemoryContent(title, content),
+          entities: parseStringArray(input.entities),
+          tags: parseStringArray(input.tags),
+          importance: normalizeNumber(input.importance, 0),
+          confidence: clamp01(input.confidence, 1),
+          timeStart: input.timeStart ?? null,
+          timeEnd: input.timeEnd ?? null,
+          sourceRefs: parseEvidenceRefs(input.sourceRefs),
+          createdAt: Number(row.created_at || existing?.createdAt || timestamp),
+          updatedAt: Number(row.updated_at || timestamp)
+        }
+        const filePath = this.writeItemFile(item, index.fileById.get(id))
+        index.byUid.set(memoryUid, item)
+        index.fileById.set(id, filePath)
       }
-      this.writeMeta({ migratedLegacyDb: true, migratedAt: new Date().toISOString() })
-      this.appendBookmark(`从旧版 ${MEMORY_DB_NAME} 迁移 ${rows.length} 条长期记忆。`)
+
+      this.syncDerivedMarkdown()
+      this.writeMeta({
+        lastId,
+        migratedLegacyDb: true,
+        migratedLegacyDbPath: status.legacyDbPath,
+        migratedLegacyItemCount: status.itemCount,
+        migratedAt: new Date().toISOString()
+      })
+      const skippedText = skippedItemCount > 0 ? `，跳过 ${skippedItemCount} 条无效记录` : ''
+      this.appendBookmark(`从旧版 ${MEMORY_DB_NAME} 迁移 ${rows.length - skippedItemCount} 条长期记忆${skippedText}。`)
     } finally {
       db.close()
     }
@@ -1184,8 +1276,12 @@ export class MemoryDatabase {
       `${status.legacyDbPath}-journal`
     ]) {
       if (!existsSync(file)) continue
-      rmSync(file, { force: true })
-      deletedFiles.push(file)
+      try {
+        rmSync(file, { force: true })
+        deletedFiles.push(file)
+      } catch (e) {
+        deleteErrors.push(`${file}: ${e instanceof Error ? e.message : String(e)}`)
+      }
     }
 
     const next = this.getMigrationStatus()
@@ -1195,7 +1291,9 @@ export class MemoryDatabase {
       needed: false,
       itemCount: status.itemCount,
       migratedItemCount: this.getStats().itemCount,
-      deletedFiles
+      deletedFiles,
+      ...(deleteErrors.length > 0 ? { deleteErrors } : {}),
+      ...(skippedItemCount > 0 ? { skippedItemCount } : {})
     }
   }
 }

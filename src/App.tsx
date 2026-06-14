@@ -101,6 +101,7 @@ function App() {
   const [memoryMigrationStatus, setMemoryMigrationStatus] = useState<MemoryMigrationStatusInfo | null>(null)
   const [memoryMigrating, setMemoryMigrating] = useState(false)
   const [memoryMigrationError, setMemoryMigrationError] = useState('')
+  const [memoryMigrationDismissed, setMemoryMigrationDismissed] = useState(false)
 
   const formatSpeed = (bytesPerSecond: number) => {
     if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return '计算中'
@@ -376,7 +377,7 @@ function App() {
   const isWelcomeWindow = location.pathname === '/welcome-window'
 
   useEffect(() => {
-    if (isChatWindow || isMomentsWindow || isAgreementWindow || isWelcomeWindow || location.pathname === '/splash') return
+    if (memoryMigrationDismissed || isChatWindow || isMomentsWindow || isAgreementWindow || isWelcomeWindow || location.pathname === '/splash') return
     let cancelled = false
     const checkMemoryMigration = async () => {
       try {
@@ -392,7 +393,13 @@ function App() {
     }
     void checkMemoryMigration()
     return () => { cancelled = true }
-  }, [isAgreementWindow, isChatWindow, isMomentsWindow, isWelcomeWindow, location.pathname])
+  }, [isAgreementWindow, isChatWindow, isMomentsWindow, isWelcomeWindow, location.pathname, memoryMigrationDismissed])
+
+  const handleDismissMemoryMigration = () => {
+    setMemoryMigrationDismissed(true)
+    setMemoryMigrationStatus(null)
+    setMemoryMigrationError('')
+  }
 
   const handleMigrateMemory = async () => {
     setMemoryMigrating(true)
@@ -401,7 +408,9 @@ function App() {
       const res = await window.electronAPI.memory.migrateLegacy()
       if (res.success && res.result?.success) {
         setMemoryMigrationStatus(null)
-        toast.success(`已迁移 ${res.result.itemCount} 条记忆`)
+        const skippedCount = res.result.skippedItemCount || 0
+        const skippedText = skippedCount > 0 ? `，跳过 ${skippedCount} 条无效记录` : ''
+        toast.success(`已迁移 ${Math.max(0, res.result.itemCount - skippedCount)} 条记忆${skippedText}`)
       } else {
         setMemoryMigrationError(res.error || '迁移失败')
       }
@@ -694,11 +703,13 @@ function App() {
       <TitleBar showTitle={false} />
       {memoryMigrationStatus?.needed && (
         <Modal.Backdrop
-          isDismissable={false}
-          isKeyboardDismissDisabled
+          isDismissable={!memoryMigrating}
+          isKeyboardDismissDisabled={memoryMigrating}
           isOpen
           variant="blur"
-          onOpenChange={() => undefined}
+          onOpenChange={(open) => {
+            if (!open && !memoryMigrating) handleDismissMemoryMigration()
+          }}
         >
           <Modal.Container placement="center" scroll="inside" size="lg">
             <Modal.Dialog className="sm:max-w-170">
@@ -713,7 +724,7 @@ function App() {
               </Modal.Header>
               <Modal.Body>
                 <Typography.Paragraph color="muted" size="sm">
-                  检测到旧版记忆库里有 {memoryMigrationStatus.itemCount} 条记忆。新版会迁移到缓存目录下的 memory-bank Markdown 文件夹，迁移完成后自动删除旧版记忆数据库文件。
+                  检测到旧版记忆库里有 {memoryMigrationStatus.itemCount} 条记忆。新版会迁移到缓存目录下的 memory-bank Markdown 文件夹，迁移完成后会尝试删除旧版记忆数据库文件。
                 </Typography.Paragraph>
                 <div className="grid gap-2 rounded-lg bg-surface p-3 text-xs text-muted">
                   <div className="break-all">旧库：{memoryMigrationStatus.legacyDbPath}</div>
@@ -726,6 +737,9 @@ function App() {
                 )}
               </Modal.Body>
               <Modal.Footer className="justify-end">
+                <Button isDisabled={memoryMigrating} type="button" variant="tertiary" onPress={handleDismissMemoryMigration}>
+                  稍后
+                </Button>
                 <Button isPending={memoryMigrating} type="button" variant="primary" onPress={() => void handleMigrateMemory()}>
                   {memoryMigrating ? '迁移中...' : '开始迁移'}
                 </Button>
