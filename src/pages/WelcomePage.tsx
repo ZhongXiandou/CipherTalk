@@ -1,11 +1,13 @@
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Alert,
   Button,
   Card,
   Chip,
+  ComboBox,
   Description,
+  Input,
   InputGroup,
   Label,
   ListBox,
@@ -81,6 +83,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
     platform: 'win32',
     arch: 'x64'
   })
+  const autoDetectDbPathAttemptedRef = useRef(false)
 
   const isMac = platformInfo.platform === 'darwin'
   const biometricLabel = isMac ? 'Touch ID' : 'Windows Hello'
@@ -224,10 +227,11 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
   useEffect(() => {
     if (currentStep.id !== 'db') return
     if (dbPath) return
-    if (isDetectingPath) return
+    if (autoDetectDbPathAttemptedRef.current) return
 
+    autoDetectDbPathAttemptedRef.current = true
     void handleAutoDetectPath(true)
-  }, [currentStep.id, dbPath, isDetectingPath])
+  }, [currentStep.id, dbPath])
 
   const handleOpenGuide = () => {
     void window.electronAPI.shell.openExternal(GUIDE_URL)
@@ -806,9 +810,11 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         description: isMac ? '请选择微信版本目录或账号根目录。' : '请选择微信-设置-存储位置对应的目录。'
       })}
       <div className="flex flex-wrap items-center gap-2.5">
-        <Button type="button" variant="primary" onPress={() => void handleAutoDetectPath()} isPending={isDetectingPath}>
-          {isDetectingPath ? <Spinner size="sm" color="current" /> : <Wand2 size={16} />}
-          {isDetectingPath ? '自动检测中' : '自动检测'}
+        <Button className="min-w-[132px] justify-center" type="button" variant="primary" onPress={() => void handleAutoDetectPath()} isPending={isDetectingPath}>
+          <span className="grid size-4 shrink-0 place-items-center">
+            {isDetectingPath ? <Spinner size="sm" color="current" /> : <Wand2 size={16} />}
+          </span>
+          <span className="min-w-[5em] text-left">{isDetectingPath ? '自动检测中' : '自动检测'}</span>
         </Button>
         <Button type="button" variant="secondary" onPress={() => void handleSelectPath()}>
           <FolderOpen size={16} /> 浏览选择目录
@@ -842,48 +848,66 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
 
   const renderKeyStep = () => (
     <div className="flex min-w-0 flex-col gap-3.5">
-      {renderTextField('账号目录', wxid, (value) => {
-        setWxid(value)
-        setIsAccountVerified(false)
-      }, {
-        placeholder: '获取密钥后将自动填充',
-        description: (
-          <span className="inline-flex items-center gap-2">
+      <ComboBox
+        allowsCustomValue
+        className="w-full"
+        defaultFilter={() => true}
+        fullWidth
+        inputValue={wxid}
+        menuTrigger="manual"
+        selectedKey={wxidOptions.includes(wxid) ? wxid : null}
+        onInputChange={(value) => {
+          setWxid(value.trim())
+          setIsAccountVerified(false)
+        }}
+        onSelectionChange={(key) => {
+          if (key != null) handleSelectWxidCandidate(String(key))
+        }}
+      >
+        <Label>账号目录</Label>
+        <ComboBox.InputGroup>
+          <Input placeholder="获取密钥后将自动填充" />
+          {wxidOptions.length > 0 && <ComboBox.Trigger />}
+        </ComboBox.InputGroup>
+        <Description>
+          <span className="inline-flex flex-wrap items-center gap-2">
             状态：
             <Chip size="sm" variant="soft" color={isAccountVerified ? 'success' : 'warning'}>
               <Chip.Label>{isAccountVerified ? '已验证' : '未验证'}</Chip.Label>
             </Chip>
+            {wxidOptions.length > 0 && (
+              <span className="text-muted">检测到 {wxidOptions.length} 个候选，可展开选择。</span>
+            )}
           </span>
-        )
-      })}
-
-      {wxidOptions.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <Typography.Paragraph size="xs" color="muted">候选账号目录</Typography.Paragraph>
-          <ScrollShadow hideScrollBar className="max-h-44 rounded-lg border border-border">
-            <ListBox
-              aria-label="候选账号目录"
-              selectionMode="single"
-              selectedKeys={wxid ? [wxid] : []}
-              onSelectionChange={(keys) => {
-                if (keys === 'all') return
-                const selectedWxid = Array.from(keys)[0]
-                if (selectedWxid != null) handleSelectWxidCandidate(String(selectedWxid))
-              }}
-            >
+        </Description>
+        {wxidOptions.length > 0 && (
+          <ComboBox.Popover className="max-h-56 overflow-auto" placement="bottom start">
+            <ListBox aria-label="候选账号目录">
               {wxidOptions.map((id) => (
                 <ListBox.Item key={id} id={id} textValue={id}>
-                  <div className="flex min-w-0 flex-col">
-                    <Label className="truncate">{id}</Label>
-                    <Description>{wxid === id ? '当前选择' : '点击选择并验证'}</Description>
+                  <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
+                    <FolderOpen size={16} />
                   </div>
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <Label className="truncate">{id}</Label>
+                    <Description>
+                      {wxid === id
+                        ? isAccountVerified ? '已验证，可继续下一步' : '当前选择，等待验证'
+                        : decryptKey.length === 64 ? '选择后自动验证' : '选择后填入密钥再验证'}
+                    </Description>
+                  </div>
+                  {wxid === id && (
+                    <Chip color={isAccountVerified ? 'success' : 'warning'} variant="soft" size="sm" className="shrink-0">
+                      <Chip.Label>{isAccountVerified ? '已验证' : '当前'}</Chip.Label>
+                    </Chip>
+                  )}
                   <ListBox.ItemIndicator />
                 </ListBox.Item>
               ))}
             </ListBox>
-          </ScrollShadow>
-        </div>
-      )}
+          </ComboBox.Popover>
+        )}
+      </ComboBox>
 
       <div className="flex flex-wrap items-center gap-2.5">
         <Button

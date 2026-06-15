@@ -776,14 +776,20 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
         return welcomeWindow
       }
 
+      const isDark = nativeTheme.shouldUseDarkColors
       welcomeWindow = new BrowserWindow({
         width: 1100,
         height: 760,
         minWidth: 900,
         minHeight: 640,
-        frame: true,
+        titleBarStyle: 'hidden',
+        titleBarOverlay: {
+          color: '#00000000',
+          symbolColor: isDark ? '#FFFFFF' : '#333333',
+          height: 40
+        },
         transparent: false,
-        backgroundColor: nativeTheme.shouldUseDarkColors ? '#1A1A1A' : '#FFFFFF',
+        backgroundColor: isDark ? '#1A1A1A' : '#FFFFFF',
         hasShadow: true,
         autoHideMenuBar: true,
         ...getWindowIconOptions(ctx),

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, Card, Description, InputGroup, Label, ListBox, Modal, NumberField, Popover, ScrollShadow, Spinner, TextField, Toolbar } from '@heroui/react'
+import { Button, Card, Description, InputGroup, Label, ListBox, Modal, Popover, ScrollShadow, Spinner, TextField, TimeField, Toolbar } from '@heroui/react'
+import { Time } from '@internationalized/date'
 import { BookOpen, Check, Clock3, Copy, Download, PenLine, RefreshCw, RotateCcw, Save, Settings, Trash2, Type } from 'lucide-react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -21,6 +22,10 @@ type DiaryExportMemoryMode = 'with-memory' | 'without-memory'
 type DiarySettingsDraft = {
   summaryHour: number
   customPrompt: string
+}
+
+function toDiarySummaryTime(hour: number): Time {
+  return new Time(normalizeDiarySummaryHour(hour), 0)
 }
 
 function formatDiaryDate(date: string): string {
@@ -657,27 +662,31 @@ export default function DiaryPage() {
                       </div>
                     )}
 
-                    <NumberField
-                      aria-label="自动总结时间"
-                      className="w-full"
-                      maxValue={23}
-                      minValue={0}
-                      step={1}
-                      value={settingsDraft.summaryHour}
-                      variant="secondary"
-                      onChange={(value) => updateSettingsDraft({ summaryHour: normalizeDiarySummaryHour(value) })}
+                    <TimeField
+                      fullWidth
+                      granularity="hour"
+                      hourCycle={24}
+                      maxValue={new Time(23, 0)}
+                      minValue={new Time(0, 0)}
+                      shouldForceLeadingZeros
+                      value={toDiarySummaryTime(settingsDraft.summaryHour)}
+                      onChange={(value) => {
+                        if (value) updateSettingsDraft({ summaryHour: normalizeDiarySummaryHour(value.hour) })
+                      }}
                     >
                       <Label>自动总结时间</Label>
-                      <NumberField.Group>
-                        <NumberField.DecrementButton />
-                        <NumberField.Input />
-                        <NumberField.IncrementButton />
-                      </NumberField.Group>
+                      <TimeField.Group fullWidth variant="secondary">
+                        <TimeField.Prefix>
+                          <Clock3 className="size-4 text-muted-foreground" />
+                        </TimeField.Prefix>
+                        <TimeField.Input>
+                          {(segment) => <TimeField.Segment segment={segment} />}
+                        </TimeField.Input>
+                      </TimeField.Group>
                       <Description className="flex items-center gap-1.5">
-                        <Clock3 className="size-3.5" />
                         每天 {String(settingsDraft.summaryHour).padStart(2, '0')}:00 后整理当天内容。
                       </Description>
-                    </NumberField>
+                    </TimeField>
 
                     <TextField
                       fullWidth
