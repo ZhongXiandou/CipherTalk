@@ -6,6 +6,7 @@ import DOMPurify from 'dompurify'
 import type { MemoryDiaryEntryInfo } from '../types/electron'
 
 type DiaryFontMode = 'hand' | 'song' | 'native'
+type DiaryExportMemoryMode = 'with-memory' | 'without-memory'
 
 function formatDiaryDate(date: string): string {
   const [year, month, day] = date.split('-')
@@ -51,6 +52,194 @@ const DIARY_FONT_OPTIONS: Array<{ id: DiaryFontMode; label: string }> = [
   { id: 'native', label: '原生' },
 ]
 
+const DIARY_EXPORT_MEMORY_OPTIONS: Array<{ id: DiaryExportMemoryMode; label: string }> = [
+  { id: 'with-memory', label: '包含记忆线索' },
+  { id: 'without-memory', label: '不含记忆线索' },
+]
+
+const DIARY_EXPORT_WATERMARK_SRC = '/About.png'
+const DIARY_EXPORT_WATERMARK_HEIGHT = 68
+
+let diaryExportWatermarkDataUrl: string | null = null
+
+function cssPx(value: string): number {
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function isMemoryClueHeading(element: HTMLElement): boolean {
+  return /^H[1-6]$/u.test(element.tagName) && element.textContent?.replace(/\s+/g, '') === '记忆线索'
+}
+
+function getDiaryPageExportChildren(page: HTMLElement, includeMemoryClues: boolean): HTMLElement[] {
+  const children = Array.from(page.children).filter((child): child is HTMLElement => child instanceof HTMLElement)
+  if (includeMemoryClues) return children
+
+  const memoryIndex = children.findIndex(isMemoryClueHeading)
+  return memoryIndex >= 0 ? children.slice(0, memoryIndex) : children
+}
+
+function removeMemoryClueSection(page: HTMLElement): void {
+  const children = Array.from(page.children).filter((child): child is HTMLElement => child instanceof HTMLElement)
+  const memoryIndex = children.findIndex(isMemoryClueHeading)
+  if (memoryIndex < 0) return
+  children.slice(memoryIndex).forEach((child) => child.remove())
+}
+
+function readBlobAsDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.addEventListener('load', () => resolve(String(reader.result || '')))
+    reader.addEventListener('error', () => reject(reader.error || new Error('读取水印图片失败')))
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function loadDiaryExportWatermarkSrc(): Promise<string> {
+  if (diaryExportWatermarkDataUrl) return diaryExportWatermarkDataUrl
+  const res = await fetch(DIARY_EXPORT_WATERMARK_SRC)
+  if (!res.ok) throw new Error('读取水印图片失败')
+  diaryExportWatermarkDataUrl = await readBlobAsDataUrl(await res.blob())
+  return diaryExportWatermarkDataUrl
+}
+
+function appendDiaryExportWatermark(container: HTMLElement, src: string): Promise<void> {
+  const watermark = container.ownerDocument.createElement('div')
+  const image = container.ownerDocument.createElement('img')
+
+  watermark.className = 'diary-export-watermark'
+  watermark.style.alignItems = 'center'
+  watermark.style.display = 'flex'
+  watermark.style.height = '52px'
+  watermark.style.justifyContent = 'center'
+  watermark.style.margin = '16px 0 0'
+  watermark.style.pointerEvents = 'none'
+  watermark.style.position = 'relative'
+  watermark.style.width = '100%'
+  watermark.style.zIndex = '1'
+  image.alt = ''
+  image.className = 'diary-export-watermark-image'
+  image.decoding = 'sync'
+  image.style.display = 'block'
+  image.style.height = '34px'
+  image.style.maxHeight = '34px'
+  image.style.maxWidth = '180px'
+  image.style.objectFit = 'contain'
+  image.style.pointerEvents = 'none'
+  image.style.userSelect = 'none'
+  image.style.width = 'auto'
+  image.src = src
+  watermark.appendChild(image)
+  container.appendChild(watermark)
+
+  if (image.complete) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    image.addEventListener('load', () => resolve(), { once: true })
+    image.addEventListener('error', () => resolve(), { once: true })
+  })
+}
+
+function getDiaryPageContentHeight(page: HTMLElement, includeMemoryClues: boolean): number {
+  const pageStyle = window.getComputedStyle(page)
+  const paddingTop = cssPx(pageStyle.paddingTop)
+  const paddingBottom = cssPx(pageStyle.paddingBottom)
+  const children = getDiaryPageExportChildren(page, includeMemoryClues)
+
+  if (children.length === 0) {
+    return Math.ceil(Math.max(paddingTop + paddingBottom, 1))
+  }
+
+  const contentBottom = children.reduce((bottom, child) => {
+    const childStyle = window.getComputedStyle(child)
+    return Math.max(bottom, child.offsetTop + child.offsetHeight + cssPx(childStyle.marginBottom))
+  }, paddingTop)
+
+  return Math.ceil(Math.max(contentBottom + paddingBottom, paddingTop + paddingBottom, 1))
+}
+
+async function waitForDiaryExportReady(node: HTMLElement): Promise<void> {
+  const imgs = Array.from(node.querySelectorAll('img'))
+  await Promise.all(imgs.map((img) => {
+    if (img.complete) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      img.addEventListener('load', () => resolve(), { once: true })
+      img.addEventListener('error', () => resolve(), { once: true })
+    })
+  }))
+  try { await document.fonts?.ready } catch { /* 忽略字体加载异常，按当前可用字体导出 */ }
+  await new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))
+  })
+}
+
+function getDiaryExportOptions(node: HTMLElement, includeMemoryClues: boolean, watermarkSrc: string) {
+  const rect = node.getBoundingClientRect()
+  const scroll = node.querySelector<HTMLElement>('.diary-reader-scroll')
+  const page = node.querySelector<HTMLElement>('.diary-book-page')
+  const style = window.getComputedStyle(node)
+  const borderX = cssPx(style.borderLeftWidth) + cssPx(style.borderRightWidth)
+  const width = Math.ceil(Math.max(node.clientWidth, rect.width - borderX, 1))
+  const pageContentHeight = page ? getDiaryPageContentHeight(page, includeMemoryClues) : 0
+  const fallbackHeight = Math.max(scroll?.scrollHeight ?? 0, node.scrollHeight, 1)
+  const scrollHeight = Math.ceil(page ? Math.max(pageContentHeight + DIARY_EXPORT_WATERMARK_HEIGHT, 1) : fallbackHeight)
+  const height = scrollHeight
+
+  return {
+    bgcolor: '#f4e7c8',
+    cacheBust: true,
+    filter: (target: Node) => {
+      if (!(target instanceof HTMLElement)) return true
+      return !target.closest('.diary-reader-toolbar, .diary-paper-close')
+    },
+    height,
+    scale: 2,
+    width,
+    style: {
+      height: `${height}px`,
+      margin: '0',
+      maxHeight: 'none',
+      maxWidth: `${width}px`,
+      minWidth: `${width}px`,
+      overflow: 'visible',
+      width: `${width}px`,
+    },
+    onclone: async (clone: HTMLElement) => {
+      clone.classList.add('diary-exporting')
+      clone.style.border = '0'
+      clone.style.borderRadius = '0'
+      clone.style.boxShadow = 'none'
+      clone.style.height = `${height}px`
+      clone.style.maxHeight = 'none'
+      clone.style.overflow = 'visible'
+      clone.style.width = `${width}px`
+      clone.style.minWidth = `${width}px`
+      clone.style.maxWidth = `${width}px`
+
+      const clonedScroll = clone.querySelector<HTMLElement>('.diary-reader-scroll')
+      if (clonedScroll) {
+        clonedScroll.scrollTop = 0
+        clonedScroll.style.borderRadius = '0'
+        clonedScroll.style.boxShadow = 'none'
+        clonedScroll.style.height = `${scrollHeight}px`
+        clonedScroll.style.margin = '0'
+        clonedScroll.style.maxHeight = 'none'
+        clonedScroll.style.overflow = 'visible'
+        clonedScroll.style.setProperty('mask-image', 'none')
+        clonedScroll.style.setProperty('-webkit-mask-image', 'none')
+      }
+
+      const clonedPage = clone.querySelector<HTMLElement>('.diary-book-page')
+      if (clonedPage) {
+        if (!includeMemoryClues) removeMemoryClueSection(clonedPage)
+        await appendDiaryExportWatermark(clonedPage, watermarkSrc)
+        clonedPage.style.height = 'auto'
+        clonedPage.style.margin = '0'
+        clonedPage.style.minHeight = 'auto'
+      }
+    },
+  }
+}
+
 export default function DiaryPage() {
   const [diaries, setDiaries] = useState<MemoryDiaryEntryInfo[]>([])
   const [selectedDate, setSelectedDate] = useState('')
@@ -66,6 +255,7 @@ export default function DiaryPage() {
   const [html, setHtml] = useState('')
   const [readerFont, setReaderFont] = useState<DiaryFontMode>('hand')
   const [fontPopoverOpen, setFontPopoverOpen] = useState(false)
+  const [downloadPopoverOpen, setDownloadPopoverOpen] = useState(false)
   const [copiedDiary, setCopiedDiary] = useState(false)
   const [downloadingDiary, setDownloadingDiary] = useState(false)
   const [deletePopoverDate, setDeletePopoverDate] = useState('')
@@ -196,34 +386,25 @@ export default function DiaryPage() {
     window.setTimeout(() => setCopiedDiary(false), 1200)
   }, [selectedDiary])
 
-  const downloadDiaryImage = useCallback(async () => {
+  const downloadDiaryImage = useCallback(async (memoryMode: DiaryExportMemoryMode = 'with-memory') => {
     const node = diaryExportRef.current
     if (!node || downloadingDiary) return
 
+    const includeMemoryClues = memoryMode === 'with-memory'
+    setDownloadPopoverOpen(false)
     setDownloadingDiary(true)
     try {
-      await document.fonts?.ready
-      await new Promise<void>((resolve) => {
-        window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))
-      })
+      await waitForDiaryExportReady(node)
 
-      const rect = node.getBoundingClientRect()
       const domtoimage = (await import('dom-to-image-more')).default
-      const dataUrl = await domtoimage.toPng(node, {
-        bgcolor: '#f4e7c8',
-        cacheBust: true,
-        filter: (target) => {
-          if (!(target instanceof HTMLElement)) return true
-          return !target.classList.contains('diary-reader-toolbar') && !target.classList.contains('diary-paper-close')
-        },
-        height: Math.ceil(rect.height),
-        scale: 2,
-        width: Math.ceil(rect.width),
-      })
+      const watermarkSrc = await loadDiaryExportWatermarkSrc()
+      const dataUrl = await domtoimage.toPng(node, getDiaryExportOptions(node, includeMemoryClues, watermarkSrc))
       const link = document.createElement('a')
-      link.download = `${selectedDiary?.date || 'diary'}-日记.png`
+      link.download = `${selectedDiary?.date || 'diary'}-日记${includeMemoryClues ? '' : '-不含记忆线索'}.png`
       link.href = dataUrl
+      document.body.appendChild(link)
       link.click()
+      document.body.removeChild(link)
     } catch (err) {
       setError(err instanceof Error ? err.message : '下载日记图片失败')
     } finally {
@@ -422,17 +603,34 @@ export default function DiaryPage() {
                   >
                     {copiedDiary ? <Check className="size-4" /> : <Copy className="size-4" />}
                   </Button>
-                  <Button
-                    isIconOnly
-                    aria-label="下载日记图片"
-                    className="diary-paper-tool-button"
-                    isDisabled={downloadingDiary}
-                    size="sm"
-                    variant="tertiary"
-                    onPress={() => void downloadDiaryImage()}
-                  >
-                    {downloadingDiary ? <Spinner size="sm" /> : <Download className="size-4" />}
-                  </Button>
+                  <Popover isOpen={downloadPopoverOpen} onOpenChange={setDownloadPopoverOpen}>
+                    <Button
+                      isIconOnly
+                      aria-label="下载日记图片"
+                      className="diary-paper-tool-button"
+                      isDisabled={downloadingDiary}
+                      size="sm"
+                      variant="tertiary"
+                    >
+                      {downloadingDiary ? <Spinner size="sm" /> : <Download className="size-4" />}
+                    </Button>
+                    <Popover.Content placement="bottom start" offset={8}>
+                      <Popover.Dialog className="p-1">
+                        <ListBox
+                          aria-label="选择日记图片下载内容"
+                          className="w-44"
+                          selectionMode="none"
+                          onAction={(key) => void downloadDiaryImage(String(key) as DiaryExportMemoryMode)}
+                        >
+                          {DIARY_EXPORT_MEMORY_OPTIONS.map((option) => (
+                            <ListBox.Item key={option.id} id={option.id} textValue={option.label}>
+                              <Label>{option.label}</Label>
+                            </ListBox.Item>
+                          ))}
+                        </ListBox>
+                      </Popover.Dialog>
+                    </Popover.Content>
+                  </Popover>
                 </Toolbar>
               )}
               <Card.Content className="relative z-10 min-h-0 p-0">
@@ -537,6 +735,55 @@ export default function DiaryPage() {
               inset -1.2rem 0 1.8rem -1.8rem rgba(47, 30, 12, 0.38);
             width: 100%;
           }
+          .diary-book-card.diary-exporting {
+            border: 0 !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            margin: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+          }
+          .diary-book-card.diary-exporting::before {
+            filter: none !important;
+          }
+          .diary-book-card.diary-exporting .diary-reader-scroll {
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            margin: 0 !important;
+            mask-image: none !important;
+            max-height: none !important;
+            overflow: visible !important;
+            -webkit-mask-image: none !important;
+          }
+          .diary-book-card.diary-exporting .diary-book-page {
+            margin: 0 !important;
+            min-height: auto !important;
+          }
+          .diary-book-card.diary-exporting .diary-export-watermark {
+            align-items: center;
+            display: flex;
+            height: 52px;
+            justify-content: center;
+            margin: 16px 0 0;
+            pointer-events: none;
+            position: relative;
+            width: 100%;
+            z-index: 1;
+          }
+          .diary-book-card.diary-exporting .diary-export-watermark-image {
+            display: block;
+            height: 34px;
+            max-height: 34px;
+            max-width: 180px;
+            object-fit: contain;
+            pointer-events: none;
+            user-select: none;
+            width: auto;
+          }
+          .diary-book-card.diary-exporting .diary-reader-toolbar,
+          .diary-book-card.diary-exporting .diary-paper-close {
+            display: none !important;
+          }
           .diary-book-page {
             color: #3e3022;
             min-height: calc(100vh - 5rem);
@@ -562,6 +809,11 @@ export default function DiaryPage() {
             max-width: 42rem;
             position: relative;
             z-index: 1;
+          }
+          .diary-markdown :where(h1, h2, h3, h4, h5, h6, p, ul, ol, li, blockquote) {
+            border-width: 0 !important;
+            border-style: none !important;
+            outline: 0 !important;
           }
           .diary-font-hand {
             font-family: "CipherTalkDiaryHand", "LXGW WenKai", "霞鹜文楷", "Ma Shan Zheng", "华文行楷", "STXingkai", "STKaiti", "KaiTi", "楷体", cursive, serif;
@@ -613,7 +865,10 @@ export default function DiaryPage() {
           }
           .diary-markdown blockquote {
             margin: 1.25rem 0;
-            border-left: 3px solid hsl(var(--heroui-accent, 180 65% 42%));
+            border-left: 3px solid hsl(var(--heroui-accent, 180 65% 42%)) !important;
+            border-top: 0 !important;
+            border-right: 0 !important;
+            border-bottom: 0 !important;
             padding-left: 1rem;
             color: var(--muted);
           }
