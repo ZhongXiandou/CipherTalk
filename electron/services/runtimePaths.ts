@@ -22,7 +22,7 @@ export function getUserDataPath(): string {
   }
 
   if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', 'ciphertalk')
+    return path.join(os.homedir(), 'Library', 'Application Support', 'CipherTalk')
   }
   const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
   return path.join(appData, 'ciphertalk')

@@ -124,6 +124,13 @@ export function registerSystemHandlers(): void {
 
   ipcMain.handle('shell:showItemInFolder', async (_, fullPath: string) => {
     const { shell } = await import('electron')
-    return shell.showItemInFolder(fullPath)
+    const targetPath = String(fullPath || '').trim()
+    if (!targetPath) {
+      throw new Error('路径为空')
+    }
+    if (!fs.existsSync(targetPath)) {
+      throw new Error(`文件不存在: ${targetPath}`)
+    }
+    return shell.showItemInFolder(targetPath)
   })
 }

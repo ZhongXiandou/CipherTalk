@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 const CURRENT_ADDON_NAME = 'ciphertalk-image-native'
+const NATIVE_IMAGE_DEBUG = process.env.CIPHERTALK_IMAGE_NATIVE_DEBUG === '1'
 
 type NativeDecryptResult = {
   data: Buffer
@@ -24,6 +25,11 @@ type NativeAddonMetadata = {
 
 let cachedAddon: NativeAddon | null | undefined
 let cachedMetadata: NativeAddonMetadata | null | undefined
+
+function logNativeImage(level: 'log' | 'warn' | 'error', ...args: any[]): void {
+  if (!NATIVE_IMAGE_DEBUG) return
+  console[level](...args)
+}
 
 function shouldEnableNative(): boolean {
   return process.env.CIPHERTALK_IMAGE_NATIVE !== '0'
@@ -77,13 +83,13 @@ function loadAddon(): NativeAddon | null {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const addon = require(candidate) as NativeAddon
       if (addon && typeof addon.decryptDatNative === 'function') {
-        console.log(`[nativeImageDecrypt] 加载成功: ${candidate}`)
+        logNativeImage('log', `[nativeImageDecrypt] 加载成功: ${candidate}`)
         cachedAddon = addon
         return addon
       }
-      console.warn(`[nativeImageDecrypt] 文件存在但缺少 decryptDatNative 函数: ${candidate}`)
+      logNativeImage('warn', `[nativeImageDecrypt] 文件存在但缺少 decryptDatNative 函数: ${candidate}`)
     } catch (e: any) {
-      console.error(`[nativeImageDecrypt] 加载失败: ${candidate}`, e?.message || e)
+      logNativeImage('error', `[nativeImageDecrypt] 加载失败: ${candidate}`, e?.message || e)
     }
   }
 
@@ -146,7 +152,7 @@ export function decryptDatViaNative(
     const result = addon.decryptDatNative(inputPath, xorKey, aesKey)
     const isWxgf = Boolean(result?.isWxgf ?? result?.is_wxgf)
     if (!result || !Buffer.isBuffer(result.data)) {
-      console.warn(`[nativeImageDecrypt] 解密返回无效数据: ${inputPath}`)
+      logNativeImage('warn', `[nativeImageDecrypt] 解密返回无效数据: ${inputPath}`)
       return null
     }
     const rawExt = typeof result.ext === 'string' && result.ext.trim()
@@ -155,7 +161,7 @@ export function decryptDatViaNative(
     const ext = rawExt ? (rawExt.startsWith('.') ? rawExt : `.${rawExt}`) : ''
     return { data: result.data, ext, isWxgf }
   } catch (e: any) {
-    console.error(`[nativeImageDecrypt] 解密异常: ${inputPath}`, e?.message || e)
+    logNativeImage('error', `[nativeImageDecrypt] 解密异常: ${inputPath}`, e?.message || e)
     return null
   }
 }

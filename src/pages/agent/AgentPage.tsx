@@ -3519,6 +3519,11 @@ export default function AgentPage() {
     )
   }, [])
 
+  const handleRecordsOpenChange = useCallback((open: boolean) => {
+    setRecordsOpen(open)
+    if (open) void refreshConversationRecords()
+  }, [refreshConversationRecords])
+
   const persistConversationMessages = useCallback(async (
     targetId: number | null,
     nextMessages: UIMessage[],
@@ -4161,7 +4166,7 @@ export default function AgentPage() {
               state={codeWorkspaceState}
             />
             <div className="flex items-center gap-1.5">
-              <Dropdown isOpen={recordsOpen} onOpenChange={setRecordsOpen}>
+              <Dropdown isOpen={recordsOpen} onOpenChange={handleRecordsOpenChange}>
                 <HeroButton
                   aria-label="对话记录"
                   className="group relative size-9 overflow-visible p-0"
