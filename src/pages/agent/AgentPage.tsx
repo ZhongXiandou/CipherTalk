@@ -265,7 +265,7 @@ const CODE_WORKSPACE_APPROVAL_POLICY_OPTIONS: Array<{
   {
     value: 'full-access',
     label: '完全访问',
-    description: '代码工作区内不再请求批准',
+    description: '本机文件读写和命令不再请求批准',
     icon: ShieldCheck,
   },
 ]

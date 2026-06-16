@@ -2,7 +2,7 @@
  * send_wechat_media —— 微信出站媒体统一工具。
  *
  * 工具只做下载/校验/归类并返回本地文件路径；真正发送由微信 bot 主进程完成。
- * 本地路径仍限制在应用缓存/导出目录，远程 URL 只允许 http/https 并下载到缓存目录。
+ * 本地路径允许电脑上可访问的任意文件，远程 URL 只允许 http/https 并下载到缓存目录。
  */
 import { tool } from 'ai'
 import { z } from 'zod'
@@ -26,7 +26,6 @@ export interface PreparedWechatMedia {
 const MAX_WECHAT_FILE_BYTES = 100 * 1024 * 1024
 const MAX_WECHAT_IMAGE_BYTES = 20 * 1024 * 1024
 const MAX_REMOTE_MEDIA_BYTES = 100 * 1024 * 1024
-const ALLOWED_CACHE_SUBDIRS = ['ai-files', 'ai-images', 'ai-videos', 'exports', 'temp', 'mcp']
 
 const MIME_BY_EXT: Record<string, string> = {
   '.txt': 'text/plain',
@@ -79,38 +78,6 @@ function normalizeRealPath(filePath: string): string | null {
     return fs.realpathSync(filePath)
   } catch {
     return null
-  }
-}
-
-function isInside(child: string, parent: string): boolean {
-  const relative = path.relative(parent, child)
-  return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative))
-}
-
-function getAllowedRoots(): string[] {
-  const cs = new ConfigService()
-  try {
-    const roots: string[] = []
-    const cacheRoot = normalizeRealPath(cs.getCacheBasePath())
-    if (cacheRoot) {
-      for (const subdir of ALLOWED_CACHE_SUBDIRS) {
-        const candidate = path.join(cacheRoot, subdir)
-        if (fs.existsSync(candidate)) {
-          const real = normalizeRealPath(candidate)
-          if (real) roots.push(real)
-        }
-      }
-    }
-
-    const exportPath = String(cs.get('exportPath') || '').trim()
-    if (exportPath && fs.existsSync(exportPath)) {
-      const real = normalizeRealPath(exportPath)
-      if (real) roots.push(real)
-    }
-
-    return roots
-  } finally {
-    cs.close()
   }
 }
 
@@ -180,11 +147,6 @@ function validateLocalMedia(filePath: string): { filePath: string; mimeType: str
   const stat = fs.statSync(realFilePath)
   if (!stat.isFile()) return { error: '路径不是文件' }
 
-  const roots = getAllowedRoots()
-  if (!roots.some((root) => isInside(realFilePath, root))) {
-    return { error: '该文件不在允许发送的缓存/导出目录内' }
-  }
-
   const mimeType = mimeTypeFromPath(realFilePath)
   const kind = mediaKindFromMime(mimeType)
   const sizeError = assertSize(kind, stat.size)
@@ -195,7 +157,7 @@ function validateLocalMedia(filePath: string): { filePath: string; mimeType: str
 
 export const sendWechatMedia = tool({
   description:
-    '在微信连接场景下发送媒体到当前微信用户。支持应用缓存/导出目录内的本地文件，或 http/https 远程媒体 URL。' +
+    '在微信连接场景下发送媒体到当前微信用户。支持电脑上可访问的任意本地文件绝对路径，或 http/https 远程媒体 URL。' +
     '会自动按 MIME 分流为图片、视频或文件。仅当用户明确要求发送媒体/文件/图片/视频到微信时使用。' +
     'caption 可作为媒体前的简短说明文字发送。',
   inputSchema: z.object({

@@ -30,9 +30,9 @@ export function createCodeWorkspaceTools(
 
     code_list_files: tool({
       description:
-        '列出代码工作区内的文件和目录。路径必须相对 workspace root；默认跳过 .git/node_modules/dist/.next/coverage 等目录。',
+        '列出代码工作区或电脑任意可访问目录内的文件和目录。路径可填相对 workspace root 的路径，或本机绝对路径；默认跳过 .git/node_modules/dist/.next/coverage 等目录。',
       inputSchema: z.object({
-        path: z.string().default('.').describe('相对 workspace root 的目录路径，默认当前工作区根目录'),
+        path: z.string().default('.').describe('目录路径：相对 workspace root，或本机绝对路径；默认当前工作区根目录'),
         maxDepth: z.number().int().min(0).max(8).default(3).describe('递归深度，默认 3'),
         limit: z.number().int().min(1).max(600).default(200).describe('最多返回多少项，默认 200'),
       }),
@@ -41,9 +41,9 @@ export function createCodeWorkspaceTools(
 
     code_read_file: tool({
       description:
-        '读取工作区内的文本文件。会拦截二进制、大文件、越界路径；.env、密钥、证书、token 等敏感文件需要用户高风险确认。',
+        '读取代码工作区或电脑任意可访问位置的文本文件。路径可填相对 workspace root 的路径，或本机绝对路径；会拦截二进制、大文件；.env、密钥、证书、token 等敏感文件需要用户高风险确认。',
       inputSchema: z.object({
-        path: z.string().min(1).describe('相对 workspace root 的文件路径'),
+        path: z.string().min(1).describe('文件路径：相对 workspace root，或本机绝对路径'),
         maxLines: z.number().int().min(1).max(1400).default(1400).describe('最多返回行数，默认 1400'),
       }),
       execute: async ({ path, maxLines }) => callCodeWorkspace(workspace, 'read_file', { path, maxLines }),
@@ -63,9 +63,9 @@ export function createCodeWorkspaceTools(
 
     code_replace_in_file: tool({
       description:
-        '在工作区内文本文件中替换一段已有文本。修改前会展示 diff 并等待用户确认；优先用它做小范围改动。',
+        '在代码工作区或电脑任意可访问位置的文本文件中替换一段已有文本。路径可填相对 workspace root 的路径，或本机绝对路径；修改前会展示 diff 并等待用户确认；优先用它做小范围改动。',
       inputSchema: z.object({
-        path: z.string().min(1).describe('相对 workspace root 的文件路径'),
+        path: z.string().min(1).describe('文件路径：相对 workspace root，或本机绝对路径'),
         search: z.string().min(1).describe('要替换的原文，必须和文件内容完全匹配'),
         replace: z.string().describe('替换后的文本'),
         replaceAll: z.boolean().default(false).describe('是否替换所有匹配项，默认只替换第一处'),
@@ -80,9 +80,9 @@ export function createCodeWorkspaceTools(
 
     code_write_file: tool({
       description:
-        '创建或覆盖工作区内文本文件。写入前会展示 diff 并等待用户确认；不要写入敏感文件，除非用户明确要求。',
+        '创建或覆盖代码工作区或电脑任意可访问位置的文本文件。路径可填相对 workspace root 的路径，或本机绝对路径；写入前会展示 diff 并等待用户确认；不要写入敏感文件，除非用户明确要求。',
       inputSchema: z.object({
-        path: z.string().min(1).describe('相对 workspace root 的文件路径'),
+        path: z.string().min(1).describe('文件路径：相对 workspace root，或本机绝对路径'),
         content: z.string().describe('完整文件内容'),
       }),
       execute: async ({ path, content }) => callCodeWorkspace(workspace, 'write_file', { path, content }),
@@ -90,21 +90,21 @@ export function createCodeWorkspaceTools(
 
     code_delete_file: tool({
       description:
-        '删除工作区内单个文件。删除前会展示 diff/删除预览并等待用户确认；不能删除目录。',
+        '删除代码工作区或电脑任意可访问位置的单个文件。路径可填相对 workspace root 的路径，或本机绝对路径；删除前会展示 diff/删除预览并等待用户确认；不能删除目录。',
       inputSchema: z.object({
-        path: z.string().min(1).describe('相对 workspace root 的文件路径'),
+        path: z.string().min(1).describe('文件路径：相对 workspace root，或本机绝对路径'),
       }),
       execute: async ({ path }) => callCodeWorkspace(workspace, 'delete_file', { path }),
     }),
 
     code_run_command: tool({
       description:
-        '在工作区内运行短命令并收集 stdout/stderr。优先用 command + args 结构化执行；需要 &&、管道、重定向、平台终端语法时用 commandLine 走受控 shell。安装依赖、测试、脚本执行都会先请求用户确认。',
+        '在代码工作区或电脑任意可访问目录内运行短命令并收集 stdout/stderr。cwd 可填相对 workspace root 的路径，或本机绝对路径；优先用 command + args 结构化执行；需要 &&、管道、重定向、平台终端语法时用 commandLine 走受控 shell。安装依赖、测试、脚本执行都会先请求用户确认。',
       inputSchema: z.object({
         command: z.string().optional().describe('可执行命令，例如 npm、npx、pnpm、node。使用 commandLine 时可省略'),
         args: z.array(z.string()).default([]).describe('命令参数数组，例如 ["install"] 或 ["tsc","--noEmit"]'),
         commandLine: z.string().optional().describe('整行终端命令；会走 shell 并按高风险确认，例如 "npm install && npm run dev"'),
-        cwd: z.string().optional().describe('相对 workspace root 的工作目录；默认 workspace root'),
+        cwd: z.string().optional().describe('工作目录：相对 workspace root，或本机绝对路径；默认 workspace root'),
         timeoutMs: z.number().int().min(1000).max(300000).optional().describe('超时时间，默认 5 分钟，上限 5 分钟'),
       }),
       execute: async ({ command, args, commandLine, cwd, timeoutMs }) => callCodeWorkspace(workspace, 'run_command', {
@@ -123,7 +123,7 @@ export function createCodeWorkspaceTools(
         command: z.string().optional().describe('可执行命令，省略则使用 npm。使用 commandLine 时可省略'),
         args: z.array(z.string()).optional().describe('命令参数，省略则使用 ["run","dev"]'),
         commandLine: z.string().optional().describe('整行 dev server 命令；会走 shell 并按高风险确认'),
-        cwd: z.string().optional().describe('相对 workspace root 的工作目录；默认 workspace root'),
+        cwd: z.string().optional().describe('工作目录：相对 workspace root，或本机绝对路径；默认 workspace root'),
       }),
       execute: async ({ command, args, commandLine, cwd }) => callCodeWorkspace(workspace, 'start_dev_server', {
         command,

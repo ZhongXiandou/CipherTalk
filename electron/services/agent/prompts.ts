@@ -37,7 +37,7 @@ const TOOL_PROMPT = `
 - consolidate_memory：整理记忆，分组去冗余、防膨胀；记了很多条或用户要"整理记忆"时调。
 - persona_control：控制数字分身/克隆好友流程。用户说"打开/开启/进入/和某人的数字分身聊天"时用 action=open；如果不存在，按工具返回询问是否克隆。用户在上一轮已被询问后回复"确定/可以/开始/克隆吧"等肯定语义时，用 action=confirm_build，并沿用上一轮工具输出里的 sessionId/displayName。用户明确要求"向量化/建立语义索引"时用 action=vectorize。
 - export_chat：自动化导出一个聊天会话。只用于用户明确要求导出聊天记录；先 validateOnly=true 校验/解析，缺 session/dateRange/format/mediaOptions/outputDir 就追问。mediaOptions 必须显式给头像、图片、视频、表情、语音五项布尔值。参数齐全后先请求最终确认；只有用户明确确认后，才调用 confirmed=true 写文件。支持 chatlab、chatlab-jsonl、json、html、excel、sql，不支持 txt。
-- send_wechat_media：微信出站媒体统一工具。用户明确要求把图片/视频/文件发到微信时使用；media 可填应用缓存/导出目录内的本地绝对路径，也可填 http/https 远程媒体 URL；工具会自动分流为图片、视频或文件。caption 可填简短说明。不要输出 MEDIA 路径或本地路径。
+- send_wechat_media：微信出站媒体统一工具。用户明确要求把图片/视频/文件发到微信时使用；media 可填电脑上可访问的任意本地绝对路径，也可填 http/https 远程媒体 URL；工具会自动分流为图片、视频或文件。caption 可填简短说明。不要输出 MEDIA 路径或本地路径。
 `
 
 const ROUTING_PROMPT = `
@@ -129,8 +129,8 @@ export const IMAGE_GEN_PROMPT = `
 /** 代码工作区提示：选择 workspace 后追加，告诉模型 code_* 工具边界与工作方式。 */
 export const CODE_WORKSPACE_PROMPT = `
 # 代码工作区（已开启）
-本轮额外提供 code_* 工具，可在用户选择的 workspace 内读文件、改代码、运行短命令、启动/停止 dev server，并把本机 localhost 预览展示给用户：
-- 只能操作当前 workspace 内的路径。路径一律使用相对 workspace root 的写法；不要尝试 ../ 越界或读取用户未选择的目录。
+本轮额外提供 code_* 工具，可在用户选择的 workspace 或电脑上可访问的任意本机绝对路径读文件、改代码、运行短命令、启动/停止 dev server，并把本机 localhost 预览展示给用户：
+- 路径可以使用相对 workspace root 的写法，也可以使用本机绝对路径。相对路径仍按 workspace root 解析；要访问工作区外文件/目录时必须使用绝对路径。
 - 动手前先用 code_workspace_status / code_list_files / code_read_file 理解项目结构；改小块优先用 code_replace_in_file，创建或完整覆盖才用 code_write_file。
 - 写文件、删除文件、运行命令、安装依赖、启动 dev server 都需要用户确认；如果工具返回 denied，要停止该操作并向用户说明未改动。
 - .env、密钥、证书、token 等敏感文件默认不读；除非用户明确要求且通过高风险确认。

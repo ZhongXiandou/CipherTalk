@@ -91,6 +91,24 @@ function isPathInside(root: string, target: string): boolean {
   return targetKey === rootKey || targetKey.startsWith(rootKey.endsWith(path.sep) ? rootKey : `${rootKey}${path.sep}`)
 }
 
+function displayPathFor(root: string, target: string): string {
+  return isPathInside(root, target) ? path.relative(root, target) || '.' : target
+}
+
+async function findExistingParentPath(target: string): Promise<string> {
+  let current = path.dirname(target)
+  while (true) {
+    try {
+      const stat = await fs.promises.stat(current)
+      if (stat.isDirectory()) return fs.promises.realpath(current)
+    } catch {
+    }
+    const next = path.dirname(current)
+    if (next === current) throw new Error('目标父目录不存在')
+    current = next
+  }
+}
+
 function truncateText(value: string, max = MAX_DIFF_CHARS): string {
   return value.length > max ? `${value.slice(0, max)}\n...<truncated>` : value
 }
@@ -396,19 +414,34 @@ export class CodeWorkspaceService {
     const workspace = this.requireWorkspace()
     const root = await fs.promises.realpath(workspace.root)
     const raw = String(inputPath || '.').trim() || '.'
-    const candidate = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(root, raw)
-    if (!isPathInside(root, candidate)) throw new Error('路径越过工作区边界')
+    const isAbsoluteInput = path.isAbsolute(raw)
+    const candidate = isAbsoluteInput ? path.resolve(raw) : path.resolve(root, raw)
+    if (!isAbsoluteInput && !isPathInside(root, candidate)) {
+      throw new Error('相对路径越过工作区边界；如需访问工作区外文件，请使用本机绝对路径')
+    }
 
+    let real: string
     try {
-      const real = await fs.promises.realpath(candidate)
-      if (!isPathInside(root, real)) throw new Error('路径通过符号链接越过工作区边界')
-      return { absPath: real, displayPath: path.relative(root, real) || '.', root }
+      real = await fs.promises.realpath(candidate)
     } catch (error: any) {
       if (!opts.allowMissing) throw error
-      const parent = path.dirname(candidate)
-      const realParent = await fs.promises.realpath(parent)
-      if (!isPathInside(root, realParent)) throw new Error('目标父目录越过工作区边界')
-      return { absPath: candidate, displayPath: path.relative(root, candidate), root }
+      const realParent = await findExistingParentPath(candidate)
+      if (!isAbsoluteInput && !isPathInside(root, realParent)) throw new Error('目标父目录越过工作区边界')
+      const external = !isPathInside(root, candidate)
+      return {
+        absPath: candidate,
+        displayPath: displayPathFor(root, candidate),
+        root: external ? realParent : root,
+      }
+    }
+
+    if (!isAbsoluteInput && !isPathInside(root, real)) throw new Error('路径通过符号链接越过工作区边界')
+    const stat = await fs.promises.stat(real).catch(() => null)
+    const external = !isPathInside(root, real)
+    return {
+      absPath: real,
+      displayPath: displayPathFor(root, real),
+      root: external && stat?.isDirectory() ? real : external ? path.dirname(real) : root,
     }
   }
 
