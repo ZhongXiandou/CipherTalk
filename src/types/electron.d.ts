@@ -778,6 +778,9 @@ export interface ElectronAPI {
   image: {
     decrypt: (payload: { sessionId?: string; imageMd5?: string; imageDatName?: string; createTime?: number; force?: boolean; quick?: boolean }) => Promise<{ success: boolean; localPath?: string; error?: string }>
     resolveCache: (payload: { sessionId?: string; imageMd5?: string; imageDatName?: string; createTime?: number }) => Promise<{ success: boolean; localPath?: string; hasUpdate?: boolean; error?: string }>
+    prewarm: (payloads: Array<{ sessionId?: string; imageMd5?: string; imageDatName?: string; createTime?: number }>) => Promise<{ success: boolean; requested: number; enqueued: number; cacheHits: number; decrypted: number; failed: number; skipped: number; error?: string }>
+    batchDecrypt: (payloads: Array<{ sessionId?: string; imageMd5?: string; imageDatName?: string; createTime?: number }>) => Promise<{ success: boolean; requested: number; current: number; total: number; successCount: number; failCount: number; cacheHits: number; decrypted: number; skipped: number; error?: string }>
+    onBatchDecryptProgress: (callback: (data: { current: number; total: number; successCount: number; failCount: number; cacheHits: number; decrypted: number; skipped: number }) => void) => () => void
     onUpdateAvailable: (callback: (data: { cacheKey: string; imageMd5?: string; imageDatName?: string }) => void) => () => void
     onCacheResolved: (callback: (data: { cacheKey: string; imageMd5?: string; imageDatName?: string; localPath: string }) => void) => () => void
     deleteThumbnails: () => Promise<{ success: boolean; deleted: number; error?: string }>

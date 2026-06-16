@@ -68,7 +68,7 @@ export function RandomMomentBubble({ sessionId, message }: Props) {
         }
 
         try {
-          const decrypted = await window.electronAPI.image.decrypt({ ...payload, force: false })
+          const decrypted = await window.electronAPI.image.decrypt({ ...payload, force: false, quick: true })
           if (cancelled) return
           if (decrypted.success && decrypted.localPath) {
             applyLocalImage(decrypted.localPath, (decrypted as any).liveVideoPath)

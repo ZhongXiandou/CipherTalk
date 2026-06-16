@@ -164,7 +164,8 @@ function MessageBubble({ message, session, showTime, myAvatarUrl, isGroupChat, h
         const result = await window.electronAPI.image.decrypt({
           sessionId: session.username,
           imageMd5: message.quotedImageMd5,
-          force: false
+          force: false,
+          quick: true
         })
         if (cancelled) return
         if (result.success && result.localPath) {

@@ -10,7 +10,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { ConfigService } from './config'
 import { getDefaultCachePath as getPlatformDefaultCachePath } from './platformService'
-import { getDocumentsPath, getExePath } from './runtimePaths'
+import { getDocumentsPath, getUserDataPath } from './runtimePaths'
 import { decryptDatViaNative, nativeAddonLocation, nativeAddonMetadata, nativeDecryptEnabled } from './nativeImageDecrypt'
 
 const execFileAsync = promisify(execFile)
@@ -62,6 +62,33 @@ type ImageLookupPayload = {
   quick?: boolean
 }
 
+type ImagePrewarmResult = {
+  success: boolean
+  requested: number
+  enqueued: number
+  cacheHits: number
+  decrypted: number
+  failed: number
+  skipped: number
+  error?: string
+}
+
+type ImageBatchDecryptProgress = {
+  current: number
+  total: number
+  successCount: number
+  failCount: number
+  cacheHits: number
+  decrypted: number
+  skipped: number
+}
+
+type ImageBatchDecryptResult = ImageBatchDecryptProgress & {
+  success: boolean
+  requested: number
+  error?: string
+}
+
 export class ImageDecryptService {
   private configService = new ConfigService()
   private hardlinkCache = new Map<string, HardlinkState>()
@@ -77,6 +104,11 @@ export class ImageDecryptService {
   private notFoundCache = new Set<string>()  // 失败缓存，避免重复查询
   private hdNotFoundCache = new Set<string>()  // 高清图失败缓存
   private nativeLogged = false
+  private datPathIndex = new Map<string, string>()
+  private datPathIndexLoaded = false
+  private datPathIndexWriteTimer: ReturnType<typeof setTimeout> | null = null
+  private prewarmKeys = new Set<string>()
+  private readonly datPathIndexMaxEntries = 20_000
 
   async resolveCachedImage(payload: ImageLookupPayload): Promise<DecryptResult & { hasUpdate?: boolean }> {
     // 不再等待缓存索引，直接查找
@@ -201,6 +233,176 @@ export class ImageDecryptService {
     } finally {
       this.pending.delete(cacheKey)
     }
+  }
+
+  async prewarmImages(
+    payloads: ImageLookupPayload[],
+    options: { limit?: number; concurrency?: number } = {}
+  ): Promise<ImagePrewarmResult> {
+    const requested = Array.isArray(payloads) ? payloads.length : 0
+    const result: ImagePrewarmResult = {
+      success: true,
+      requested,
+      enqueued: 0,
+      cacheHits: 0,
+      decrypted: 0,
+      failed: 0,
+      skipped: 0
+    }
+
+    if (!Array.isArray(payloads) || payloads.length === 0) return result
+
+    const limit = Math.max(1, Math.min(options.limit ?? 40, 120))
+    const concurrency = Math.max(1, Math.min(options.concurrency ?? 2, 4))
+    const seen = new Set<string>()
+    const queue: Array<{ payload: ImageLookupPayload; lookupKey: string }> = []
+
+    for (const payload of payloads) {
+      if (queue.length >= limit) break
+      const cacheKey = payload?.imageMd5 || payload?.imageDatName
+      if (!cacheKey) {
+        result.skipped += 1
+        continue
+      }
+      const lookupKey = this.buildLookupCacheKey(payload, cacheKey)
+      if (seen.has(lookupKey) || this.prewarmKeys.has(lookupKey)) {
+        result.skipped += 1
+        continue
+      }
+      seen.add(lookupKey)
+      this.prewarmKeys.add(lookupKey)
+      queue.push({
+        lookupKey,
+        payload: {
+          sessionId: payload.sessionId,
+          imageMd5: payload.imageMd5,
+          imageDatName: payload.imageDatName,
+          createTime: payload.createTime,
+          force: false,
+          quick: true
+        }
+      })
+    }
+
+    result.enqueued = queue.length
+    let cursor = 0
+    const workerCount = Math.min(concurrency, queue.length)
+
+    const runNext = async () => {
+      while (cursor < queue.length) {
+        const item = queue[cursor]
+        cursor += 1
+        try {
+          const cached = await this.resolveCachedImage(item.payload)
+          if (cached.success && cached.localPath) {
+            result.cacheHits += 1
+            continue
+          }
+
+          const decrypted = await this.decryptImage(item.payload)
+          if (decrypted.success && decrypted.localPath) {
+            result.decrypted += 1
+          } else {
+            result.failed += 1
+          }
+        } catch {
+          result.failed += 1
+        } finally {
+          this.prewarmKeys.delete(item.lookupKey)
+        }
+      }
+    }
+
+    await Promise.all(Array.from({ length: workerCount }, runNext))
+    return result
+  }
+
+  async batchDecryptImages(
+    payloads: ImageLookupPayload[],
+    options: { concurrency?: number; onProgress?: (progress: ImageBatchDecryptProgress) => void } = {}
+  ): Promise<ImageBatchDecryptResult> {
+    const requested = Array.isArray(payloads) ? payloads.length : 0
+    const result: ImageBatchDecryptResult = {
+      success: true,
+      requested,
+      current: 0,
+      total: 0,
+      successCount: 0,
+      failCount: 0,
+      cacheHits: 0,
+      decrypted: 0,
+      skipped: 0
+    }
+
+    if (!Array.isArray(payloads) || payloads.length === 0) return result
+
+    const seen = new Set<string>()
+    const queue: ImageLookupPayload[] = []
+    for (const payload of payloads) {
+      const cacheKey = payload?.imageMd5 || payload?.imageDatName
+      if (!cacheKey) {
+        result.skipped += 1
+        continue
+      }
+      const lookupKey = this.buildLookupCacheKey(payload, cacheKey)
+      if (seen.has(lookupKey)) {
+        result.skipped += 1
+        continue
+      }
+      seen.add(lookupKey)
+      queue.push({
+        sessionId: payload.sessionId,
+        imageMd5: payload.imageMd5,
+        imageDatName: payload.imageDatName,
+        createTime: payload.createTime,
+        force: false,
+        quick: true
+      })
+    }
+
+    result.total = queue.length
+    options.onProgress?.({ ...result })
+    if (queue.length === 0) return result
+
+    const concurrency = Math.max(1, Math.min(options.concurrency ?? 2, 4))
+    let cursor = 0
+
+    const completeOne = (kind: 'cache' | 'decrypt' | 'fail') => {
+      if (kind === 'cache') {
+        result.cacheHits += 1
+        result.successCount += 1
+      } else if (kind === 'decrypt') {
+        result.decrypted += 1
+        result.successCount += 1
+      } else {
+        result.failCount += 1
+      }
+      result.current += 1
+      options.onProgress?.({ ...result })
+    }
+
+    const runNext = async () => {
+      while (cursor < queue.length) {
+        const payload = queue[cursor]
+        cursor += 1
+
+        try {
+          const cached = await this.resolveCachedImage(payload)
+          if (cached.success && cached.localPath) {
+            completeOne('cache')
+            continue
+          }
+
+          const decrypted = await this.decryptImage(payload)
+          completeOne(decrypted.success && decrypted.localPath ? 'decrypt' : 'fail')
+        } catch {
+          completeOne('fail')
+        }
+      }
+    }
+
+    await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, runNext))
+    return result
   }
 
   private async resolveCachedOutputByDatPathHint(
@@ -345,7 +547,9 @@ export class ImageDecryptService {
           }
         }
 
-        this.notFoundCache.add(lookupCacheKey)
+        if (!payload.quick) {
+          this.notFoundCache.add(lookupCacheKey)
+        }
         console.warn(`[ImageDecrypt] 未找到图片文件: ${payload.imageDatName || payload.imageMd5} sessionId=${payload.sessionId}`)
         this.logDecryptTiming({
           cacheKey,
@@ -885,6 +1089,16 @@ export class ImageDecryptService {
     const primaryDatName = imageDatName || imageMd5
     if (!primaryDatName) {
       return null
+    }
+
+    const indexedPath = this.getIndexedDatPath(accountDir, [primaryDatName, imageMd5, imageDatName], allowThumbnail)
+    if (indexedPath) {
+      diagnostics && (diagnostics.source = 'dat_path_index')
+      this.cacheSessionDatRoot(accountDir, sessionId, indexedPath)
+      for (const name of [primaryDatName, imageMd5, imageDatName]) {
+        if (name) this.cacheDatPath(accountDir, name, indexedPath)
+      }
+      return indexedPath
     }
 
     const monthPath = this.searchDatInSessionMonth(accountDir, sessionId, primaryDatName, createTime, allowThumbnail)
@@ -1929,6 +2143,116 @@ export class ImageDecryptService {
     const normalized = this.normalizeDatBase(datName)
     if (normalized && normalized !== datName.toLowerCase()) {
       this.resolvedCache.set(`${accountDir}|${normalized}`, datPath)
+    }
+    this.setDatPathIndex(accountDir, datName, datPath)
+  }
+
+  private getDatPathIndexPath(): string {
+    const dir = join(getUserDataPath(), 'image-cache')
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true })
+    }
+    return join(dir, 'dat-path-index.json')
+  }
+
+  private ensureDatPathIndexLoaded(): void {
+    if (this.datPathIndexLoaded) return
+    this.datPathIndexLoaded = true
+
+    try {
+      const filePath = this.getDatPathIndexPath()
+      if (!existsSync(filePath)) return
+      const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as { entries?: Array<[string, string]> }
+      if (!Array.isArray(parsed.entries)) return
+
+      for (const entry of parsed.entries) {
+        const key = String(entry?.[0] || '').trim()
+        const value = String(entry?.[1] || '').trim()
+        if (key && value) this.datPathIndex.set(key, value)
+      }
+    } catch {
+      this.datPathIndex.clear()
+    }
+  }
+
+  private getDatPathIndexKeys(accountDir: string, datName: string): string[] {
+    const account = accountDir.trim().toLowerCase()
+    const lower = datName.trim().toLowerCase()
+    if (!account || !lower) return []
+
+    const keys: string[] = []
+    const add = (name: string) => {
+      const normalizedName = name.trim().toLowerCase()
+      if (!normalizedName) return
+      const key = `${account}|${normalizedName}`
+      if (!keys.includes(key)) keys.push(key)
+    }
+
+    add(lower)
+    add(this.normalizeDatBase(lower))
+    return keys
+  }
+
+  private getIndexedDatPath(accountDir: string, datNames: Array<string | undefined>, allowThumbnail: boolean): string | null {
+    this.ensureDatPathIndexLoaded()
+
+    let removedStale = false
+    const names = Array.from(new Set(datNames.filter((name): name is string => Boolean(name))))
+    for (const name of names) {
+      for (const key of this.getDatPathIndexKeys(accountDir, name)) {
+        const cached = this.datPathIndex.get(key)
+        if (!cached) continue
+        if (!existsSync(cached)) {
+          this.datPathIndex.delete(key)
+          removedStale = true
+          continue
+        }
+        if (allowThumbnail || !this.isThumbnailPath(cached)) return cached
+
+        const hdPath = this.findHdVariantInSameDir(cached)
+        if (hdPath) return hdPath
+      }
+    }
+
+    if (removedStale) this.scheduleDatPathIndexFlush()
+    return null
+  }
+
+  private setDatPathIndex(accountDir: string, datName: string, datPath: string): void {
+    if (!datName || !datPath) return
+    this.ensureDatPathIndexLoaded()
+
+    let changed = false
+    for (const key of this.getDatPathIndexKeys(accountDir, datName)) {
+      if (!key) continue
+      if (this.datPathIndex.get(key) === datPath) continue
+      if (this.datPathIndex.has(key)) this.datPathIndex.delete(key)
+      this.datPathIndex.set(key, datPath)
+      changed = true
+    }
+
+    if (changed) this.scheduleDatPathIndexFlush()
+  }
+
+  private scheduleDatPathIndexFlush(): void {
+    if (this.datPathIndexWriteTimer) return
+    this.datPathIndexWriteTimer = setTimeout(() => {
+      this.datPathIndexWriteTimer = null
+      this.flushDatPathIndex()
+    }, 1_000)
+    ;(this.datPathIndexWriteTimer as any)?.unref?.()
+  }
+
+  private flushDatPathIndex(): void {
+    try {
+      const entries = Array.from(this.datPathIndex.entries())
+        .filter(([, filePath]) => existsSync(filePath))
+        .slice(-this.datPathIndexMaxEntries)
+
+      this.datPathIndex = new Map(entries)
+      writeFileSync(this.getDatPathIndexPath(), JSON.stringify({ version: 1, entries }), 'utf-8')
+    } catch {
+      // 索引只是加速缓存，写入失败不影响图片解密
     }
   }
 

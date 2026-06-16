@@ -12,7 +12,7 @@ import {
   isMessageVisibleForSession,
 } from './messageMapper'
 import { compareMessageCursorAsc, compareMessageCursorDesc, messageIdentityKey } from './types'
-import { decodeMessageContent, extractXmlValue } from './rowDecoders'
+import { coerceRowString, decodeMessageContent, extractXmlValue, getRowField } from './rowDecoders'
 import {
   parseChatHistory,
   parseEmojiInfo,
@@ -1238,18 +1238,99 @@ export async function getAllImageMessages(state: ChatServiceState,
           continue
         }
 
+        const selectCandidates = [
+          'message_content',
+          'compress_content',
+          'create_time',
+          'imageMd5',
+          'image_md5',
+          'md5',
+          'MD5',
+          'cdnthumbmd5',
+          'cdnThumbMd5',
+          'thumbfullmd5',
+          'thumbFullMd5',
+          'fullmd5',
+          'fullMd5',
+          'imageDatName',
+          'image_dat_name',
+          'datName',
+          'dat_name',
+          'fileName',
+          'file_name',
+          'filename',
+          'path',
+          'filePath',
+          'packed_info_data',
+          'packed_info',
+          'packedInfoData',
+          'packedInfo',
+          'PackedInfoData',
+          'PackedInfo',
+          'packed_info_blob',
+          'packedInfoBlob',
+          'BytesExtra',
+          'bytes_extra',
+          'reserved0',
+          'Reserved0',
+          'WCDB_CT_packed_info_data',
+          'WCDB_CT_packed_info',
+          'WCDB_CT_PackedInfoData',
+          'WCDB_CT_PackedInfo',
+          'WCDB_CT_Reserved0'
+        ]
+        const actualByLower = new Map<string, string>()
+        columns.forEach((c: any) => actualByLower.set(String(c.name).toLowerCase(), String(c.name)))
+        const selectColumns = Array.from(new Set(
+          selectCandidates
+            .map(name => actualByLower.get(name.toLowerCase()))
+            .filter((name): name is string => Boolean(name))
+        ))
+        const selectSql = selectColumns.length > 0
+          ? selectColumns.map(name => `"${name.replace(/"/g, '""')}"`).join(', ')
+          : '*'
+
         const rows = await dbAdapter.all<any>(
           'message',
           dbPath,
-          `SELECT * FROM ${tableName} WHERE ${typeCondition}`
+          `SELECT ${selectSql} FROM ${tableName} WHERE ${typeCondition}`
         )
 
         for (const row of rows) {
-          const content = decodeMessageContent(row.message_content, row.compress_content)
+          const content = decodeMessageContent(
+            getRowField(row, ['message_content', 'messageContent', 'MessageContent']),
+            getRowField(row, ['compress_content', 'compressContent', 'CompressContent'])
+          )
           const imageInfo = parseImageInfo(content)
-          const datName = parseImageDatNameFromRow(row)
-          if (imageInfo.md5 || datName) {
-            images.push({ imageMd5: imageInfo.md5, imageDatName: datName, createTime: row.create_time })
+          const imageMd5 = coerceRowString(getRowField(row, [
+            'imageMd5',
+            'image_md5',
+            'md5',
+            'MD5',
+            'cdnthumbmd5',
+            'cdnThumbMd5',
+            'thumbfullmd5',
+            'thumbFullMd5',
+            'fullmd5',
+            'fullMd5'
+          ])) || imageInfo.md5
+          const datName = coerceRowString(getRowField(row, [
+            'imageDatName',
+            'image_dat_name',
+            'datName',
+            'dat_name',
+            'fileName',
+            'file_name',
+            'filename',
+            'path',
+            'filePath'
+          ])) || parseImageDatNameFromRow(row)
+          if (imageMd5 || datName) {
+            images.push({
+              imageMd5,
+              imageDatName: datName,
+              createTime: Number(getRowField(row, ['create_time', 'createTime', 'CreateTime'])) || undefined
+            })
           }
         }
       } catch (e: any) {

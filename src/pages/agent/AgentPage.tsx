@@ -4612,7 +4612,7 @@ export default function AgentPage() {
                 sessions={sessions}
               />
               <PromptInputTextarea
-                className="pt-1.5 pb-2"
+                className="pt-3 pb-2"
                 placeholder="问问你的聊天记录，Enter 发送，Shift + Enter 换行…"
               />
             </PromptInputBody>

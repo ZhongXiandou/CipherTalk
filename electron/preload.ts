@@ -571,6 +571,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('image:decrypt', payload),
     resolveCache: (payload: { sessionId?: string; imageMd5?: string; imageDatName?: string; createTime?: number }) =>
       ipcRenderer.invoke('image:resolveCache', payload),
+    prewarm: (payloads: Array<{ sessionId?: string; imageMd5?: string; imageDatName?: string; createTime?: number }>) =>
+      ipcRenderer.invoke('image:prewarm', payloads),
+    batchDecrypt: (payloads: Array<{ sessionId?: string; imageMd5?: string; imageDatName?: string; createTime?: number }>) =>
+      ipcRenderer.invoke('image:batchDecrypt', payloads),
+    onBatchDecryptProgress: (callback: (data: { current: number; total: number; successCount: number; failCount: number; cacheHits: number; decrypted: number; skipped: number }) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, data: { current: number; total: number; successCount: number; failCount: number; cacheHits: number; decrypted: number; skipped: number }) => callback(data)
+      ipcRenderer.on('image:batchDecryptProgress', listener)
+      return () => { ipcRenderer.removeListener('image:batchDecryptProgress', listener) }
+    },
     onUpdateAvailable: (callback: (data: { cacheKey: string; imageMd5?: string; imageDatName?: string }) => void) => {
       ipcRenderer.on('image:updateAvailable', (_, data) => callback(data))
       return () => ipcRenderer.removeAllListeners('image:updateAvailable')

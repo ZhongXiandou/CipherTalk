@@ -37,6 +37,55 @@ function getMessageCacheKey(message: Message): string {
 // 减小单次 prepend 的渲染阻塞（一次性 mount 50 条约卡 180ms，25 条约减半）。
 const INITIAL_PAGE_SIZE = 50
 const HISTORY_PAGE_SIZE = 25
+const IMAGE_PREWARM_LIMIT = 40
+
+type ImagePrewarmPayload = {
+  sessionId?: string
+  imageMd5?: string
+  imageDatName?: string
+  createTime?: number
+}
+
+function buildImagePrewarmPayloads(messages: Message[], sessionId: string, limit = IMAGE_PREWARM_LIMIT): ImagePrewarmPayload[] {
+  const payloads: ImagePrewarmPayload[] = []
+  const seen = new Set<string>()
+
+  const addPayload = (payload: ImagePrewarmPayload) => {
+    const imageKey = payload.imageMd5 || payload.imageDatName
+    if (!imageKey) return
+    const dedupeKey = [
+      payload.sessionId || '',
+      imageKey,
+      payload.imageDatName || '',
+      payload.createTime || 0
+    ].join('|')
+    if (seen.has(dedupeKey)) return
+    seen.add(dedupeKey)
+    payloads.push(payload)
+  }
+
+  for (let i = messages.length - 1; i >= 0 && payloads.length < limit; i -= 1) {
+    const message = messages[i]
+    if (message.localType === 3 && (message.imageMd5 || message.imageDatName)) {
+      addPayload({
+        sessionId,
+        imageMd5: message.imageMd5 || undefined,
+        imageDatName: message.imageDatName || undefined,
+        createTime: message.createTime
+      })
+    }
+
+    if (message.quotedImageMd5) {
+      addPayload({
+        sessionId,
+        imageMd5: message.quotedImageMd5,
+        createTime: message.createTime
+      })
+    }
+  }
+
+  return payloads
+}
 
 function ChatPage(_props: ChatPageProps) {
   const [quoteStyle, setQuoteStyle] = useState<QuoteStyleConfig>('default')
@@ -105,6 +154,7 @@ function ChatPage(_props: ChatPageProps) {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const sidebarRef = useRef<HTMLDivElement>(null)
   const messagesRef = useRef<Message[]>([])
+  const imagePrewarmSignatureRef = useRef('')
   const isLoadingMoreRef = useRef(false)
   const scrollToBottomAfterRenderRef = useRef(false)
   // 虚拟列表滚动信号：ChatPage 表达"该置底/置顶"的意图，递增令 MessageListVirtual 用 scrollToIndex 落点
@@ -1341,34 +1391,62 @@ function ChatPage(_props: ChatPageProps) {
     setShowBatchDecryptProgress(true)
     setBatchDecryptProgress({ current: 0, total: images.length })
 
-    let success = 0, fail = 0
-    for (let i = 0; i < images.length; i++) {
-      try {
-        const r = await window.electronAPI.image.decrypt({
-          sessionId: session.username,
-          imageMd5: images[i].imageMd5,
-          imageDatName: images[i].imageDatName,
-          createTime: images[i].createTime,
-          force: false
-        })
-        if (r?.success) success++
-        else fail++
-      } catch {
-        fail++
-      }
-      if (i % 5 === 0) await new Promise(r => setTimeout(r, 0))
-      setBatchDecryptProgress({ current: i + 1, total: images.length })
+    const payloads = images.map(img => ({
+      sessionId: session.username,
+      imageMd5: img.imageMd5,
+      imageDatName: img.imageDatName,
+      createTime: img.createTime
+    }))
+
+    let finalSuccess = 0
+    let finalFail = 0
+    const unsubscribeProgress = window.electronAPI.image.onBatchDecryptProgress((progress) => {
+      setBatchDecryptProgress({ current: progress.current, total: progress.total || images.length })
+      finalSuccess = progress.successCount
+      finalFail = progress.failCount
+    })
+
+    try {
+      const result = await window.electronAPI.image.batchDecrypt(payloads)
+      finalSuccess = result.successCount
+      finalFail = result.failCount
+      setBatchDecryptProgress({ current: result.current, total: result.total || images.length })
+    } catch {
+      finalFail = Math.max(finalFail, images.length - finalSuccess)
+    } finally {
+      unsubscribeProgress()
+      setIsBatchDecrypting(false)
+      setShowBatchDecryptProgress(false)
     }
 
-    setIsBatchDecrypting(false)
-    setShowBatchDecryptProgress(false)
-    alert(`解密完成：成功 ${success} 张，失败 ${fail} 张`)
+    alert(`解密完成：成功 ${finalSuccess} 张，失败 ${finalFail} 张`)
   }, [currentSessionId, sessions, batchImageMessages, batchImageSelectedDates])
 
   // 同步 messages 和 currentSessionId 到 ref，供自动更新使用
   useEffect(() => {
     messagesRef.current = messages
   }, [messages])
+
+  useEffect(() => {
+    if (!currentSessionId || hasImageKey === false || messages.length === 0) return
+
+    const payloads = buildImagePrewarmPayloads(messages, currentSessionId)
+    if (payloads.length === 0) return
+
+    const signature = payloads
+      .map(item => `${item.sessionId || ''}:${item.imageMd5 || ''}:${item.imageDatName || ''}:${item.createTime || 0}`)
+      .join('|')
+    if (signature === imagePrewarmSignatureRef.current) return
+    imagePrewarmSignatureRef.current = signature
+
+    const timer = window.setTimeout(() => {
+      void window.electronAPI.image.prewarm(payloads).catch(() => { })
+    }, 300)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [currentSessionId, hasImageKey, messages])
 
   useEffect(() => {
     currentOffsetRef.current = currentOffset

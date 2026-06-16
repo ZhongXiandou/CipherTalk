@@ -166,7 +166,8 @@ function ImageBubble({ message, session, hasImageKey, onContextMenu }: ImageBubb
           imageMd5: message.imageMd5 || undefined,
           imageDatName: message.imageDatName,
           createTime: message.createTime,
-          force: forceUpdate
+          force: forceUpdate,
+          quick: !forceUpdate
         })
 
         if (result.success && result.localPath) {

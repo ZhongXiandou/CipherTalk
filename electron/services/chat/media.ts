@@ -313,7 +313,8 @@ export async function getImageData(state: ChatServiceState, sessionId: string, m
       imageMd5: msg.imageMd5 || undefined,
       imageDatName: msg.imageDatName || String(msg.localId),
       createTime: createTime || msg.createTime,
-      force: false
+      force: false,
+      quick: true
     }
 
     let result = await imageDecryptService.resolveCachedImage(payload)

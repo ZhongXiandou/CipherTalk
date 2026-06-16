@@ -61,7 +61,7 @@ export function subscribeImageCacheResolved(callback: (payload: ImageCacheResolv
 
 const imageDecryptQueue: Array<() => Promise<void>> = []
 let isProcessingQueue = false
-const MAX_CONCURRENT_DECRYPTS = 1
+const MAX_CONCURRENT_DECRYPTS = 2
 
 async function processDecryptQueue() {
   if (isProcessingQueue) return

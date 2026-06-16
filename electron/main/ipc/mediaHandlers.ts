@@ -379,6 +379,19 @@ export function registerMediaHandlers(ctx: MainProcessContext): void {
     return result
   })
 
+  ipcMain.handle('image:prewarm', async (_, payloads: Array<{ sessionId?: string; imageMd5?: string; imageDatName?: string; createTime?: number }>) => {
+    return imageDecryptService.prewarmImages(payloads, { limit: 40, concurrency: 2 })
+  })
+
+  ipcMain.handle('image:batchDecrypt', async (event, payloads: Array<{ sessionId?: string; imageMd5?: string; imageDatName?: string; createTime?: number }>) => {
+    return imageDecryptService.batchDecryptImages(payloads, {
+      concurrency: 2,
+      onProgress: (progress) => {
+        event.sender.send('image:batchDecryptProgress', progress)
+      }
+    })
+  })
+
   ipcMain.handle('image:countThumbnails', async () => {
     return imageDecryptService.countThumbnails()
   })
