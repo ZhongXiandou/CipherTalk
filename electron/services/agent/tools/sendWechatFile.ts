@@ -1,6 +1,6 @@
 /**
- * send_wechat_file —— 给微信连接场景准备一个受控文件发送结果。
- * 工具只校验并返回电脑上可访问的本地文件；真正发送由主进程微信 bot 完成。
+ * send_wechat_file —— 给微信机器人当前会话准备一个受控文件回复附件。
+ * 工具只校验并返回电脑上可访问的本地文件；真正回复由主进程微信 bot 绑定当前 incoming session 完成。
  */
 import { tool } from 'ai'
 import { z } from 'zod'
@@ -40,8 +40,8 @@ function normalizeRealPath(filePath: string): string | null {
 
 export const sendWechatFile = tool({
   description:
-    '在微信连接场景下发送一个本地文件。仅当用户明确要求把已生成/已导出的文件发到微信时使用。' +
-    'filePath 可以是电脑上可访问的任意本地文件绝对路径。',
+    '仅在微信官方机器人场景下，把本地文件作为当前触发会话的回复附件。' +
+    'filePath 可以是电脑上可访问的任意本地文件绝对路径；不得指定联系人、群或 toUserId。',
   inputSchema: z.object({
     filePath: z.string().min(1).describe('要发送的本地文件绝对路径'),
   }),
@@ -60,7 +60,7 @@ export const sendWechatFile = tool({
         fileName: path.basename(realFilePath),
         sizeBytes: stat.size,
         mimeType: mimeTypeFromPath(realFilePath),
-        note: '文件已准备发送到微信，回答里不要输出本地路径',
+        note: '文件已准备作为当前微信会话回复附件，回答里不要输出本地路径',
       }
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) }

@@ -254,6 +254,10 @@ export class AgentProcessService {
           void this.handleCodeWorkspaceCall(worker, msg.payload)
           return
         }
+        if (msg?.type === 'agentCapability:call') {
+          void this.handleAgentCapabilityCall(worker, msg.payload)
+          return
+        }
         if (msg?.type === 'aiExport:call') {
           void this.handleAiExportCall(worker, msg.payload)
           return
@@ -427,6 +431,27 @@ export class AgentProcessService {
       worker.postMessage({ type: 'codeWorkspace:result', payload: { reqId, result } })
     } catch (e: any) {
       worker.postMessage({ type: 'codeWorkspace:result', payload: { reqId, error: e?.message || String(e) } })
+    }
+  }
+
+  /**
+   * 处理 Agent 子进程发来的本机能力请求。文件索引、资料库、产物、任务、桌面截图等
+   * 都在主进程执行，避免 AI utility process 绕过审计边界。
+   */
+  private async handleAgentCapabilityCall(
+    worker: UtilityProcess,
+    payload: { reqId: number; method: string; args?: Record<string, unknown> },
+  ): Promise<void> {
+    const reqId = payload?.reqId
+    try {
+      const { agentCapabilityService } = await import('./agentCapabilityService')
+      const result = await agentCapabilityService.handleCall(
+        String(payload?.method || ''),
+        payload?.args && typeof payload.args === 'object' ? payload.args : {},
+      )
+      worker.postMessage({ type: 'agentCapability:result', payload: { reqId, result } })
+    } catch (e: any) {
+      worker.postMessage({ type: 'agentCapability:result', payload: { reqId, error: e?.message || String(e) } })
     }
   }
 

@@ -1,7 +1,7 @@
 /**
- * send_wechat_media —— 微信出站媒体统一工具。
+ * send_wechat_media —— 微信机器人当前会话回复附件工具。
  *
- * 工具只做下载/校验/归类并返回本地文件路径；真正发送由微信 bot 主进程完成。
+ * 工具只做下载/校验/归类并返回本地文件路径；真正回复由微信 bot 主进程绑定当前 incoming session 完成。
  * 本地路径允许电脑上可访问的任意文件，远程 URL 只允许 http/https 并下载到缓存目录。
  */
 import { tool } from 'ai'
@@ -157,9 +157,9 @@ function validateLocalMedia(filePath: string): { filePath: string; mimeType: str
 
 export const sendWechatMedia = tool({
   description:
-    '在微信连接场景下发送媒体到当前微信用户。支持电脑上可访问的任意本地文件绝对路径，或 http/https 远程媒体 URL。' +
+    '仅在微信官方机器人场景下，把媒体作为当前触发会话的回复附件。支持电脑上可访问的任意本地文件绝对路径，或 http/https 远程媒体 URL。' +
     '会自动按 MIME 分流为图片、视频或文件。仅当用户明确要求发送媒体/文件/图片/视频到微信时使用。' +
-    'caption 可作为媒体前的简短说明文字发送。',
+    'caption 可作为附件前的简短说明文字。不得指定联系人、群或 toUserId。',
   inputSchema: z.object({
     media: z.string().min(1).describe('本地文件绝对路径或 http/https 远程媒体 URL'),
     caption: z.string().optional().describe('媒体前要发送的简短说明文字'),
@@ -170,7 +170,7 @@ export const sendWechatMedia = tool({
       return {
         success: true,
         ...prepared,
-        note: '媒体已准备发送到微信，回答里不要输出本地路径',
+        note: '媒体已准备作为当前微信会话回复附件，回答里不要输出本地路径',
       }
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) }

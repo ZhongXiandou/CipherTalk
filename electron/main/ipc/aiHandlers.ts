@@ -150,6 +150,10 @@ function errorToLogData(error: unknown): Record<string, unknown> {
 }
 
 export function registerAiHandlers(ctx: MainProcessContext): void {
+  void import('../../services/agent/agentCapabilityService')
+    .then(({ agentCapabilityService }) => agentCapabilityService.setContext(ctx))
+    .catch(() => undefined)
+
   // ========= AI Agent（跑在独立 utilityProcess 子进程，主进程仅做 broker）=========
   ipcMain.handle('agent:run', async (event, payload: {
     runId: string
@@ -237,18 +241,21 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
       sendPrepProgress()
       const { agentProcessService } = await import('../../services/agent/agentProcessService')
       agentProcessService.setLogger(logger)
-      const { resolveProviderConfig } = await import('../../services/agent/resolveProviderConfig')
-      const { refreshResolvedProxyUrl } = await import('../../services/ai/proxyFetch')
+      const { agentProfileService } = await import('../../services/agent/agentProfileService')
       const { convertToModelMessages } = await import('ai')
       markPerf('加载主进程服务模块')
-      stage = 'refresh_proxy'
+      stage = 'resolve_agent_profile'
       sendPrepProgress()
-      await refreshAgentRunProxyCached(refreshResolvedProxyUrl) // 主进程探测系统代理并持久化，供子进程 agent/嵌入读取
-      markPerf('系统代理探测')
-      stage = 'resolve_provider'
-      sendPrepProgress()
-      const providerConfig = resolveProviderConfig(payload.modelConfig)
-      markPerf('解析模型配置')
+      const profile = await timedTask('解析 Agent Profile', agentProfileService.resolve({
+        mode: 'app',
+        scope,
+        modelConfig: payload.modelConfig,
+        toolProfile,
+        codeWorkspace,
+        includeMcpSkills: true,
+      }))
+      const providerConfig = profile.providerConfig
+      markPerf('解析 Agent Profile', `MCP ${profile.mcpTools.length} 个 / 技能 ${profile.skills.length} 个`)
       stage = 'convert_messages'
       sendPrepProgress()
       const uiMessages = shouldStripProviderMetadata(providerConfig)
@@ -256,29 +263,10 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
         : payload.messages
       const messages = await convertToModelMessages(uiMessages)
       markPerf('整理消息', `${messages.length} 条`)
-      stage = 'load_context_services'
-      sendPrepProgress()
-      const { mcpClientService } = await import('../../services/mcpClientService')
-      const { buildReadOnlyMcpToolDescriptors } = await import('../../services/agent/mcpToolPolicy')
-      const { skillManagerService } = await import('../../services/skillManagerService')
-      const {
-        fingerprintMcpToolSchemas,
-        getCachedMcpToolDescriptors,
-        setCachedMcpToolDescriptors,
-      } = await import('../../services/agent/runtimeCache')
-      const connectedMcpToolSchemas = mcpClientService.getConnectedToolSchemas()
-      const mcpToolVersion = fingerprintMcpToolSchemas(connectedMcpToolSchemas)
-      let readOnlyMcpTools = getCachedMcpToolDescriptors(mcpToolVersion)
-      if (!readOnlyMcpTools) {
-        readOnlyMcpTools = buildReadOnlyMcpToolDescriptors(connectedMcpToolSchemas)
-        setCachedMcpToolDescriptors(mcpToolVersion, readOnlyMcpTools)
-      }
-      markPerf('加载上下文服务模块', `只读 MCP 工具 ${readOnlyMcpTools.length} 个`)
       stage = 'inject_tools_and_skills'
       sendPrepProgress()
-      const mcpTools = readOnlyMcpTools
-      const skills = skillManagerService.getAllSkillsForAgentPrompt()
-      markPerf('工具与技能直注', `MCP ${mcpTools.length} 个 / 技能 ${skills.length} 个`)
+      const mcpTools = profile.mcpTools
+      const skills = profile.skills
       sendPrepProgress()
       if (mcpTools.length > 0 || skills.length > 0) {
         console.info('[agent:run] injected context', {
@@ -291,16 +279,16 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
         elapsedMs: Date.now() - startedAt,
         provider: providerToLogData(providerConfig),
         modelMessageCount: messages.length,
-        readOnlyMcpToolCount: readOnlyMcpTools.length,
-        mcpCandidateCount: readOnlyMcpTools.length,
+        readOnlyMcpToolCount: profile.logMeta.readOnlyMcpToolCount,
+        mcpCandidateCount: profile.logMeta.readOnlyMcpToolCount,
         selectedMcpToolCount: mcpTools.length,
         selectedMcpTools: mcpTools.map((tool) => `${tool.serverName}/${tool.toolName}`),
-        mcpSelectionMode: 'all',
+        mcpSelectionMode: profile.logMeta.mcpSelectionMode,
         mcpRerankApplied: false,
         mcpRerankError: null,
         selectedSkillCount: skills.length,
         selectedSkills: skills.map((skill) => skill.name),
-        skillSelectionMode: 'all',
+        skillSelectionMode: profile.logMeta.skillSelectionMode,
       })
       stage = 'run_agent_process'
       sendPrepProgress()
@@ -328,7 +316,17 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
       let firstChunkSeen = false
       let firstModelOutputSeen = false
       await agentProcessService.run(
-        { messages, providerConfig, scope, mcpTools, skills, planMode: payload.planMode === true, toolProfile, codeWorkspace },
+        {
+          messages,
+          providerConfig,
+          scope: profile.scope,
+          mcpTools,
+          skills,
+          planMode: payload.planMode === true,
+          toolProfile: profile.toolProfile,
+          codeWorkspace: profile.codeWorkspace,
+          allowWechatReplyMedia: false,
+        },
         (chunk) => {
           chunkCount += 1
           lastActivityAt = Date.now()

@@ -43,6 +43,7 @@ export function buildAgentInstructions(
 ): { instructions: SystemModelMessage[]; tools: ReturnType<typeof buildTools>; promptCacheKey: string } {
   const promptParts = buildAgentPromptParts(input.scope, input.skills, {
     includeWechatOutbound: input.outputMode === 'wechat',
+    includeWechatReplyMedia: input.allowWechatReplyMedia === true,
   })
   const dynamicSystem = [
     promptParts.dynamicSystem,
@@ -238,7 +239,9 @@ export async function runAgent(
         ? buildPlanModeTools(input.scope, codeWorkspace)
         : toolProfile === 'code'
           ? buildCodeOnlyTools(codeWorkspace, webSearchOn, imageGenOn)
-          : buildTools(input.scope, input.providerConfig, input.mcpTools, webSearchOn, imageGenOn, codeWorkspace))
+          : buildTools(input.scope, input.providerConfig, input.mcpTools, webSearchOn, imageGenOn, codeWorkspace, {
+            allowWechatReplyMedia: input.allowWechatReplyMedia === true,
+          }))
     perf('构建工具集', `${Object.keys(baseTools).length} 个`)
     const prepared = buildAgentInstructions(input, memoryContext, relevantMemoryContext, baseTools, webSearchOn, imageGenOn)
     perf('组装系统提示')

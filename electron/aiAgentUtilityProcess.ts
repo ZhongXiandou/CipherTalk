@@ -72,6 +72,7 @@ async function handleMessage(msg: any): Promise<void> {
     type === 'wcdb:result' ||
     type === 'mcp:result' ||
     type === 'codeWorkspace:result' ||
+    type === 'agentCapability:result' ||
     type === 'aiExport:result' ||
     type === 'aiExport:progress'
   ) return

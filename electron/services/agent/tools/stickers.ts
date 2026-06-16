@@ -1,5 +1,5 @@
 /**
- * 表情包工具 —— search_stickers 按"使用情境"检索聊天里出现过的表情包，send_sticker 把选中的发出来。
+ * 表情包工具 —— search_stickers 按"使用情境"检索聊天里出现过的表情包，send_sticker 把选中的作为当前会话回复附件。
  *
  * 词典从 chat_search_index 的 message_index 聚合（localType=47），不直接碰原微信库。
  * 语义难题与 persona 表情词典同解法：表情是图、模型看不到内容，但发表情前最近一句话
@@ -210,9 +210,9 @@ export const searchStickers = tool({
 
 export const sendSticker = tool({
   description:
-    '把一张表情包发给用户（在回答里展示成表情图）。md5 来自 search_stickers 的结果，先检索再发。' +
+    '把一张表情包作为当前会话回复附件。md5 来自 search_stickers 的结果，先检索再发。' +
     '表情包是点缀：只在情绪到位或用户要求时发，一轮最多 1 张。' +
-    '发出后回答里不要再输出 md5、路径或链接。',
+    '不得指定联系人、群或 toUserId；发出后回答里不要再输出 md5、路径或链接。',
   inputSchema: z.object({
     md5: z.string().min(8).describe('表情包 md5（来自 search_stickers 结果）'),
   }),
@@ -239,7 +239,7 @@ export const sendSticker = tool({
       return {
         success: true,
         filePath,
-        note: '表情包已展示给用户，回答里不要再输出路径或链接',
+        note: '表情包已准备作为当前会话回复附件，回答里不要再输出路径或链接',
       }
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) }

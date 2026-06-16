@@ -100,6 +100,11 @@ export interface AgentRunInput {
   toolMode?: 'default' | 'disabled'
   /** 输出场景：微信入口会追加微信发送约定，软件内聊天保持默认。 */
   outputMode?: 'default' | 'wechat'
+  /**
+   * 仅用于微信官方机器人入口：允许工具返回图片/文件作为"当前触发会话的回复附件"。
+   * 不允许模型指定联系人、群、toUserId 或跨会话发送。
+   */
+  allowWechatReplyMedia?: boolean
   /** 计划模式：开启后本轮只制定执行计划、不给最终结论（见 prompts.ts PLAN_MODE_PROMPT）。 */
   planMode?: boolean
   /** 工具画像：chat=聊天/记忆工具，code=代码工作区工具，hybrid=两者同时挂载。 */

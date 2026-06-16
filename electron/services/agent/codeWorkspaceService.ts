@@ -17,6 +17,7 @@ import type {
   CodeWorkspaceState,
   CodeWorkspaceToolCall,
 } from './codeWorkspaceTypes'
+import { agentAuditService } from './agentAuditService'
 
 const CONFIG_KEY = 'agentCodeWorkspaceRoot'
 const APPROVAL_POLICY_CONFIG_KEY = 'agentCodeWorkspaceApprovalPolicy'
@@ -607,9 +608,30 @@ export class CodeWorkspaceService {
       risk: this.isSensitivePath(target.displayPath) ? 'high' : 'medium',
       summary: `修改文件 ${target.displayPath}`,
     })
-    if (!approved) return { success: false, denied: true, error: '用户拒绝写入', path: target.displayPath }
+    if (!approved) {
+      agentAuditService.record({
+        source: 'code-workspace',
+        toolName: 'code_replace_in_file',
+        argsSummary: { path: target.displayPath },
+        risk: this.isSensitivePath(target.displayPath) ? 'high' : 'medium',
+        status: 'denied',
+        targetPath: target.absPath,
+      })
+      return { success: false, denied: true, error: '用户拒绝写入', path: target.displayPath }
+    }
+    const snapshotPath = agentAuditService.createSnapshot(target.absPath)
     await fs.promises.writeFile(target.absPath, after, 'utf8')
-    return { success: true, path: target.displayPath, diffPreview }
+    const audit = agentAuditService.record({
+      source: 'code-workspace',
+      toolName: 'code_replace_in_file',
+      argsSummary: { path: target.displayPath, replaceAll: args.replaceAll === true },
+      risk: this.isSensitivePath(target.displayPath) ? 'high' : 'medium',
+      status: 'success',
+      targetPath: target.absPath,
+      snapshotPath,
+      outputPaths: [target.absPath],
+    })
+    return { success: true, path: target.displayPath, diffPreview, operationId: audit.operationId }
   }
 
   private async writeFile(args: Record<string, unknown>): Promise<unknown> {
@@ -624,10 +646,31 @@ export class CodeWorkspaceService {
       risk: this.isSensitivePath(target.displayPath) ? 'high' : 'medium',
       summary: `${before ? '覆盖' : '创建'}文件 ${target.displayPath}`,
     })
-    if (!approved) return { success: false, denied: true, error: '用户拒绝写入', path: target.displayPath }
+    if (!approved) {
+      agentAuditService.record({
+        source: 'code-workspace',
+        toolName: 'code_write_file',
+        argsSummary: { path: target.displayPath },
+        risk: this.isSensitivePath(target.displayPath) ? 'high' : 'medium',
+        status: 'denied',
+        targetPath: target.absPath,
+      })
+      return { success: false, denied: true, error: '用户拒绝写入', path: target.displayPath }
+    }
+    const snapshotPath = before ? agentAuditService.createSnapshot(target.absPath) : undefined
     await fs.promises.mkdir(path.dirname(target.absPath), { recursive: true })
     await fs.promises.writeFile(target.absPath, content, 'utf8')
-    return { success: true, path: target.displayPath, bytes: Buffer.byteLength(content), diffPreview }
+    const audit = agentAuditService.record({
+      source: 'code-workspace',
+      toolName: 'code_write_file',
+      argsSummary: { path: target.displayPath, bytes: Buffer.byteLength(content) },
+      risk: this.isSensitivePath(target.displayPath) ? 'high' : 'medium',
+      status: 'success',
+      targetPath: target.absPath,
+      snapshotPath,
+      outputPaths: [target.absPath],
+    })
+    return { success: true, path: target.displayPath, bytes: Buffer.byteLength(content), diffPreview, operationId: audit.operationId }
   }
 
   private async deleteFile(args: Record<string, unknown>): Promise<unknown> {
@@ -641,9 +684,29 @@ export class CodeWorkspaceService {
       risk: 'high',
       summary: `删除文件 ${target.displayPath}`,
     })
-    if (!approved) return { success: false, denied: true, error: '用户拒绝删除', path: target.displayPath }
+    if (!approved) {
+      agentAuditService.record({
+        source: 'code-workspace',
+        toolName: 'code_delete_file',
+        argsSummary: { path: target.displayPath },
+        risk: 'high',
+        status: 'denied',
+        targetPath: target.absPath,
+      })
+      return { success: false, denied: true, error: '用户拒绝删除', path: target.displayPath }
+    }
+    const snapshotPath = agentAuditService.createSnapshot(target.absPath)
     await fs.promises.unlink(target.absPath)
-    return { success: true, path: target.displayPath }
+    const audit = agentAuditService.record({
+      source: 'code-workspace',
+      toolName: 'code_delete_file',
+      argsSummary: { path: target.displayPath },
+      risk: 'high',
+      status: 'success',
+      targetPath: target.absPath,
+      snapshotPath,
+    })
+    return { success: true, path: target.displayPath, operationId: audit.operationId }
   }
 
   private async runCommand(args: Record<string, unknown>): Promise<unknown> {
@@ -658,8 +721,26 @@ export class CodeWorkspaceService {
       risk: parsed.mode === 'shell' || looksShellLike(parsed.command, parsed.args) ? 'high' : 'medium',
       summary: `运行命令 ${commandText}`,
     })
-    if (!approved) return { success: false, denied: true, error: '用户拒绝运行命令', command: commandText }
-    return this.spawnAndCollectCandidates(candidates, cwd, Number(args.timeoutMs) || COMMAND_TIMEOUT_MS)
+    if (!approved) {
+      agentAuditService.record({
+        source: 'code-workspace',
+        toolName: 'code_run_command',
+        argsSummary: { command: commandText, cwd },
+        risk: parsed.mode === 'shell' || looksShellLike(parsed.command, parsed.args) ? 'high' : 'medium',
+        status: 'denied',
+      })
+      return { success: false, denied: true, error: '用户拒绝运行命令', command: commandText }
+    }
+    const result = await this.spawnAndCollectCandidates(candidates, cwd, Number(args.timeoutMs) || COMMAND_TIMEOUT_MS)
+    agentAuditService.record({
+      source: 'code-workspace',
+      toolName: 'code_run_command',
+      argsSummary: { command: commandText, cwd },
+      risk: parsed.mode === 'shell' || looksShellLike(parsed.command, parsed.args) ? 'high' : 'medium',
+      status: (result as { success?: unknown }).success === false ? 'failed' : 'success',
+      error: (result as { error?: string }).error,
+    })
+    return result
   }
 
   private async startDevServer(args: Record<string, unknown>): Promise<unknown> {

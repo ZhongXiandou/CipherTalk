@@ -1,5 +1,5 @@
 /**
- * send_random_image —— 从聊天记录里随机抽一张图片发给用户（彩蛋）。
+ * send_random_image —— 从聊天记录里随机抽一张图片作为当前会话回复附件（彩蛋）。
  * 在 message_index 已索引行里随机取 localType=3 消息，经 chatService.getImageData
  * 解密成纯图片字节后落盘到 ai-images，前端用 local-image:// 展示（同 generate_image）。
  */
@@ -15,9 +15,9 @@ const MAX_ATTEMPTS = 5 // 抽到的消息可能解密失败（缺原图），多
 
 export const sendRandomImage = tool({
   description:
-    '从本地聊天记录里随机抽一张历史图片发给用户（盲盒彩蛋）。' +
+    '从本地聊天记录里随机抽一张历史图片作为当前会话回复附件（盲盒彩蛋）。' +
     '仅当用户明确要求"随机发张图/抽张图/来张老照片"这类玩法时使用，不要主动发。' +
-    '可用 sessionId 限定从某个会话里抽。图片会自动展示给用户，回答时提一下来源（谁/何时）即可，不要输出路径。',
+    '可用 sessionId 限定从某个会话里抽；不得指定联系人、群或 toUserId。图片会自动回复到当前会话，回答时提一下来源（谁/何时）即可，不要输出路径。',
   inputSchema: z.object({
     sessionId: z.string().optional().describe('限定某会话/群（username，来自 list_contacts）；不传则全库随机'),
   }),
@@ -67,7 +67,7 @@ export const sendRandomImage = tool({
           from: sessionName,
           sender: senderName,
           time: toLocalTime(pick.createTime),
-          note: '图片已展示给用户，回答里提一下来源即可，不要输出路径或链接',
+          note: '图片已准备作为当前会话回复附件，回答里提一下来源即可，不要输出路径或链接',
         }
       }
       return { error: '连续抽到的图片都无法解密（可能缺少原图缓存），可以再试一次' }

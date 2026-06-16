@@ -1012,6 +1012,11 @@ class WeixinBotService {
     let typing: TypingIndicator | null = null
     try {
       if (await this.handleWechatCommand(from, commandText, contextToken)) return
+      void import('../agent/agentCapabilityService')
+        .then(({ agentCapabilityService }) => {
+          agentCapabilityService.notifyWechatIncomingMessage({ from, text: commandText, at: Date.now() })
+        })
+        .catch(() => undefined)
       const personaMode = this.getConversationMode(from)
       if (personaMode?.mode === 'persona') {
         await this.handlePersonaModeMessage(from, text, personaMode, contextToken)
@@ -1571,7 +1576,7 @@ class WeixinBotService {
           if (!item.filePath) throw new Error('文件路径为空')
           await sendFile(session, toUserId, item.filePath, contextToken)
         }
-        this.logger?.warn('WechatBot', '已发送微信媒体', { to: toUserId, kind: item.kind, filePath: item.filePath, textLength: item.text?.length })
+        this.logger?.warn('WechatBot', '已回复当前微信会话媒体', { to: toUserId, kind: item.kind, filePath: item.filePath, textLength: item.text?.length })
       } catch (e) {
         const errorData = errorToLogData(e)
         this.logger?.error('WechatBot', '发送微信媒体失败，准备发送文本兜底', {
@@ -1645,18 +1650,18 @@ class WeixinBotService {
     }
   }
 
-  /** 把对话（历史 + 本轮）交给项目内 Agent，收集流式文本作为回复（启用内置读/查工具，不注入 MCP/技能）。 */
+  /** 把对话（历史 + 本轮）交给项目内 Agent，收集流式文本作为当前微信机器人会话的回复。 */
   private async runAgent(uiMessages: UIMessage[]): Promise<WechatBotReply> {
-    const { resolveProviderConfig } = await import('../agent/resolveProviderConfig')
-    const { refreshResolvedProxyUrl } = await import('../ai/proxyFetch')
     const { convertToModelMessages } = await import('ai')
     const { agentProcessService } = await import('../agent/agentProcessService')
-    const { codeWorkspaceService } = await import('../agent/codeWorkspaceService')
+    const { agentProfileService } = await import('../agent/agentProfileService')
     agentProcessService.setLogger(this.logger as never)
-    const providerConfig = resolveProviderConfig()
-    await refreshResolvedProxyUrl()
-    await codeWorkspaceService.ensureWorkspaceInitialized()
-    const codeWorkspace = codeWorkspaceService.getState().workspace
+    const profile = await agentProfileService.resolve({
+      mode: 'wechat-bot',
+      scope: { kind: 'global' },
+      ensureCodeWorkspace: true,
+      includeMcpSkills: true,
+    })
     const messages = await convertToModelMessages(uiMessages)
     let reply = ''
     const textBlocks: string[] = []
@@ -1667,15 +1672,16 @@ class WeixinBotService {
     await agentProcessService.run(
       {
         messages,
-        providerConfig,
-        scope: { kind: 'global' },
-        mcpTools: [],
-        skills: [],
+        providerConfig: profile.providerConfig,
+        scope: profile.scope,
+        mcpTools: profile.mcpTools,
+        skills: profile.skills,
         toolMode: 'default',
         outputMode: 'wechat',
+        allowWechatReplyMedia: true,
         planMode: false,
-        toolProfile: codeWorkspace ? 'hybrid' : 'chat',
-        codeWorkspace,
+        toolProfile: profile.toolProfile,
+        codeWorkspace: profile.codeWorkspace,
       },
       (chunk) => {
         rememberToolNameFromChunk(chunk, toolNames)

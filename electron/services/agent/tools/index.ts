@@ -32,6 +32,7 @@ import { personaControl } from './personaControl'
 import { sendWechatMedia } from './wechatMedia'
 import { createCodeWorkspaceTools } from './codeWorkspace'
 import { exportChat } from './exportChat'
+import { createAgentCapabilityTools } from './capabilities'
 
 /** 基础读/查工具（不含 delegate_analysis），主 Agent 与子 Agent 共用。 */
 export function buildBaseTools(_scope: AgentScope): ToolSet {
@@ -79,17 +80,35 @@ export function buildPlanModeTools(_scope: AgentScope, codeWorkspace?: CodeWorks
   }
 }
 
-export function buildChatTools(scope: AgentScope, providerConfig: AgentProviderConfig, mcpTools: AgentMcpToolDescriptor[] = [], enableWebSearch = false, enableImageGen = false): ToolSet {
+export interface BuildChatToolsOptions {
+  allowWechatReplyMedia?: boolean
+}
+
+function createWechatReplyMediaTools(): ToolSet {
   return {
-    ...buildBaseTools(scope),
-    ...buildMcpTools(mcpTools),
-    ...(enableWebSearch ? { web_search: webSearch } : {}),
-    ...(enableImageGen ? { generate_image: generateImage } : {}),
     search_stickers: searchStickers,
     send_sticker: sendSticker,
     send_random_image: sendRandomImage,
     send_wechat_media: sendWechatMedia,
     send_wechat_file: sendWechatFile,
+  }
+}
+
+export function buildChatTools(
+  scope: AgentScope,
+  providerConfig: AgentProviderConfig,
+  mcpTools: AgentMcpToolDescriptor[] = [],
+  enableWebSearch = false,
+  enableImageGen = false,
+  options: BuildChatToolsOptions = {},
+): ToolSet {
+  return {
+    ...buildBaseTools(scope),
+    ...createAgentCapabilityTools(),
+    ...buildMcpTools(mcpTools),
+    ...(enableWebSearch ? { web_search: webSearch } : {}),
+    ...(enableImageGen ? { generate_image: generateImage } : {}),
+    ...(options.allowWechatReplyMedia ? createWechatReplyMediaTools() : {}),
     export_chat: exportChat,
     persona_control: personaControl,
     remember: createRemember(scope),
@@ -125,9 +144,10 @@ export function buildTools(
   enableWebSearch = false,
   enableImageGen = false,
   codeWorkspace?: CodeWorkspaceRef | null,
+  options: BuildChatToolsOptions = {},
 ): ToolSet {
   return {
-    ...buildChatTools(scope, providerConfig, mcpTools, enableWebSearch, enableImageGen),
+    ...buildChatTools(scope, providerConfig, mcpTools, enableWebSearch, enableImageGen, options),
     ...createCodeWorkspaceTools(codeWorkspace),
   }
 }
