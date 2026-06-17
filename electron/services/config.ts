@@ -59,6 +59,7 @@ interface ConfigSchema {
   releaseAnnouncementNotes: string
   releaseAnnouncementSeenVersion: string
   releaseAnnouncementSeenId: string
+  narrationAudioEnabled: boolean | null
   homeBackgroundSource: 'preset' | 'custom'
   homeBackgroundPreset: 'beijing' | 'beijing2'
   homeBackgroundCustomType: 'image' | 'video' | ''
@@ -258,6 +259,7 @@ const defaults: ConfigSchema = {
   releaseAnnouncementNotes: '',
   releaseAnnouncementSeenVersion: '',
   releaseAnnouncementSeenId: '',
+  narrationAudioEnabled: null,
   homeBackgroundSource: 'preset',
   homeBackgroundPreset: 'beijing',
   homeBackgroundCustomType: '',

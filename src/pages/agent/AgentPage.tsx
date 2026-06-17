@@ -6,7 +6,7 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type
 import { useChat } from '@ai-sdk/react'
 import { isToolUIPart, type ChatStatus, type UIMessage } from 'ai'
 import { AlertDialog, Button as HeroButton, ButtonGroup, Dropdown, Header, Input, Label, Modal, Separator, Surface, Switch, Table, TextField, Toolbar, Tooltip } from '@heroui/react'
-import { AtSign, BarChart3, Braces, Brain, CheckIcon, ChevronDown, Clock3, Code2, Copy, FileText, Globe, Hand, History, Image as ImageIcon, Info, Link2, ListChecks, Monitor, PanelLeft, PenLine, Play, Quote, RefreshCcw, Search, ShieldAlert, ShieldCheck, Slash, SquarePen, Table2, Terminal, Trash2, Users, Volume2, Wrench, X, Sparkles, type LucideIcon } from 'lucide-react'
+import { AtSign, BarChart3, Braces, Brain, CheckIcon, ChevronDown, Clock3, Code2, Copy, FileText, Globe, Hand, History, Image as ImageIcon, Info, Link2, ListChecks, Monitor, PanelLeft, PenLine, Play, Quote, RefreshCcw, Search, ShieldAlert, ShieldCheck, Slash, SquarePen, Table2, Terminal, Trash2, Users, Volume2, VolumeX, Wrench, X, Sparkles, type LucideIcon } from 'lucide-react'
 import { Sources, SourcesContent, SourcesTrigger } from '@/components/ai-elements/sources'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import {
@@ -2632,6 +2632,8 @@ function AgentMemoryIntro({ onMemoryCreated }: { onMemoryCreated: () => void }) 
   const [finalizingLineIndex, setFinalizingLineIndex] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [cues, setCues] = useState<MemorySubtitleCue[]>(() => parseMemorySrt(MEMORY_INTRO_FALLBACK_SRTS.name))
+  const [audioPreferenceLoaded, setAudioPreferenceLoaded] = useState(false)
+  const [audioEnabled, setAudioEnabled] = useState(false)
   const currentAnswer = answers[question.key] || ''
   const lines = useMemo<MemoryTypewriterTextPart[][]>(() => cues.map((cue) => [cue.text]), [cues])
   const lineStarts = useMemo(() => {
@@ -2652,6 +2654,40 @@ function AgentMemoryIntro({ onMemoryCreated }: { onMemoryCreated: () => void }) 
 
   useEffect(() => {
     let cancelled = false
+    void configService.getNarrationAudioEnabledPreference()
+      .then((value) => {
+        if (cancelled) return
+        setAudioEnabled(value === true)
+      })
+      .catch(() => {
+        if (!cancelled) setAudioEnabled(false)
+      })
+      .finally(() => {
+        if (!cancelled) setAudioPreferenceLoaded(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const commitAudioPreference = useCallback((enabled: boolean) => {
+    setAudioEnabled(enabled)
+    void configService.setNarrationAudioEnabled(enabled).catch(() => {
+      // 声音偏好保存失败不影响本次引导。
+    })
+
+    const audio = audioRef.current
+    if (!audio) return
+    audio.muted = !enabled
+    if (enabled && audio.paused) {
+      void audio.play().catch(() => {
+        // Electron/浏览器策略可能拦截自动播放；保留开关状态。
+      })
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
     setCues(parseMemorySrt(MEMORY_INTRO_FALLBACK_SRTS[question.key]))
     void fetch(publicJiyiAsset(question.subtitleFile))
       .then((res) => (res.ok ? res.text() : ''))
@@ -2669,6 +2705,8 @@ function AgentMemoryIntro({ onMemoryCreated }: { onMemoryCreated: () => void }) 
   }, [question.key, question.subtitleFile])
 
   useEffect(() => {
+    if (!audioPreferenceLoaded) return
+
     const audio = audioRef.current
     if (!audio) return
 
@@ -2711,6 +2749,7 @@ function AgentMemoryIntro({ onMemoryCreated }: { onMemoryCreated: () => void }) 
       })
 
     audio.currentTime = 0
+    audio.muted = !audioEnabled
     setCurrentTime(0)
     lastStateProgressRef.current = -1
     if (progressFillRef.current) {
@@ -2734,7 +2773,19 @@ function AgentMemoryIntro({ onMemoryCreated }: { onMemoryCreated: () => void }) 
         progressFillRef.current.style.transform = 'translate3d(0, 0, 0) scaleX(0)'
       }
     }
-  }, [question.audioFile])
+  }, [audioPreferenceLoaded, question.audioFile])
+
+  useEffect(() => {
+    if (!audioPreferenceLoaded) return
+    const audio = audioRef.current
+    if (!audio) return
+    audio.muted = !audioEnabled
+    if (audioEnabled && audio.paused) {
+      void audio.play().catch(() => {
+        // Electron/浏览器策略可能拦截自动播放；保留开关状态。
+      })
+    }
+  }, [audioEnabled, audioPreferenceLoaded])
 
   useEffect(() => {
     setError('')
@@ -2833,6 +2884,33 @@ function AgentMemoryIntro({ onMemoryCreated }: { onMemoryCreated: () => void }) 
           }
         }}
       />
+
+      <div className="absolute right-5 top-5 z-20">
+        <Switch
+          aria-label="记忆引导声音"
+          isDisabled={!audioPreferenceLoaded}
+          isSelected={audioEnabled}
+          onChange={commitAudioPreference}
+          size="sm"
+        >
+          <Switch.Content className="gap-2 rounded-(--agent-radius,12px) border border-border bg-surface/80 px-2 py-1 text-foreground shadow-xs backdrop-blur hover:bg-surface">
+            <Switch.Control>
+              <Switch.Thumb>
+                <Switch.Icon>
+                  {audioEnabled ? (
+                    <Volume2 className="size-3" />
+                  ) : (
+                    <VolumeX className="size-3 opacity-70" />
+                  )}
+                </Switch.Icon>
+              </Switch.Thumb>
+            </Switch.Control>
+            <span className="whitespace-nowrap text-xs leading-none text-muted-foreground">
+              {audioEnabled ? '声音开' : '静音'}
+            </span>
+          </Switch.Content>
+        </Switch>
+      </div>
 
       <div className="relative z-10 flex size-full items-center justify-center px-6 py-10">
         <div className="grid w-full max-w-340 overflow-hidden">

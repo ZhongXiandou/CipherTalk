@@ -50,7 +50,8 @@ export const CONFIG_KEYS = {
   AI_PROVIDER_MODEL_CACHE: 'aiProviderModelCache',
   AI_ACTIVE_CONFIG_PRESET_ID: 'aiActiveConfigPresetId',
   AGENT_CODE_WORKSPACE_ROOT: 'agentCodeWorkspaceRoot',
-  AGENT_CODE_WORKSPACE_APPROVAL_POLICY: 'agentCodeWorkspaceApprovalPolicy'
+  AGENT_CODE_WORKSPACE_APPROVAL_POLICY: 'agentCodeWorkspaceApprovalPolicy',
+  NARRATION_AUDIO_ENABLED: 'narrationAudioEnabled'
 } as const
 
 export type { AccountProfile, AccountProfileInput, AccountProfilePatch }
@@ -739,4 +740,15 @@ export async function getHardwareAccelerationEnabled(): Promise<boolean> {
 
 export async function setHardwareAccelerationEnabled(enabled: boolean): Promise<void> {
   await config.set(CONFIG_KEYS.HARDWARE_ACCELERATION_ENABLED, enabled)
+}
+
+export type NarrationAudioPreference = boolean | null
+
+export async function getNarrationAudioEnabledPreference(): Promise<NarrationAudioPreference> {
+  const value = await config.get(CONFIG_KEYS.NARRATION_AUDIO_ENABLED)
+  return value === true || value === false ? value : null
+}
+
+export async function setNarrationAudioEnabled(enabled: boolean): Promise<void> {
+  await config.set(CONFIG_KEYS.NARRATION_AUDIO_ENABLED, enabled)
 }
