@@ -55,10 +55,12 @@ interface ConfigSchema {
   language: string
   releaseAnnouncementVersion: string
   releaseAnnouncementId: string
+  releaseAnnouncementContentId: string
   releaseAnnouncementBody: string
   releaseAnnouncementNotes: string
   releaseAnnouncementSeenVersion: string
   releaseAnnouncementSeenId: string
+  releaseAnnouncementSeenContentId: string
   narrationAudioEnabled: boolean | null
   homeBackgroundSource: 'preset' | 'custom'
   homeBackgroundPreset: 'beijing' | 'beijing2'
@@ -257,10 +259,12 @@ const defaults: ConfigSchema = {
   language: 'zh-CN',
   releaseAnnouncementVersion: '',
   releaseAnnouncementId: '',
+  releaseAnnouncementContentId: '',
   releaseAnnouncementBody: '',
   releaseAnnouncementNotes: '',
   releaseAnnouncementSeenVersion: '',
   releaseAnnouncementSeenId: '',
+  releaseAnnouncementSeenContentId: '',
   narrationAudioEnabled: null,
   homeBackgroundSource: 'preset',
   homeBackgroundPreset: 'beijing',

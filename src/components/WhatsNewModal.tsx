@@ -1,5 +1,5 @@
 import { Button, Modal } from '@heroui/react'
-import { Quote, Send, Volume2, VolumeX, X } from 'lucide-react'
+import { Send, Volume2, VolumeX, X } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import * as configService from '../services/config'
 
@@ -9,25 +9,6 @@ interface WhatsNewModalProps {
   version: string
 }
 
-type VisionSection = {
-  key: 'memory' | 'evidence' | 'ownership'
-  text: string
-}
-
-const VISION_SECTIONS: VisionSection[] = [
-  {
-    key: 'memory',
-    text: '有人离开后，一句语音就是遗物；一段闲聊，可能是最后一次拥抱。CipherTalk 要把这些碎片从设备里救出来。'
-  },
-  {
-    key: 'evidence',
-    text: '被恶意、羞辱、威胁消耗时，聊天记录不该躺在黑盒里。它要能被快速找到、串起来、拿得出手。'
-  },
-  {
-    key: 'ownership',
-    text: '更多时候，它只是把你的数字人生还给你。不是平台的，不是某台设备的，是你的。'
-  }
-]
 
 const publicAsset = (fileName: string): string => `${import.meta.env.BASE_URL}${fileName}`
 
@@ -169,20 +150,40 @@ function buildCharacterTimings(lines: TypewriterTextPart[][], cues: SubtitleCue[
 }
 
 const FALLBACK_SUBTITLE_CUES = parseSrt(`1
-00:00:00,000 --> 00:00:16,189
-它不是聊天记录读取器。它更像一把开刃的钥匙，从旧手机里撬出体温、证据和人生主权。聊天记录不是冷数据。它可能是想念、证据、关系的暗线，也是一个人活过的痕迹。
+00:00:00,000 --> 00:00:01,943
+有些话没有消失，
 
 2
-00:00:16,344 --> 00:00:22,850
-有人离开后，一句语音就是遗物；一段闲聊，可能是最后一次拥抱。
+00:00:02,088 --> 00:00:03,857
+只是睡在时间的深处。
 
 3
-00:00:23,004 --> 00:00:39,797
-CipherTalk 要把这些碎片从设备里救出来。被恶意、羞辱、威胁消耗时，聊天记录不该躺在黑盒里。它要能被快速找到、串起来、拿得出手。更多时候，它只是把你的数字人生还给你。
+00:00:03,996 --> 00:00:05,173
+等你需要时，
 
 4
-00:00:39,960 --> 00:00:46,942
-不是平台的，不是某台设备的，是你的。死亡不是生命的终点，遗忘才是。
+00:00:05,328 --> 00:00:07,353
+它们应该还能被找到，
+
+5
+00:00:07,524 --> 00:00:08,991
+带着当时的温度，
+
+6
+00:00:09,144 --> 00:00:10,704
+和足够清楚的来路。
+
+7
+00:00:10,872 --> 00:00:12,990
+CipherTalk 继续往前，
+
+8
+00:00:13,140 --> 00:00:14,654
+为记忆留灯，
+
+9
+00:00:14,796 --> 00:00:16,008
+也为真相留门。
 `)
 
 function TypewriterText({ parts, currentTime, charTimings, startIndex }: TypewriterTextProps) {
@@ -229,19 +230,18 @@ function TypewriterText({ parts, currentTime, charTimings, startIndex }: Typewri
 
 const VISION_LINES: TypewriterTextPart[][] = [
   [
-    '它不是聊天记录读取器。',
+    '有些话没有消失，',
     {
       className: 'bg-linear-to-r from-white via-cyan-100 to-fuchsia-200 bg-clip-text text-transparent',
-      text: '它更像一把开刃的钥匙'
-    },
-    '，从旧手机里撬出体温、证据和人生主权。'
+      text: '只是睡在时间的深处。'
+    }
   ],
-  ['聊天记录不是冷数据。它可能是想念、证据、关系的暗线，也是一个人活过的痕迹。'],
-  ...VISION_SECTIONS.map((section) => [section.text]),
-  ['死亡不是生命的终点，遗忘才是。'],
-  ['《寻梦环游记》']
+  ['等你需要时，它们应该还能被找到，'],
+  ['带着当时的温度，和足够清楚的来路。'],
+  ['CipherTalk 继续往前，'],
+  ['为记忆留灯，'],
+  ['也为真相留门。']
 ]
-
 const VISION_LINE_STARTS = VISION_LINES.reduce<number[]>((starts, parts, index) => {
   if (index === 0) {
     starts.push(0)
@@ -491,8 +491,8 @@ function WhatsNewModal({ deferCloseUntilAudioEnds = false, onClose }: WhatsNewMo
   )
 
   const visionArticle = (
-    <article className="relative mx-auto flex max-w-180 flex-col gap-5 text-[15px] leading-8 text-white/88 drop-shadow-[0_2px_12px_rgba(0,0,0,0.55)]">
-      <p className="m-0 text-xl font-semibold leading-9 text-white sm:text-2xl sm:leading-10">
+    <article className="relative mx-auto flex max-w-160 flex-col gap-5 text-[16px] leading-8 text-white/88 drop-shadow-[0_2px_12px_rgba(0,0,0,0.55)] sm:text-[17px] sm:leading-9">
+      <p className="m-0 text-2xl font-semibold leading-10 text-white sm:text-3xl sm:leading-12">
         <TypewriterText
           charTimings={charTimings}
           currentTime={audioCurrentTime}
@@ -501,47 +501,31 @@ function WhatsNewModal({ deferCloseUntilAudioEnds = false, onClose }: WhatsNewMo
         />
       </p>
 
-      <p className="m-0">
-        <TypewriterText
-          charTimings={charTimings}
-          currentTime={audioCurrentTime}
-          parts={VISION_LINES[1]}
-          startIndex={VISION_LINE_STARTS[1]}
-        />
-      </p>
-
-      {VISION_SECTIONS.map((section, index) => (
-        <p className="m-0" key={section.key}>
-          <TypewriterText
-            charTimings={charTimings}
-            currentTime={audioCurrentTime}
-            parts={VISION_LINES[2 + index]}
-            startIndex={VISION_LINE_STARTS[2 + index]}
-          />
-        </p>
-      ))}
-
-      <blockquote className="m-0 flex gap-3 border-l border-white/35 py-1 pl-4 text-white">
-        <Quote className="mt-1 size-4 shrink-0 text-white/80" aria-hidden="true" />
-        <div>
-          <p className="m-0 font-semibold">
+      <div className="flex flex-col gap-3 text-white/82">
+        {[1, 2].map((lineIndex) => (
+          <p className="m-0" key={lineIndex}>
             <TypewriterText
               charTimings={charTimings}
               currentTime={audioCurrentTime}
-              parts={VISION_LINES[5]}
-              startIndex={VISION_LINE_STARTS[5]}
+              parts={VISION_LINES[lineIndex]}
+              startIndex={VISION_LINE_STARTS[lineIndex]}
             />
           </p>
-          <cite className="mt-1 block text-sm not-italic text-white/65">
+        ))}
+      </div>
+
+      <div className="mt-2 flex flex-col gap-2 border-l border-white/35 py-1 pl-4 text-white">
+        {[3, 4, 5].map((lineIndex) => (
+          <p className={lineIndex >= 4 ? 'm-0 font-semibold' : 'm-0'} key={lineIndex}>
             <TypewriterText
               charTimings={charTimings}
               currentTime={audioCurrentTime}
-              parts={VISION_LINES[6]}
-              startIndex={VISION_LINE_STARTS[6]}
+              parts={VISION_LINES[lineIndex]}
+              startIndex={VISION_LINE_STARTS[lineIndex]}
             />
-          </cite>
-        </div>
-      </blockquote>
+          </p>
+        ))}
+      </div>
 
       <div className="h-px w-full overflow-hidden bg-white/12" aria-hidden="true">
         <div
@@ -556,24 +540,23 @@ function WhatsNewModal({ deferCloseUntilAudioEnds = false, onClose }: WhatsNewMo
         style={actionsStyle}
       >
         {showActions && (
-            <>
-              <p className="m-0 text-sm leading-6 text-white/72">想看项目动向和后续骚操作，进频道。</p>
-              <div className="flex shrink-0 gap-2">
-                <Button
-                  className="justify-center border-white/28 bg-white/12 text-white hover:bg-white/20"
-                  onPress={handleTelegram}
-                  variant="outline"
-                >
-                  <Send className="size-4" />
-                  Telegram 频道
-                </Button>
-              </div>
-            </>
-          )}
-        </div>
+          <>
+            <p className="m-0 text-sm leading-6 text-white/72">想看项目动向和后续演进，进频道。</p>
+            <div className="flex shrink-0 gap-2">
+              <Button
+                className="justify-center border-white/28 bg-white/12 text-white hover:bg-white/20"
+                onPress={handleTelegram}
+                variant="outline"
+              >
+                <Send className="size-4" />
+                Telegram 频道
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
     </article>
   )
-
   if (canRunVision) {
     return (
       <div

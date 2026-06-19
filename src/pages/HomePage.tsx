@@ -21,6 +21,7 @@ function HomePage() {
   const [deferVisionClose, setDeferVisionClose] = useState(false)
   const [currentVersion, setCurrentVersion] = useState('')
   const [currentAnnouncementId, setCurrentAnnouncementId] = useState('')
+  const [currentAnnouncementContentId, setCurrentAnnouncementContentId] = useState('')
   const [failedBackgroundKey, setFailedBackgroundKey] = useState('')
 
   const [randomSnippet, setRandomSnippet] = useState<RandomMomentSnippet | null>(null)
@@ -80,27 +81,37 @@ function HomePage() {
       const version = await window.electronAPI.app.getVersion()
       setCurrentVersion(version)
 
-      const [announcementVersion, announcementId, seenVersion, seenId] = await Promise.all([
+      const [announcementVersion, announcementId, announcementContentId, seenVersion, seenId, seenContentId] = await Promise.all([
         window.electronAPI.config.get('releaseAnnouncementVersion'),
         window.electronAPI.config.get('releaseAnnouncementId'),
+        window.electronAPI.config.get('releaseAnnouncementContentId')
+          .catch(() => ''),
         window.electronAPI.config.get('releaseAnnouncementSeenVersion')
           .catch(() => ''),
         window.electronAPI.config.get('releaseAnnouncementSeenId')
+          .catch(() => ''),
+        window.electronAPI.config.get('releaseAnnouncementSeenContentId')
           .catch(() => '')
       ])
 
       const normalizedAnnouncementVersion = String(announcementVersion || '').trim()
       const normalizedAnnouncementId = String(announcementId || '').trim()
+      const normalizedAnnouncementContentId = String(announcementContentId || '').trim()
       const normalizedSeenVersion = String(seenVersion || '').trim()
       const normalizedSeenId = String(seenId || '').trim()
+      const normalizedSeenContentId = String(seenContentId || '').trim()
       setCurrentAnnouncementId(normalizedAnnouncementId)
+      setCurrentAnnouncementContentId(normalizedAnnouncementContentId)
 
       const shouldShowAnnouncement = normalizedAnnouncementId
         ? normalizedSeenId !== normalizedAnnouncementId
         : normalizedSeenVersion !== version
 
       if (normalizedAnnouncementVersion === version && shouldShowAnnouncement) {
-        setDeferVisionClose(true)
+        const hasSeenSameAnnouncementContent = normalizedAnnouncementContentId
+          ? normalizedSeenContentId === normalizedAnnouncementContentId
+          : false
+        setDeferVisionClose(!hasSeenSameAnnouncementContent)
         setShowWhatsNew(true)
       }
     } catch (e) {
@@ -115,6 +126,9 @@ function HomePage() {
     }
     if (currentAnnouncementId) {
       window.electronAPI.config.set('releaseAnnouncementSeenId', currentAnnouncementId)
+    }
+    if (currentAnnouncementContentId) {
+      window.electronAPI.config.set('releaseAnnouncementSeenContentId', currentAnnouncementContentId)
     }
   }
 

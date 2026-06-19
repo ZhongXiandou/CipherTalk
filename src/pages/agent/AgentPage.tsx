@@ -8,7 +8,6 @@ import { isToolUIPart, type ChatStatus, type UIMessage } from 'ai'
 import { AlertDialog, Button as HeroButton, ButtonGroup, Dropdown, Header, Input, Label, Modal, Separator, Surface, Switch, Table, TextField, Toolbar, Tooltip } from '@heroui/react'
 import { AtSign, BarChart3, Braces, Brain, CheckIcon, ChevronDown, Clock3, Code2, Copy, FileText, Globe, Hand, History, Image as ImageIcon, Info, Link2, ListChecks, Monitor, PanelLeft, PenLine, Play, Quote, RefreshCcw, Search, ShieldAlert, ShieldCheck, Slash, SquarePen, Table2, Terminal, Trash2, Users, Volume2, VolumeX, Wrench, X, Sparkles, type LucideIcon } from 'lucide-react'
 import { Sources, SourcesContent, SourcesTrigger } from '@/components/ai-elements/sources'
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import {
   Conversation,
   ConversationAutoScroll,
@@ -2078,21 +2077,21 @@ function MessageSources({
         {items.map((it, index) => {
           const senderName = senderNameOf(it)
           return (
-            <HoverCard closeDelay={80} key={it.id} openDelay={120}>
-              <HoverCardTrigger asChild>
+            <Tooltip closeDelay={80} delay={120} key={it.id}>
+              <Tooltip.Trigger>
                 <span className="inline-flex max-w-40 items-center gap-1 rounded-full border border-border/60 bg-card/60 px-2 py-0.5 text-[11px] text-muted-foreground">
                   <Quote className="size-3 shrink-0 opacity-70" />
                   <span className="shrink-0">{index + 1}</span>
                   <span className="truncate">{senderName}</span>
                 </span>
-              </HoverCardTrigger>
-              <HoverCardContent align="start" className="w-80 text-xs" side="top">
+              </Tooltip.Trigger>
+              <Tooltip.Content className="w-80 text-xs" placement="top start">
                 <div className="mb-1 font-medium text-[11px] text-muted-foreground">
                   {[senderName, it.time].filter(Boolean).join(' · ')}
                 </div>
                 <div className="max-h-40 overflow-auto whitespace-pre-wrap text-foreground">{it.text}</div>
-              </HoverCardContent>
-            </HoverCard>
+              </Tooltip.Content>
+            </Tooltip>
           )
         })}
       </SourcesContent>
@@ -3383,7 +3382,7 @@ export default function AgentPage() {
     [handleAgentProgress]
   )
   // 流式 chunk 合并到每 50ms 更新一次 UI，避免 token 级高频重渲染拖卡滚动
-  const { messages, sendMessage, setMessages, status, stop } = useChat({ transport, experimental_throttle: 50 })
+  const { messages, sendMessage, regenerate, setMessages, status, stop } = useChat({ transport, experimental_throttle: 50 })
   const messagesRef = useRef<UIMessage[]>(messages)
   messagesRef.current = messages
   const lastSavedMessagesRef = useRef('')
@@ -4179,6 +4178,8 @@ export default function AgentPage() {
 
   const handleRegenerateAssistantMessage = useCallback((messageIndex: number) => {
     if (busy || !selectedModelSupportsTools) return
+    const assistantMessage = messages[messageIndex]
+    if (!assistantMessage || assistantMessage.role !== 'assistant') return
     const userIndex = (() => {
       for (let index = messageIndex - 1; index >= 0; index -= 1) {
         if (messages[index]?.role === 'user') return index
@@ -4187,11 +4188,6 @@ export default function AgentPage() {
     })()
     if (userIndex < 0) return
 
-    const userMessage = messages[userIndex]
-    const text = messageTextOf(userMessage)
-    const files = userMessage.parts.filter((part): part is Extract<UIMessage['parts'][number], { type: 'file' }> => part.type === 'file')
-    if (!text && files.length === 0) return
-
     stopSpeakingMessage()
     setAgentNotice('')
     setAgentProgress([])
@@ -4199,16 +4195,15 @@ export default function AgentPage() {
     setSubAgentProgress([])
     runIsPlanRef.current = planModeRef.current
     submitScopeRef.current = activeScopeRef.current
-    const nextMessages = messages.slice(0, userIndex)
-    setMessages(nextMessages)
+    const nextMessages = messages.slice(0, messageIndex)
     messagesRef.current = nextMessages
 
-    const sendPromise = Promise.resolve(sendMessage({ text, files })).finally(() => {
+    const sendPromise = Promise.resolve(regenerate({ messageId: assistantMessage.id })).finally(() => {
       submitScopeRef.current = null
       setAgentRunPending(false)
     })
     void sendPromise
-  }, [busy, messages, selectedModelSupportsTools, sendMessage, setMessages])
+  }, [busy, messages, regenerate, selectedModelSupportsTools])
 
   // 计划模式确认：关闭计划模式并让 Agent 按上一条计划开始执行（沿用当前会话 scope）
   const handleExecutePlan = useCallback(() => {

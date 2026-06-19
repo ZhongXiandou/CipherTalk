@@ -1,24 +1,20 @@
 "use client";
 
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Disclosure, Link } from "@heroui/react";
 import { cn } from "@/lib/utils";
 import { BookIcon, ChevronDownIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 
-export type SourcesProps = ComponentProps<"div">;
+export type SourcesProps = ComponentProps<typeof Disclosure>;
 
 export const Sources = ({ className, ...props }: SourcesProps) => (
-  <Collapsible
+  <Disclosure
     className={cn("not-prose mb-4 text-primary text-xs", className)}
     {...props}
   />
 );
 
-export type SourcesTriggerProps = ComponentProps<typeof CollapsibleTrigger> & {
+export type SourcesTriggerProps = ComponentProps<typeof Disclosure.Trigger> & {
   count: number;
 };
 
@@ -28,36 +24,38 @@ export const SourcesTrigger = ({
   children,
   ...props
 }: SourcesTriggerProps) => (
-  <CollapsibleTrigger
-    className={cn("flex items-center gap-2", className)}
-    {...props}
-  >
-    {children ?? (
-      <>
-        <p className="font-medium">Used {count} sources</p>
-        <ChevronDownIcon className="h-4 w-4" />
-      </>
-    )}
-  </CollapsibleTrigger>
+  <Disclosure.Heading>
+    <Disclosure.Trigger
+      className={cn("flex items-center gap-2", className)}
+      {...props}
+    >
+      {children ?? (
+        <>
+          <p className="font-medium">Used {count} sources</p>
+          <Disclosure.Indicator>
+            <ChevronDownIcon className="h-4 w-4" />
+          </Disclosure.Indicator>
+        </>
+      )}
+    </Disclosure.Trigger>
+  </Disclosure.Heading>
 );
 
-export type SourcesContentProps = ComponentProps<typeof CollapsibleContent>;
+export type SourcesContentProps = ComponentProps<typeof Disclosure.Body>;
 
 export const SourcesContent = ({
   className,
   ...props
 }: SourcesContentProps) => (
-  <CollapsibleContent
-    className={cn(
-      "mt-3 flex w-fit flex-col gap-2",
-      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
-      className
-    )}
-    {...props}
-  />
+  <Disclosure.Content>
+    <Disclosure.Body
+      className={cn("mt-3 flex w-fit flex-col gap-2 outline-none", className)}
+      {...props}
+    />
+  </Disclosure.Content>
 );
 
-export type SourceProps = ComponentProps<"a">;
+export type SourceProps = ComponentProps<typeof Link>;
 
 const EXTERNAL_HREF_RE = /^(https?:)?\/\//i;
 
@@ -69,7 +67,7 @@ export const Source = ({ href, title, children, ...props }: SourceProps) => {
   const external = Boolean(href && EXTERNAL_HREF_RE.test(href));
 
   return (
-    <a
+    <Link
       className="flex items-center gap-2"
       href={href}
       {...props}
@@ -88,6 +86,6 @@ export const Source = ({ href, title, children, ...props }: SourceProps) => {
           <span className="block font-medium">{title}</span>
         </>
       )}
-    </a>
+    </Link>
   );
 };

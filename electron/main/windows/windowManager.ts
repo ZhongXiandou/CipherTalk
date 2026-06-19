@@ -35,20 +35,21 @@ function getReleaseAnnouncementPath(): string {
     : join(process.resourcesPath, 'release-announcement.json')
 }
 
-function buildReleaseAnnouncementId(payload: ReleaseAnnouncementPayload, releaseBody: string, releaseNotes: string): string {
-  const version = String(payload.version || '').trim()
-  const generatedAt = String(payload.generatedAt || '').trim()
-  if (generatedAt) return `${version}:${generatedAt}`
-
-  const contentHash = createHash('sha256')
-    .update(version)
-    .update('\n')
+function buildReleaseAnnouncementContentId(releaseBody: string, releaseNotes: string): string {
+  return createHash('sha256')
     .update(releaseBody)
     .update('\n')
     .update(releaseNotes)
     .digest('hex')
     .slice(0, 16)
-  return `${version}:${contentHash}`
+}
+
+function buildReleaseAnnouncementId(payload: ReleaseAnnouncementPayload, releaseBody: string, releaseNotes: string): string {
+  const version = String(payload.version || '').trim()
+  const generatedAt = String(payload.generatedAt || '').trim()
+  if (generatedAt) return `${version}:${generatedAt}`
+
+  return `${version}:${buildReleaseAnnouncementContentId(releaseBody, releaseNotes)}`
 }
 
 function syncPackagedReleaseAnnouncement(ctx: MainProcessContext) {
@@ -69,15 +70,18 @@ function syncPackagedReleaseAnnouncement(ctx: MainProcessContext) {
     const releaseBody = String(payload.releaseBody || '').trim()
     const releaseNotes = String(payload.releaseNotes || '').trim()
     const announcementId = buildReleaseAnnouncementId(payload, releaseBody, releaseNotes)
+    const announcementContentId = buildReleaseAnnouncementContentId(releaseBody, releaseNotes)
 
     const storedVersion = configService.get('releaseAnnouncementVersion')
     const storedId = configService.get('releaseAnnouncementId')
+    const storedContentId = configService.get('releaseAnnouncementContentId')
     const storedBody = configService.get('releaseAnnouncementBody')
     const storedNotes = configService.get('releaseAnnouncementNotes')
 
     if (
       storedVersion === version &&
       storedId === announcementId &&
+      storedContentId === announcementContentId &&
       storedBody === releaseBody &&
       storedNotes === releaseNotes
     ) {
@@ -86,6 +90,7 @@ function syncPackagedReleaseAnnouncement(ctx: MainProcessContext) {
 
     configService.set('releaseAnnouncementVersion', version)
     configService.set('releaseAnnouncementId', announcementId)
+    configService.set('releaseAnnouncementContentId', announcementContentId)
     configService.set('releaseAnnouncementBody', releaseBody)
     configService.set('releaseAnnouncementNotes', releaseNotes)
     ctx.getLogService()?.info('ReleaseAnnouncement', '已同步本地版本公告', {
