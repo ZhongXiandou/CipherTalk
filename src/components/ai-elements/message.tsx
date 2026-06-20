@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import {
   Button as HeroButton,
   ButtonGroup as HeroButtonGroup,
+  Card as HeroCard,
   Separator as HeroSeparator,
   Table as HeroTable,
   Toolbar as HeroToolbar,
@@ -38,15 +39,6 @@ import type { ComponentProps, HTMLAttributes, ReactElement, ReactNode } from "re
 import { Children, Fragment, cloneElement, createContext, isValidElement, memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type AnimateOptions } from "streamdown";
 import { bundledLanguages, type BundledLanguage } from "shiki";
-import {
-  Artifact,
-  ArtifactAction,
-  ArtifactActions,
-  ArtifactContent,
-  ArtifactDescription,
-  ArtifactHeader,
-  ArtifactTitle,
-} from "./artifact";
 import { CodeBlock } from "./code-block";
 import { Terminal, TerminalContent } from "./terminal";
 import {
@@ -581,7 +573,10 @@ export function analyzeMessageRenderActivity(markdown: string, isStreaming = fal
   };
 }
 
-const MessageRenderContext = createContext<{ isStreaming: boolean }>({ isStreaming: false });
+const MessageRenderContext = createContext<{ isStreaming: boolean; markdown: string }>({
+  isStreaming: false,
+  markdown: "",
+});
 
 function normalizeCodeLanguage(language?: string): BundledLanguage {
   const normalized = language?.trim().toLowerCase();
@@ -594,7 +589,61 @@ function normalizeCodeLanguage(language?: string): BundledLanguage {
 }
 
 function getRawCodeLanguage(className?: string): string | undefined {
-  return className?.match(/language-([^\s]+)/)?.[1]?.trim().toLowerCase();
+  return className?.match(/language-([^\s]+)/)?.[1]?.trim();
+}
+
+function getOriginalFenceLanguage(markdown: string, code: string, classLanguage?: string): string | undefined {
+  if (!markdown || !code) return undefined;
+
+  const expectedLanguage = normalizeMarkdownLanguage(classLanguage);
+  const lines = markdown.split(/\r?\n/);
+  let inFence = false;
+  let fenceMarker = "";
+  let fenceLength = 0;
+  let fenceLanguage = "";
+  let fenceLines: string[] = [];
+  const candidates: { code: string; language: string }[] = [];
+
+  for (const line of lines) {
+    const openMatch = line.match(/^\s*(```+|~~~+)\s*([^\s`]*)?/);
+    if (openMatch) {
+      if (inFence) {
+        const marker = openMatch[1];
+        if (marker[0] === fenceMarker && marker.length >= fenceLength) {
+          candidates.push({
+            code: fenceLines.join("\n"),
+            language: fenceLanguage,
+          });
+          inFence = false;
+          fenceMarker = "";
+          fenceLength = 0;
+          fenceLanguage = "";
+          fenceLines = [];
+        } else {
+          fenceLines.push(line);
+        }
+      } else {
+        const marker = openMatch[1];
+        inFence = true;
+        fenceMarker = marker[0];
+        fenceLength = marker.length;
+        fenceLanguage = openMatch[2]?.trim() ?? "";
+        fenceLines = [];
+      }
+      continue;
+    }
+
+    if (inFence) fenceLines.push(line);
+  }
+
+  const normalizedCode = code.replace(/\n$/, "");
+  const match = candidates.find((candidate) => {
+    if (candidate.code.replace(/\n$/, "") !== normalizedCode) return false;
+    if (!expectedLanguage) return true;
+    return normalizeMarkdownLanguage(candidate.language) === expectedLanguage;
+  }) ?? candidates.find((candidate) => candidate.code.replace(/\n$/, "") === normalizedCode);
+
+  return match?.language || undefined;
 }
 
 function isHtmlCode(language: string | undefined, code: string): boolean {
@@ -647,7 +696,7 @@ function StreamingChartPlaceholder({ language }: { language?: string }) {
 }
 
 const MessageCode = ({ children, className, node: _node, ...props }: MessageCodeProps) => {
-  const { isStreaming } = useContext(MessageRenderContext);
+  const { isStreaming, markdown } = useContext(MessageRenderContext);
   const [isCopied, setIsCopied] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const isBlock = "data-block" in props;
@@ -661,6 +710,7 @@ const MessageCode = ({ children, className, node: _node, ...props }: MessageCode
 
   const code = String(children ?? "").replace(/\n$/, "");
   const rawLanguage = getRawCodeLanguage(className);
+  const displayLanguage = getOriginalFenceLanguage(markdown, code, rawLanguage) ?? rawLanguage;
   const canPreviewHtml = isHtmlCode(rawLanguage, code);
   const canRenderTerminal = isTerminalCode(rawLanguage);
   const chartOption = canParseChartOption(rawLanguage) ? parseChartOption(code) : null;
@@ -712,48 +762,53 @@ const MessageCode = ({ children, className, node: _node, ...props }: MessageCode
   }
 
   return (
-    <Artifact className="my-2 h-128 max-h-[70vh] w-full max-w-full">
-      <ArtifactHeader>
-        <div className="min-w-0">
-          <ArtifactTitle className="font-mono">{rawLanguage || language}</ArtifactTitle>
-          <ArtifactDescription>
-            {showPreview && canPreviewHtml ? "HTML Preview" : canRenderTerminal ? "Terminal" : "Code"}
-          </ArtifactDescription>
-        </div>
-        <ArtifactActions>
+    <HeroCard className="group/code relative my-2 flex w-fit max-w-full gap-0 overflow-hidden bg-[#181a20] p-0 text-white dark:bg-[#181a20]" variant="default">
+      <div className="absolute top-2 right-2 z-10 flex items-center gap-1 opacity-70 transition-opacity group-hover/code:opacity-100">
           {canPreviewHtml && (
-            <ArtifactAction
-              icon={showPreview ? CodeIcon : EyeIcon}
-              label={showPreview ? "查看代码" : "预览 HTML"}
-              onClick={() => setShowPreview((value) => !value)}
-              tooltip={showPreview ? "查看代码" : "预览 HTML"}
-            />
+            <HeroButton
+              aria-label={showPreview ? "查看代码" : "预览 HTML"}
+              className="size-7 min-w-0 rounded-full bg-transparent p-0 text-white/55 shadow-none data-[hovered=true]:bg-white/10 data-[hovered=true]:text-white data-[pressed=true]:scale-95 [&_svg]:size-3.5"
+              isIconOnly
+              onPress={() => setShowPreview((value) => !value)}
+              size="sm"
+              variant="ghost"
+            >
+              {showPreview ? <CodeIcon /> : <EyeIcon />}
+            </HeroButton>
           )}
-          <ArtifactAction
-            icon={isCopied ? CheckIcon : CopyIcon}
-            label="复制代码"
-            onClick={handleCopy}
-            tooltip={isCopied ? "已复制" : "复制代码"}
-          />
-        </ArtifactActions>
-      </ArtifactHeader>
-      <ArtifactContent className="p-0">
-        {showPreview && canPreviewHtml ? (
-          <WebPreview className="rounded-none border-0" defaultUrl="about:srcdoc">
-            <WebPreviewNavigation>
-              <WebPreviewUrl readOnly value="about:srcdoc" />
-            </WebPreviewNavigation>
-            <WebPreviewBody className="bg-white" sandbox="" srcDoc={code} />
-          </WebPreview>
-        ) : canRenderTerminal ? (
-          <Terminal autoScroll className="h-full rounded-none border-0" output={code}>
-            <TerminalContent className="h-full max-h-none" />
-          </Terminal>
-        ) : (
-          <CodeBlock className="min-h-full rounded-none border-0" code={code} language={language} />
-        )}
-      </ArtifactContent>
-    </Artifact>
+          <HeroButton
+            aria-label={isCopied ? "已复制" : "复制代码"}
+            className="size-7 min-w-0 rounded-full bg-transparent p-0 text-white/55 shadow-none data-[hovered=true]:bg-white/10 data-[hovered=true]:text-white data-[pressed=true]:scale-95 [&_svg]:size-3.5"
+            isIconOnly
+            onPress={() => void handleCopy()}
+            size="sm"
+            variant="ghost"
+          >
+            {isCopied ? <CheckIcon /> : <CopyIcon />}
+          </HeroButton>
+      </div>
+      {showPreview && canPreviewHtml ? (
+        <WebPreview className="min-h-72 rounded-none border-0" defaultUrl="about:srcdoc">
+          <WebPreviewNavigation>
+            <WebPreviewUrl readOnly value="about:srcdoc" />
+          </WebPreviewNavigation>
+          <WebPreviewBody className="bg-white" sandbox="" srcDoc={code} />
+        </WebPreview>
+      ) : canRenderTerminal ? (
+        <Terminal autoScroll className="max-h-[70vh] rounded-none border-0" output={code}>
+          <TerminalContent className="max-h-none pb-8" />
+        </Terminal>
+      ) : (
+        <CodeBlock
+          className="w-fit max-w-full max-h-[70vh] rounded-none border-0 bg-transparent [&>div>div]:bg-transparent! [&>div>div>pre]:bg-transparent! [&>div>div>pre]:pb-8 [&>div>div>pre]:pr-14"
+          code={code}
+          language={language}
+        />
+      )}
+      <div className="pointer-events-none absolute right-2 bottom-2 z-10 max-w-[calc(100%-1rem)] truncate rounded-md bg-black/25 px-2 py-0.5 font-mono text-[11px] text-white/45 backdrop-blur-sm">
+        {showPreview && canPreviewHtml ? "preview" : canRenderTerminal ? "terminal" : displayLanguage || language}
+      </div>
+    </HeroCard>
   );
 };
 
@@ -1180,7 +1235,7 @@ export const MessageResponse = memo(
     const activity = useMemo(() => analyzeMessageRenderActivity(markdown, isStreaming), [isStreaming, markdown]);
 
     return (
-      <MessageRenderContext.Provider value={{ isStreaming }}>
+      <MessageRenderContext.Provider value={{ isStreaming, markdown }}>
         <Streamdown
           animated={isStreaming ? STREAMING_TEXT_ANIMATION : false}
           className={cn(
