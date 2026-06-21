@@ -24,6 +24,7 @@ export interface WindowManager {
   closeSplashWindow(): Promise<void>
   createTray(): Tray | null
   destroyTray(): void
+  focusMainWindow(route?: string): BrowserWindow
   setDockIcon(): void
   openChatWindow(): BrowserWindow
   openMomentsWindow(filterUsername?: string): BrowserWindow

@@ -28,6 +28,8 @@ type ReleaseAnnouncementPayload = {
   generatedAt?: string
 }
 
+const MAIN_WINDOW_ROUTES = new Set(['/home', '/agent', '/settings', '/pets', '/diary', '/export'])
+
 function getReleaseAnnouncementPath(): string {
   const isDev = !!process.env.VITE_DEV_SERVER_URL
   return isDev
@@ -321,6 +323,68 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
     const existingTray = ctx.getTray()
     if (existingTray) return existingTray
 
+    const focusMainWindow = (route?: string): BrowserWindow => manager.focusMainWindow(route)
+
+    const toggleMainWindow = () => {
+      const mainWindow = ctx.getMainWindow()
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized()) {
+        mainWindow.hide()
+        return
+      }
+      focusMainWindow()
+    }
+
+    const togglePetWindow = () => {
+      const configService = ctx.getConfigService()
+      const enabled = Boolean(configService?.get('petDesktopEnabled')) && manager.isPetWindowOpen()
+      if (enabled) {
+        manager.closePetWindow()
+        configService?.set('petDesktopEnabled', false)
+        ctx.broadcastToWindows('config:changed', { key: 'petDesktopEnabled', value: false })
+        return
+      }
+
+      configService?.set('petDesktopEnabled', true)
+      ctx.broadcastToWindows('config:changed', { key: 'petDesktopEnabled', value: true })
+      const currentPet = configService?.get('petCurrent')
+      if (currentPet) manager.openPetWindow()
+    }
+
+    const showTrayMenu = async () => {
+      const tray = ctx.getTray()
+      if (!tray) return
+      const configService = ctx.getConfigService()
+      const petEnabled = Boolean(configService?.get('petDesktopEnabled')) && manager.isPetWindowOpen()
+      const mainWindow = ctx.getMainWindow()
+      const mainVisible = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized())
+
+      const contextMenu = Menu.buildFromTemplate([
+        {
+          label: mainVisible ? '隐藏主窗口' : '显示主窗口',
+          click: toggleMainWindow,
+        },
+        { type: 'separator' },
+        { label: 'AI 助手', click: () => focusMainWindow('/agent') },
+        { label: '导出', click: () => focusMainWindow('/export') },
+        {
+          label: '桌宠',
+          type: 'checkbox',
+          checked: petEnabled,
+          click: togglePetWindow,
+        },
+        { label: '设置', click: () => focusMainWindow('/settings') },
+        { type: 'separator' },
+        {
+          label: '退出',
+          click: () => {
+            ctx.appWithQuitFlag.isQuitting = true
+            app.quit()
+          },
+        },
+      ])
+      tray.popUpContextMenu(contextMenu)
+    }
+
     let tray: Tray
     try {
       tray = new Tray(getTrayImage(ctx))
@@ -335,33 +399,9 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
       tray.setIgnoreDoubleClickEvents(true)
     }
 
-    const showMainWindow = () => {
-      const mainWindow = ctx.getMainWindow()
-      if (mainWindow) {
-        if (mainWindow.isMinimized()) mainWindow.restore()
-        mainWindow.show()
-        mainWindow.focus()
-      }
-    }
-
-    const contextMenu = Menu.buildFromTemplate([
-      {
-        label: '显示主窗口',
-        click: showMainWindow
-      },
-      { type: 'separator' },
-      {
-        label: '退出',
-        click: () => {
-          ctx.appWithQuitFlag.isQuitting = true
-          app.quit()
-        }
-      }
-    ])
-
     tray.setToolTip('密语 CipherTalk')
-    tray.setContextMenu(contextMenu)
-    tray.on('double-click', showMainWindow)
+    tray.on('click', () => { void showTrayMenu() })
+    tray.on('right-click', () => { void showTrayMenu() })
 
     return tray
   }
@@ -528,6 +568,32 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
         tray.destroy()
         ctx.setTray(null)
       }
+    },
+
+    focusMainWindow(route?: string) {
+      const targetRoute = route && MAIN_WINDOW_ROUTES.has(route) ? route : undefined
+      let win = ctx.getMainWindow()
+      if (!win || win.isDestroyed()) {
+        win = manager.createMainWindow()
+      }
+
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+
+      if (targetRoute) {
+        const sendNavigate = () => {
+          if (!win || win.isDestroyed()) return
+          win.webContents.send('window:navigate', targetRoute)
+        }
+        if (win.webContents.isLoading()) {
+          win.webContents.once('did-finish-load', sendNavigate)
+        } else {
+          sendNavigate()
+        }
+      }
+
+      return win
     },
 
     setDockIcon() {

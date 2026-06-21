@@ -77,6 +77,8 @@ type UpdateDownloadProgressPayload = {
   bytesPerSecond: number
 }
 
+const MAIN_WINDOW_NAV_ROUTES = new Set(['/home', '/agent', '/settings', '/pets', '/diary', '/export'])
+
 function App() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -102,6 +104,13 @@ function App() {
   const [memoryMigrating, setMemoryMigrating] = useState(false)
   const [memoryMigrationError, setMemoryMigrationError] = useState('')
   const [memoryMigrationDismissed, setMemoryMigrationDismissed] = useState(false)
+
+  useEffect(() => {
+    const off = window.electronAPI.window.onNavigate((route) => {
+      if (MAIN_WINDOW_NAV_ROUTES.has(route)) navigate(route)
+    })
+    return off
+  }, [navigate])
 
   const formatSpeed = (bytesPerSecond: number) => {
     if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return '计算中'

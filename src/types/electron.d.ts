@@ -374,6 +374,7 @@ export interface ElectronAPI {
     openPersonaChatWindow: (sessionId: string) => Promise<boolean>
     openPosterStyleWindow: () => Promise<boolean>
     onMomentsFilterUser: (callback: (username: string) => void) => () => void
+    onNavigate: (callback: (route: string) => void) => () => void
     openAgreementWindow: () => Promise<boolean>
     openPurchaseWindow: () => Promise<boolean>
     openWelcomeWindow: (mode?: 'default' | 'add-account') => Promise<boolean>

@@ -439,6 +439,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('moments:filterUser', (_, username) => callback(username))
       return () => ipcRenderer.removeAllListeners('moments:filterUser')
     },
+    onNavigate: (callback: (route: string) => void) => {
+      const listener = (_: unknown, route: string) => callback(route)
+      ipcRenderer.on('window:navigate', listener)
+      return () => ipcRenderer.removeListener('window:navigate', listener)
+    },
     openAgreementWindow: () => ipcRenderer.invoke('window:openAgreementWindow'),
     openPurchaseWindow: () => ipcRenderer.invoke('window:openPurchaseWindow'),
     openWelcomeWindow: (mode?: 'default' | 'add-account') => ipcRenderer.invoke('window:openWelcomeWindow', mode),
