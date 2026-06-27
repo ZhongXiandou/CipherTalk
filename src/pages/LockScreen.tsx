@@ -1,13 +1,16 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, type CSSProperties } from 'react'
 import { Avatar, Button } from '@heroui/react'
 import { useAppStore } from '../stores/appStore'
 import { useAuthStore } from '../stores/authStore'
 import { Lock, Fingerprint, AlertCircle, ChevronRight } from 'lucide-react'
 import './LockScreen.css'
 
+const noDragStyle = { WebkitAppRegion: 'no-drag' } as CSSProperties
+
 export default function LockScreen() {
     const { userInfo } = useAppStore()
     const [password, setPassword] = useState('')
+    const passwordInputRef = useRef<HTMLInputElement>(null)
     const { unlock, verifyPassword, authMethod } = useAuthStore()
     const [isVerifying, setIsVerifying] = useState(false)
     const [error, setError] = useState('')
@@ -20,6 +23,14 @@ export default function LockScreen() {
             // ignore
         })
     }, [])
+
+    useEffect(() => {
+        if (authMethod !== 'password') return
+        const focusTimer = window.setTimeout(() => {
+            passwordInputRef.current?.focus()
+        }, 0)
+        return () => window.clearTimeout(focusTimer)
+    }, [authMethod])
 
     const handleUnlock = async () => {
         if (isVerifying) return
@@ -61,8 +72,8 @@ export default function LockScreen() {
     }
 
     return (
-        <div className="lock-screen-overlay">
-            <div className="lock-content">
+        <div className="lock-screen-overlay" style={noDragStyle}>
+            <div className="lock-content" style={noDragStyle}>
                 <div className="lock-avatar-container">
                     <Avatar className="lock-avatar" color="default" variant="soft">
                         {userInfo?.avatarUrl ? (
@@ -96,20 +107,31 @@ export default function LockScreen() {
                         {isVerifying ? '正在验证...' : platformInfo.platform === 'darwin' ? '使用 Touch ID 解锁' : '使用 Windows Hello 解锁'}
                     </Button>
                 ) : (
-                    <form className="password-form" onSubmit={handlePasswordUnlock}>
-                        <div className="password-input-wrapper">
+                    <form className="password-form" onSubmit={handlePasswordUnlock} style={noDragStyle}>
+                        <div
+                            className="password-input-wrapper"
+                            style={noDragStyle}
+                            onMouseDown={(event) => {
+                                if (event.target === event.currentTarget) {
+                                    passwordInputRef.current?.focus()
+                                }
+                            }}
+                        >
                             <input
+                                ref={passwordInputRef}
                                 type="password"
                                 placeholder="请输入应用密码"
                                 className="password-input"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 autoFocus
+                                style={noDragStyle}
                             />
                             <button
                                 type="submit"
                                 className="password-submit-btn"
                                 disabled={isVerifying || !password}
+                                style={noDragStyle}
                             >
                                 <ChevronRight size={20} />
                             </button>

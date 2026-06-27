@@ -32,6 +32,8 @@
 }
 
 .lock-content {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -40,6 +42,8 @@
   padding: 40px;
   border-radius: 24px;
   width: 320px;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
 }
 
 .lock-avatar-container {
@@ -125,6 +129,8 @@
 
 .password-form {
   width: 100%;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
 }
 
 .password-input-wrapper {
@@ -136,6 +142,8 @@
   border-radius: 12px;
   padding: 6px 6px 6px 16px;
   transition: all 0.2s ease;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
 }
 
 .password-input-wrapper:focus-within {
@@ -151,6 +159,8 @@
   color: var(--text-primary);
   font-size: 15px;
   outline: none;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
 }
 
 .password-input::placeholder {
@@ -169,6 +179,8 @@
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
 }
 
 .password-submit-btn:hover {
