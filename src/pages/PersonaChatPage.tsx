@@ -4,23 +4,57 @@
  * 等待回复时头部只显示「对方正在输入…」，不暴露内部检索过程。
  * 历史挂 agent 会话存储（scope kind='persona'），打开恢复、每轮保存。
  */
-import { AlertCircle, Bot, CheckCircle, Loader2, MessageSquareX, Mic2, RefreshCw, Send, Square, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { AlertCircle, Bot, CheckCircle, Loader2, MessageSquareX, Mic2, RefreshCw, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useChat } from '@ai-sdk/react'
-import { AlertDialog, Button, ProgressBar, Label, Tooltip } from '@heroui/react'
-import type { UIMessage } from 'ai'
+import { AlertDialog, Button, ProgressBar, Label, Skeleton, Tooltip } from '@heroui/react'
+import type { FileUIPart, UIMessage } from 'ai'
+import type { CSSProperties } from 'react'
+import {
+  PromptInput,
+  PromptInputActionAddAttachments,
+  PromptInputActionMenu,
+  PromptInputActionMenuContent,
+  PromptInputActionMenuTrigger,
+  PromptInputAttachment,
+  PromptInputAttachments,
+  PromptInputBody,
+  PromptInputFooter,
+  PromptInputHeader,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputTools,
+  type PromptInputMessage,
+} from '@/components/ai-elements/prompt-input'
 import { PersonaChatTransport } from '../features/aiagent/transport/personaChatTransport'
+import { cn } from '../lib/utils'
 import { useTtsSpeaker } from '../lib/ttsPlayer'
 import { parseWechatEmoji } from '../utils/wechatEmoji'
 import type { PersonaBuildProgressInfo, PersonaRecordInfo } from '../types/electron'
 
 type Phase = 'loading' | 'confirm' | 'building' | 'chat'
 
+type PersonaChatPageProps = {
+  sessionId?: string
+  embedded?: boolean
+  onPersonaChanged?: () => void
+}
+
 function messageTextParts(message: UIMessage): string[] {
   return (message.parts || [])
     .map((part) => (part && typeof part === 'object' && part.type === 'text' ? String((part as { text?: unknown }).text || '') : ''))
     .filter(Boolean)
+}
+
+function messageFileParts(message: UIMessage): FileUIPart[] {
+  return (message.parts || [])
+    .filter((part): part is FileUIPart => (
+      Boolean(part)
+      && typeof part === 'object'
+      && part.type === 'file'
+      && typeof (part as { url?: unknown }).url === 'string'
+    ))
 }
 
 function messageText(message: UIMessage): string {
@@ -32,6 +66,8 @@ const VOICE_MARKER_RE = /^[\[【]\s*(?:语音|voice)\s*[\]】]\s*/i
 
 /** 表情包气泡标记（personaChatEngine 把 [表情:N] 解析后发出）：前缀 + JSON（cdnUrl/md5 等）。 */
 const STICKER_BUBBLE_PREFIX = '[表情包]'
+const INITIAL_RENDERED_MESSAGE_COUNT = 80
+const RENDERED_MESSAGE_BATCH_SIZE = 80
 
 interface PersonaStickerData {
   cdnUrl?: string
@@ -100,7 +136,7 @@ function PersonaStickerBubble({ sticker }: { sticker: PersonaStickerData }) {
       </div>
     )
   }
-  return <img alt="表情包" className="max-h-28 max-w-40 rounded-lg object-contain" draggable={false} src={src} />
+  return <img alt="表情包" className="max-h-36 max-w-52 rounded-lg object-contain" draggable={false} loading="lazy" src={src} />
 }
 
 /** 微信语音条的声波图标：加载时旋转提示，播放时切换成动态音量柱。 */
@@ -149,6 +185,7 @@ function PersonaAvatar({ name, avatarUrl, size }: { name: string; avatarUrl?: st
         alt={name}
         style={{ width: size, height: size }}
         className="shrink-0 rounded-full object-cover"
+        loading="lazy"
         onError={() => setImgError(true)}
       />
     )
@@ -170,22 +207,90 @@ function getPersonaVoiceLabel(persona: PersonaRecordInfo | null): string {
   return '专属豆包音色'
 }
 
-export default function PersonaChatPage() {
+function PersonaChatSkeleton() {
+  return (
+    <div className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex h-16 shrink-0 items-center gap-3 border-b border-border/60 px-5">
+        <Skeleton className="size-11 shrink-0 rounded-full" />
+        <div className="min-w-0 flex-1 space-y-2">
+          <Skeleton className="h-4 w-36 rounded-lg" />
+          <Skeleton className="h-3 w-72 max-w-full rounded-lg" />
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Skeleton className="size-8 rounded-lg" />
+          <Skeleton className="size-8 rounded-lg" />
+          <Skeleton className="size-8 rounded-lg" />
+        </div>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-hidden px-6 py-5">
+        <div className="flex items-start gap-3">
+          <Skeleton className="size-10 shrink-0 rounded-full" />
+          <div className="space-y-2">
+            <Skeleton className="h-11 w-72 rounded-2xl" />
+            <Skeleton className="h-11 w-52 rounded-2xl" />
+          </div>
+        </div>
+        <div className="flex justify-end gap-3">
+          <div className="space-y-2">
+            <Skeleton className="h-11 w-64 rounded-2xl" />
+            <Skeleton className="ml-auto h-11 w-40 rounded-2xl" />
+          </div>
+          <Skeleton className="size-10 shrink-0 rounded-full" />
+        </div>
+      </div>
+
+      <div className="shrink-0 border-t border-border/60 px-5 py-4">
+        <Skeleton className="mx-auto h-24 w-full max-w-4xl rounded-[22px]" />
+      </div>
+    </div>
+  )
+}
+
+function PersonaMessageAttachment({ file, isMine }: { file: FileUIPart; isMine: boolean }) {
+  const isImage = file.mediaType?.startsWith('image/') && file.url
+  if (isImage) {
+    return (
+      <img
+        alt={file.filename || '图片'}
+        className={cn(
+          'max-h-64 max-w-80 rounded-2xl object-contain shadow-xs',
+          isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'
+        )}
+        draggable={false}
+        loading="lazy"
+        src={file.url}
+      />
+    )
+  }
+
+  return (
+    <div className={cn(
+      'max-w-80 rounded-2xl bg-surface px-4 py-2.5 text-sm text-foreground',
+      isMine ? 'rounded-tr-sm bg-success-soft text-success-soft-foreground' : 'rounded-tl-sm'
+    )}>
+      {file.filename || '附件'}
+    </div>
+  )
+}
+
+export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = false, onPersonaChanged }: PersonaChatPageProps = {}) {
   const location = useLocation()
-  const sessionId = useMemo(() => {
+  const routeSessionId = useMemo(() => {
     const match = /^\/persona-chat\/([^/]+)/.exec(location.pathname)
     return match ? decodeURIComponent(match[1]) : ''
   }, [location.pathname])
+  const sessionId = sessionIdProp || routeSessionId
 
   const [displayName, setDisplayName] = useState('')
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined)
   const [myAvatarUrl, setMyAvatarUrl] = useState<string | undefined>(undefined)
+  const [sessionDetailLoading, setSessionDetailLoading] = useState(true)
   const [phase, setPhase] = useState<Phase>('loading')
   const [persona, setPersona] = useState<PersonaRecordInfo | null>(null)
   const [buildProgress, setBuildProgress] = useState<PersonaBuildProgressInfo | null>(null)
   const [buildError, setBuildError] = useState<string | null>(null)
   const [conversationId, setConversationId] = useState<number | null>(null)
-  const [input, setInput] = useState('')
   const [clearingConversations, setClearingConversations] = useState(false)
   const [voiceCloning, setVoiceCloning] = useState(false)
   const [voiceCloneStatus, setVoiceCloneStatus] = useState<{ ok: boolean; text: string } | null>(null)
@@ -197,11 +302,84 @@ export default function PersonaChatPage() {
   const inputValueRef = useRef('')
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const shouldStickToBottomRef = useRef(true)
+  const scrollFrameRef = useRef<number | null>(null)
+  const scrollTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([])
   const lastSavedCountRef = useRef(0)
 
   const transport = useMemo(() => new PersonaChatTransport(() => sessionId), [sessionId])
   const { messages, sendMessage, setMessages, status, stop, error } = useChat({ transport, experimental_throttle: 50 })
   const busy = status === 'submitted' || status === 'streaming'
+  const stopRef = useRef(stop)
+  const stopVoiceRef = useRef<() => void>(() => {})
+  const setMessagesRef = useRef(setMessages)
+  const [visibleMessageCount, setVisibleMessageCount] = useState(INITIAL_RENDERED_MESSAGE_COUNT)
+  const visibleMessageCountRef = useRef(INITIAL_RENDERED_MESSAGE_COUNT)
+  const messagesLengthRef = useRef(0)
+  const loadingOlderRef = useRef(false)
+
+  visibleMessageCountRef.current = visibleMessageCount
+  messagesLengthRef.current = messages.length
+
+  const visibleMessages = useMemo(() => {
+    const start = Math.max(0, messages.length - visibleMessageCount)
+    return messages.slice(start)
+  }, [messages, visibleMessageCount])
+  const hiddenMessageCount = Math.max(0, messages.length - visibleMessages.length)
+
+  const clearScheduledScroll = useCallback(() => {
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current)
+      scrollFrameRef.current = null
+    }
+    for (const timer of scrollTimersRef.current) clearTimeout(timer)
+    scrollTimersRef.current = []
+  }, [])
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    shouldStickToBottomRef.current = true
+    clearScheduledScroll()
+    const apply = () => {
+      const el = scrollRef.current
+      if (!el) return
+      el.scrollTo({ top: el.scrollHeight, behavior })
+    }
+    apply()
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      apply()
+    })
+    scrollTimersRef.current = [80, 240, 600].map((delay) => setTimeout(apply, delay))
+  }, [clearScheduledScroll])
+
+  const loadOlderMessages = useCallback(() => {
+    const total = messagesLengthRef.current
+    const current = visibleMessageCountRef.current
+    if (loadingOlderRef.current || current >= total) return
+
+    const el = scrollRef.current
+    const previousHeight = el?.scrollHeight ?? 0
+    const previousTop = el?.scrollTop ?? 0
+
+    loadingOlderRef.current = true
+    setVisibleMessageCount(Math.min(total, current + RENDERED_MESSAGE_BATCH_SIZE))
+    requestAnimationFrame(() => {
+      const nextEl = scrollRef.current
+      if (nextEl) nextEl.scrollTop = nextEl.scrollHeight - previousHeight + previousTop
+      loadingOlderRef.current = false
+    })
+  }, [])
+
+  const handleMessageScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    shouldStickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96
+    if (el.scrollTop < 80 && visibleMessageCountRef.current < messagesLengthRef.current) loadOlderMessages()
+  }
+
+  const handleMessageMediaLoad = () => {
+    if (shouldStickToBottomRef.current) scrollToBottom()
+  }
 
   // 语音消息：模型自己决定哪条用语音发（行首 [语音] 标记），这里负责微信式的"点开听"
   const { speakingKey, speakingState, speak: speakVoice, stop: stopVoice } = useTtsSpeaker()
@@ -212,6 +390,44 @@ export default function PersonaChatPage() {
   /** 连播链 id：点新语音/停止时自增，旧的连播循环检测到后退出 */
   const voiceChainRef = useRef(0)
   useEffect(() => () => { stopVoice() }, [stopVoice])
+
+  useEffect(() => {
+    stopRef.current = stop
+    stopVoiceRef.current = stopVoice
+    setMessagesRef.current = setMessages
+  }, [setMessages, stop, stopVoice])
+
+  useEffect(() => {
+    stopRef.current()
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current)
+      flushTimerRef.current = null
+    }
+    stopVoiceRef.current()
+    pendingRef.current = []
+    inputValueRef.current = ''
+    shouldStickToBottomRef.current = true
+    clearScheduledScroll()
+    loadingOlderRef.current = false
+    visibleMessageCountRef.current = INITIAL_RENDERED_MESSAGE_COUNT
+    lastSavedCountRef.current = 0
+    setDisplayName('')
+    setAvatarUrl(undefined)
+    setMyAvatarUrl(undefined)
+    setSessionDetailLoading(Boolean(sessionId))
+    setPhase('loading')
+    setPersona(null)
+    setBuildProgress(null)
+    setBuildError(null)
+    setConversationId(null)
+    setPendingTexts([])
+    setVisibleMessageCount(INITIAL_RENDERED_MESSAGE_COUNT)
+    setPlayedVoice(new Set())
+    setRevealedVoice(new Set())
+    setVoiceCloneStatus(null)
+    setConfirmAction(null)
+    setMessagesRef.current([])
+  }, [clearScheduledScroll, sessionId])
 
   const markVoicePlayed = (key: string) => {
     setPlayedVoice((prev) => {
@@ -288,17 +504,32 @@ export default function PersonaChatPage() {
   // 卸载时清掉待发计时器
   useEffect(() => () => {
     if (flushTimerRef.current) clearTimeout(flushTimerRef.current)
-  }, [])
+    clearScheduledScroll()
+  }, [clearScheduledScroll])
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages, pendingTexts, busy, phase, scrollToBottom])
+
+  useEffect(() => {
+    if (phase !== 'chat') return
+    scrollToBottom()
+  }, [phase, sessionId, scrollToBottom])
 
   // 窗口标题同步（任务栏/系统标题栏）
   useEffect(() => {
+    if (embedded) return
     document.title = busy ? '对方正在输入…' : (displayName ? `${displayName}` : '克隆好友')
-  }, [busy, displayName])
+  }, [busy, displayName, embedded])
 
   // 拉好友信息（昵称/头像）
   useEffect(() => {
-    if (!sessionId) return
+    if (!sessionId) {
+      setSessionDetailLoading(false)
+      return
+    }
     let cancelled = false
+    setSessionDetailLoading(true)
     void Promise.all([
       window.electronAPI.chat.getSessionDetail(sessionId),
       window.electronAPI.chat.getMyAvatarUrl(),
@@ -313,7 +544,13 @@ export default function PersonaChatPage() {
       if (myAvatarRes.success && myAvatarRes.avatarUrl) {
         setMyAvatarUrl(myAvatarRes.avatarUrl)
       }
-    }).catch(() => { if (!cancelled) setDisplayName(sessionId) })
+      setSessionDetailLoading(false)
+    }).catch(() => {
+      if (!cancelled) {
+        setDisplayName(sessionId)
+        setSessionDetailLoading(false)
+      }
+    })
     return () => { cancelled = true }
   }, [sessionId])
 
@@ -369,12 +606,6 @@ export default function PersonaChatPage() {
     })
   }, [sessionId])
 
-  // 新消息自动滚到底
-  useEffect(() => {
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [messages, pendingTexts, busy, phase])
-
   // 每轮结束保存对话；保存后触发对话反思（主进程攒够未反思消息才真正跑，提炼导演笔记）
   useEffect(() => {
     if (status !== 'ready' || !conversationId || messages.length === 0) return
@@ -393,6 +624,7 @@ export default function PersonaChatPage() {
     if (res.success && res.persona) {
       setPersona(res.persona)
       setPhase('chat')
+      onPersonaChanged?.()
     } else {
       setBuildError(res.error || '克隆失败')
       setPhase('confirm')
@@ -408,6 +640,7 @@ export default function PersonaChatPage() {
     setConversationId(null)
     lastSavedCountRef.current = 0
     setPhase('confirm')
+    onPersonaChanged?.()
   }
 
   const handleCloneVoice = async () => {
@@ -475,10 +708,7 @@ export default function PersonaChatPage() {
     }
   }
 
-  const handleSend = async () => {
-    const text = input.trim()
-    if (!text || busy) return
-    setInput('')
+  const ensureConversation = async () => {
     inputValueRef.current = ''
     if (!conversationId) {
       try {
@@ -491,10 +721,36 @@ export default function PersonaChatPage() {
         }
       } catch { /* 创建失败不阻塞发送，本轮不持久化 */ }
     }
+  }
+
+  const handleSendText = async (rawText: string) => {
+    const text = rawText.trim()
+    if (!text || busy) return
+    await ensureConversation()
     // 不直接触发 AI：先进待发缓冲，停顿几秒后这一串一起交给对方回
     pendingRef.current = [...pendingRef.current, text]
     setPendingTexts(pendingRef.current)
     armFlushTimer()
+  }
+
+  const handlePromptSubmit = async (message: PromptInputMessage) => {
+    if (busy) {
+      stop()
+      return
+    }
+    const text = message.text.trim()
+    if (message.files.length > 0) {
+      await ensureConversation()
+      clearPending()
+      await sendMessage({
+        parts: [
+          ...message.files.map((file) => ({ ...file, type: 'file' as const })),
+          ...(text ? [{ type: 'text' as const, text }] : []),
+        ],
+      })
+      return
+    }
+    await handleSendText(text)
   }
 
   if (!sessionId) {
@@ -503,13 +759,8 @@ export default function PersonaChatPage() {
     )
   }
 
-  if (phase === 'loading') {
-    return (
-      <div className="flex flex-1 items-center justify-center gap-2 text-muted">
-        <Loader2 size={18} className="animate-spin" />
-        <span className="text-sm">正在检查分身状态…</span>
-      </div>
-    )
+  if (phase === 'loading' || sessionDetailLoading) {
+    return <PersonaChatSkeleton />
   }
 
   if (phase === 'confirm') {
@@ -567,13 +818,13 @@ export default function PersonaChatPage() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
       {/* 仿手机聊天头部：等待回复时只显示"对方正在输入…" */}
-      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-border/60 px-4">
-        <PersonaAvatar name={displayName} avatarUrl={avatarUrl} size={36} />
+      <div className="flex h-16 shrink-0 items-center gap-3 border-b border-border/60 px-5">
+        <PersonaAvatar name={displayName} avatarUrl={avatarUrl} size={44} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold text-foreground">{headerTitle}</div>
-          <div className="truncate text-xs text-muted">
+          <div className="truncate text-base font-semibold text-foreground">{headerTitle}</div>
+          <div className="truncate text-sm text-muted">
             数字分身{persona ? ` · 基于 ${persona.stats.friendMessageCount + (persona.stats.groupMessageCount || 0)} 条消息${persona.stats.groupMessageCount ? `（含群聊发言 ${persona.stats.groupMessageCount} 条）` : ''}${persona.ttsVoice ? ` · ${getPersonaVoiceLabel(persona)}` : ''}` : ''}
           </div>
         </div>
@@ -641,22 +892,38 @@ export default function PersonaChatPage() {
       )}
 
       {/* 消息区 */}
-      <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-3">
+      <div
+        ref={scrollRef}
+        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-6 pt-5 pb-52"
+        onLoadCapture={handleMessageMediaLoad}
+        onScroll={handleMessageScroll}
+      >
         {messages.length === 0 && pendingTexts.length === 0 && !busy && (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted">
-            <Bot size={32} />
-            <p className="text-sm">和「{displayName}」的分身打个招呼吧</p>
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted">
+            <Bot size={40} />
+            <p className="text-base">和「{displayName}」的分身打个招呼吧</p>
           </div>
         )}
-        {messages.map((message) => {
+        {hiddenMessageCount > 0 && (
+          <div className="flex justify-center py-1">
+            <Button size="sm" variant="tertiary" onPress={loadOlderMessages}>
+              加载更早消息（还有 {hiddenMessageCount} 条）
+            </Button>
+          </div>
+        )}
+        {visibleMessages.map((message) => {
           const rawBubbles = messageTextParts(message).map((part) => part.trim()).filter(Boolean)
-          if (rawBubbles.length === 0) return null
+          const fileParts = messageFileParts(message)
+          if (rawBubbles.length === 0 && fileParts.length === 0) return null
           const bubbles = rawBubbles.map(parseBubble)
           const isMine = message.role === 'user'
           return (
-            <div key={message.id} className={`flex w-full gap-2 ${isMine ? 'justify-end' : 'justify-start'}`}>
-              {!isMine && <PersonaAvatar name={displayName} avatarUrl={avatarUrl} size={30} />}
-              <div className={`flex max-w-[78%] flex-col gap-1 ${isMine ? 'items-end' : 'items-start'}`}>
+            <div key={message.id} className={`flex w-full gap-3 ${isMine ? 'justify-end' : 'justify-start'}`}>
+              {!isMine && <PersonaAvatar name={displayName} avatarUrl={avatarUrl} size={38} />}
+              <div className={`flex max-w-[76%] flex-col gap-1.5 ${isMine ? 'items-end' : 'items-start'}`}>
+                {fileParts.map((file, index) => (
+                  <PersonaMessageAttachment key={`${message.id}:file:${index}`} file={file} isMine={isMine} />
+                ))}
                 {bubbles.map((bubble, index) => {
                   const bubbleKey = `${message.id}:${index}`
                   if (bubble.sticker) {
@@ -671,9 +938,9 @@ export default function PersonaChatPage() {
                       <div key={bubbleKey} className="flex items-center gap-1.5">
                         <button
                           aria-label={active ? '停止播放语音' : `播放语音，约 ${bubble.seconds} 秒`}
-                          className={`flex cursor-pointer items-center rounded-2xl rounded-tl-sm border-0 bg-surface px-3 py-2.5 text-sm text-foreground transition-colors hover:bg-surface/80 ${loading ? 'animate-pulse' : ''} ${playing ? 'ring-1 ring-accent/40' : ''}`}
+                          className={`flex cursor-pointer items-center rounded-2xl rounded-tl-sm border-0 bg-surface px-4 py-3 text-base text-foreground transition-colors hover:bg-surface/80 ${loading ? 'animate-pulse' : ''} ${playing ? 'ring-1 ring-accent/40' : ''}`}
                           onClick={() => { void handlePlayVoice(message.id, bubbles, index) }}
-                          style={{ width: Math.min(220, 88 + bubble.seconds * 3) }}
+                          style={{ width: Math.min(260, 108 + bubble.seconds * 4) }}
                           type="button"
                         >
                           <VoiceWaves loading={loading} playing={playing} />
@@ -689,7 +956,7 @@ export default function PersonaChatPage() {
                   return (
                     <div
                       key={bubbleKey}
-                      className={`whitespace-pre-wrap wrap-break-word rounded-2xl px-3 py-2 text-sm ${
+                      className={`whitespace-pre-wrap wrap-break-word rounded-2xl px-4 py-2.5 text-base leading-7 ${
                         isMine
                           ? 'rounded-tr-sm bg-success-soft text-success-soft-foreground'
                           : 'rounded-tl-sm bg-surface text-foreground'
@@ -700,30 +967,30 @@ export default function PersonaChatPage() {
                   )
                 })}
               </div>
-              {isMine && <PersonaAvatar name="我" avatarUrl={myAvatarUrl} size={30} />}
+              {isMine && <PersonaAvatar name="我" avatarUrl={myAvatarUrl} size={38} />}
             </div>
           )
         })}
         {/* 待发缓冲气泡：已显示但还没交给 AI（等用户把话说完） */}
         {pendingTexts.length > 0 && (
-          <div className="flex w-full justify-end gap-2">
-            <div className="flex max-w-[78%] flex-col items-end gap-1">
+          <div className="flex w-full justify-end gap-3">
+            <div className="flex max-w-[76%] flex-col items-end gap-1.5">
               {pendingTexts.map((bubble, index) => (
                 <div
                   key={`pending:${index}`}
-                  className="whitespace-pre-wrap wrap-break-word rounded-2xl rounded-tr-sm bg-success-soft px-3 py-2 text-sm text-success-soft-foreground"
+                  className="whitespace-pre-wrap wrap-break-word rounded-2xl rounded-tr-sm bg-success-soft px-4 py-2.5 text-base leading-7 text-success-soft-foreground"
                 >
                   {parseWechatEmoji(bubble)}
                 </div>
               ))}
             </div>
-            <PersonaAvatar name="我" avatarUrl={myAvatarUrl} size={30} />
+            <PersonaAvatar name="我" avatarUrl={myAvatarUrl} size={38} />
           </div>
         )}
         {showTypingIndicator && (
-          <div className="flex w-full items-start justify-start gap-2">
-            <PersonaAvatar name={displayName} avatarUrl={avatarUrl} size={30} />
-            <span className="inline-flex gap-1 rounded-2xl rounded-tl-sm bg-surface px-3 py-2.5">
+          <div className="flex w-full items-start justify-start gap-3">
+            <PersonaAvatar name={displayName} avatarUrl={avatarUrl} size={38} />
+            <span className="inline-flex gap-1 rounded-2xl rounded-tl-sm bg-surface px-4 py-3">
               <span className="size-1.5 animate-bounce rounded-full bg-muted [animation-delay:0ms]" />
               <span className="size-1.5 animate-bounce rounded-full bg-muted [animation-delay:150ms]" />
               <span className="size-1.5 animate-bounce rounded-full bg-muted [animation-delay:300ms]" />
@@ -739,32 +1006,55 @@ export default function PersonaChatPage() {
       </div>
 
       {/* 输入栏 */}
-      <div className="flex shrink-0 items-center gap-2 border-t border-border/60 px-3 py-3">
-        <input
-          aria-label={`给${displayName}的分身发消息`}
-          className="h-10 flex-1 rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-[3px] focus:ring-ring/30"
-          placeholder={`给「${displayName}」发消息…`}
-          value={input}
-          onChange={(event) => {
-            setInput(event.target.value)
-            inputValueRef.current = event.target.value
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-              event.preventDefault()
-              void handleSend()
-            }
+      <div className="pointer-events-none absolute right-0 bottom-0 left-0 h-56">
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 backdrop-blur-[2px]"
+          style={{
+            background: 'linear-gradient(to top, var(--bg-primary) 0%, color-mix(in srgb, var(--bg-primary) 82%, transparent) 48%, transparent 100%)',
+            maskImage: 'linear-gradient(to top, black 0%, black 58%, transparent 100%)',
+            WebkitMaskImage: 'linear-gradient(to top, black 0%, black 58%, transparent 100%)',
           }}
         />
-        {busy ? (
-          <Button isIconOnly aria-label="停止生成" variant="secondary" onPress={() => stop()}>
-            <Square size={16} />
-          </Button>
-        ) : (
-          <Button isIconOnly aria-label="发送" isDisabled={!input.trim()} onPress={handleSend}>
-            <Send size={16} />
-          </Button>
-        )}
+        <div className="absolute right-0 bottom-4 left-0 grid place-items-center px-5">
+        <div className="pointer-events-auto w-full max-w-[min(64rem,calc(100%-2.5rem))]">
+          <PromptInput
+            accept="image/*"
+            className="persona-prompt-input w-full **:data-[slot=input-group]:rounded-(--persona-radius,12px) **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-lg"
+            maxFiles={6}
+            maxFileSize={8 * 1024 * 1024}
+            multiple
+            onSubmit={handlePromptSubmit}
+            style={{ '--persona-radius': '22px' } as CSSProperties}
+          >
+            <PromptInputHeader className="flex-col items-stretch gap-1.5 px-3 pt-2 pb-0">
+              <PromptInputAttachments className="p-0">
+                {(attachment) => <PromptInputAttachment data={attachment} />}
+              </PromptInputAttachments>
+            </PromptInputHeader>
+            <PromptInputBody>
+              <PromptInputTextarea
+                className="min-h-13 pt-3 pb-2 text-base"
+                placeholder={`给「${displayName}」发消息，Enter 发送，Shift + Enter 换行…`}
+                onChange={(event) => {
+                  inputValueRef.current = event.currentTarget.value
+                }}
+              />
+            </PromptInputBody>
+            <PromptInputFooter>
+              <PromptInputTools>
+                <PromptInputActionMenu>
+                  <PromptInputActionMenuTrigger aria-label="添加图片" variant="tertiary" />
+                  <PromptInputActionMenuContent>
+                    <PromptInputActionAddAttachments label="添加图片" />
+                  </PromptInputActionMenuContent>
+                </PromptInputActionMenu>
+              </PromptInputTools>
+              <PromptInputSubmit status={busy ? 'streaming' : undefined} />
+            </PromptInputFooter>
+          </PromptInput>
+        </div>
+        </div>
       </div>
 
       {/* 删除分身画像确认 */}

@@ -4988,14 +4988,14 @@ export default function AgentPage() {
               state={codeWorkspaceState}
             />
           )}
-          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
       <Conversation className="min-h-0 flex-1">
         <ConversationAutoScroll enabled={shouldAnchorLatestUser} trigger={latestUserMessageId} />
         <ConversationContent
           className={
             messages.length === 0
-              ? 'mx-auto h-full w-full min-w-80 max-w-[82%] pt-4 pb-12'
-              : 'mx-auto w-full min-w-80 max-w-[82%] pt-4 pb-12'
+              ? 'mx-auto h-full w-full min-w-80 max-w-[82%] pt-4 pb-48'
+              : 'mx-auto w-full min-w-80 max-w-[82%] pt-4 pb-48'
           }
         >
           {messages.length === 0 ? (
@@ -5304,15 +5304,26 @@ export default function AgentPage() {
           {busy && subAgentProgress.length > 0 && !lastAssistantMessageHasDelegateTool && <SubAgentProgressPanel events={subAgentProgress} />}
           {status === 'submitted' && agentProgress.length === 0 && <Loader />}
         </ConversationContent>
-        <ConversationScrollButton />
+        <ConversationScrollButton className="bottom-36" />
       </Conversation>
 
-      <div className="shrink-0 pt-2 pb-1">
+      <div className="pointer-events-none absolute right-0 bottom-0 left-0 h-44">
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 backdrop-blur-[2px]"
+          style={{
+            background: 'linear-gradient(to top, var(--bg-primary) 0%, color-mix(in srgb, var(--bg-primary) 82%, transparent) 48%, transparent 100%)',
+            maskImage: 'linear-gradient(to top, black 0%, black 58%, transparent 100%)',
+            WebkitMaskImage: 'linear-gradient(to top, black 0%, black 58%, transparent 100%)',
+          }}
+        />
+        <div className="absolute right-0 bottom-3 left-0 grid place-items-center px-5">
+          <div className="pointer-events-auto w-full max-w-4xl">
         <PromptInputProvider>
           <PromptInputControllerBridge controllerRef={promptInputControllerRef} />
           <PromptInput
             accept="image/*,.txt,.md,.json,.csv,.pdf,application/pdf"
-            className={`agent-prompt-input mx-auto mb-1 w-full min-w-80 max-w-[82%] **:data-[slot=input-group]:rounded-(--agent-radius,12px) **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-xs ${workspaceFileDragOver ? '**:data-[slot=input-group]:ring-2 **:data-[slot=input-group]:ring-primary/45' : ''}`}
+            className={`agent-prompt-input w-full **:data-[slot=input-group]:rounded-(--agent-radius,12px) **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-lg ${workspaceFileDragOver ? '**:data-[slot=input-group]:ring-2 **:data-[slot=input-group]:ring-primary/45' : ''}`}
             maxFiles={6}
             maxFileSize={8 * 1024 * 1024}
             multiple
@@ -5339,13 +5350,13 @@ export default function AgentPage() {
                 sessions={sessions}
               />
               <PromptInputTextarea
-                className="pt-3 pb-2"
+                className="min-h-10 max-h-40 py-2 text-sm leading-5"
                 placeholder="问问你的聊天记录，Enter 发送，Shift + Enter 换行…"
               />
             </PromptInputBody>
 
-            <PromptInputFooter>
-              <PromptInputTools className="flex-wrap gap-2">
+            <PromptInputFooter className="items-center gap-1.5 px-2.5 pt-1 pb-2">
+              <PromptInputTools className="flex-wrap gap-1.5">
                 <ButtonGroup size="sm" variant="tertiary">
                   <PromptInputActionMenu>
                     <PromptInputActionMenuTrigger aria-label="更多输入操作" variant="tertiary" />
@@ -5490,7 +5501,7 @@ export default function AgentPage() {
             </PromptInputFooter>
           </PromptInput>
         </PromptInputProvider>
-        <div className="mx-auto flex w-full min-w-80 max-w-[82%] items-center justify-between gap-3 px-2">
+        <div className="mt-2 flex w-full items-center justify-between gap-3 px-2">
           <CodeWorkspacePanel
             approval={codeWorkspaceApproval}
             className="min-w-0 flex-1"
@@ -5508,6 +5519,8 @@ export default function AgentPage() {
               <span className="font-medium text-foreground/80">共 {formatTokenCount(conversationUsage.total)}</span>
             </div>
           )}
+        </div>
+          </div>
         </div>
       </div>
           </div>
@@ -5572,7 +5585,7 @@ export default function AgentPage() {
               <Modal.Heading>分享 Agent 对话</Modal.Heading>
             </Modal.Header>
             <Modal.Body>
-              <div className="grid min-h-[34rem] gap-5 lg:grid-cols-[20rem_minmax(0,1fr)]">
+              <div className="grid min-h-136 gap-5 lg:grid-cols-[20rem_minmax(0,1fr)]">
                 <div className="min-h-0 rounded-(--agent-radius,12px) border border-border bg-muted/20 p-3">
                   <SearchField
                     aria-label="搜索对话"
@@ -5586,7 +5599,7 @@ export default function AgentPage() {
                       <SearchField.ClearButton />
                     </SearchField.Group>
                   </SearchField>
-                  <div className="ct-agent-scrollbar max-h-[30rem] space-y-1 overflow-y-auto pr-1">
+                  <div className="ct-agent-scrollbar max-h-120 space-y-1 overflow-y-auto pr-1">
                     {conversationRecords.length === 0 ? (
                       <div className="flex min-h-40 items-center justify-center rounded-(--agent-radius,12px) border border-dashed border-border text-muted-foreground text-sm">
                         暂无对话记录
@@ -5634,7 +5647,7 @@ export default function AgentPage() {
                       </span>
                     )}
                   </div>
-                  <div className="ct-agent-scrollbar max-h-[31rem] overflow-auto p-5">
+                  <div className="ct-agent-scrollbar max-h-124 overflow-auto p-5">
                     {shareLoading ? (
                       <div className="flex min-h-80 items-center justify-center gap-2 text-muted-foreground text-sm">
                         <Spinner size="sm" />
@@ -5647,7 +5660,7 @@ export default function AgentPage() {
                         </div>
                         <div
                           aria-hidden
-                          className="pointer-events-none fixed left-[-10000px] top-0"
+                          className="pointer-events-none fixed -left-2500 top-0"
                         >
                           <AgentShareCard captureRef={shareCardRef} data={sharePreviewData} />
                         </div>

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactElement, type CSSProperties, type Key } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Avatar, Button, ScrollShadow, Separator, Tabs, Tooltip } from '@heroui/react'
-import { Home, MessageSquare, Database, Settings, SquareChevronLeft, SquareChevronRight, Download, Aperture, Bot, PawPrint, BookOpen } from 'lucide-react'
+import { Home, MessageSquare, Database, Settings, SquareChevronLeft, SquareChevronRight, Download, Aperture, Bot, PawPrint, BookOpen, UserRoundPlus } from 'lucide-react'
 import { MCP } from '@lobehub/icons'
 import packageJson from '../../package.json'
 import { useAppStore } from '../stores/appStore'
@@ -70,6 +70,7 @@ function Sidebar({ autoCollapse = false }: { autoCollapse?: boolean }) {
   const navItems: NavItemConfig[] = [
     { key: 'home', label: '首页', icon: <Home size={NAV_ICON_SIZE} />, type: 'route', path: '/home' },
     { key: 'agent', label: 'CT-Agent', icon: <Bot size={NAV_ICON_SIZE} />, type: 'route', path: '/agent' },
+    { key: 'personas', label: 'AI 克隆', icon: <UserRoundPlus size={NAV_ICON_SIZE} />, type: 'route', path: '/personas' },
     { key: 'diary', label: '日记', icon: <BookOpen size={NAV_ICON_SIZE} />, type: 'route', path: '/diary' },
     { key: 'pets', label: 'AI 宠物', icon: <PawPrint size={NAV_ICON_SIZE} />, type: 'route', path: '/pets' },
     { key: 'chat', label: '聊天查看', icon: <MessageSquare size={NAV_ICON_SIZE} />, type: 'action', onClick: openChatWindow },

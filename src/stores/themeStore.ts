@@ -6,6 +6,13 @@ export type HomeBackgroundSource = 'preset' | 'custom'
 export type HomeBackgroundMediaType = 'image' | 'video' | ''
 
 const publicAsset = (fileName: string): string => `${import.meta.env.BASE_URL}${fileName}`
+const cacheThemeMode = (mode: ThemeMode): void => {
+  try {
+    window.localStorage.setItem('themeMode', mode)
+  } catch {
+    // localStorage may be unavailable in restricted contexts.
+  }
+}
 
 export const HOME_BACKGROUND_PRESETS = [
   { id: 'beijing', label: '默认背景', description: '原始预设视频', src: publicAsset('beijing.mp4'), poster: publicAsset('beijing.jpg') },
@@ -83,6 +90,7 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
 
   setThemeMode: async (mode) => {
     set({ themeMode: mode })
+    cacheThemeMode(mode)
     try {
       await window.electronAPI.config.set('themeMode', mode)
     } catch (e) {
@@ -213,6 +221,7 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
         homeBackground: nextHomeBackground,
         isLoaded: true
       })
+      cacheThemeMode(nextThemeMode)
     } catch (e) {
       console.error('加载主题失败:', e)
       set({ isLoaded: true })

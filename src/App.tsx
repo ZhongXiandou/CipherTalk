@@ -15,6 +15,7 @@ import DataManagementPage from './pages/DataManagementPage'
 import SettingsPage from './pages/SettingsPage'
 import McpPage from './pages/McpPage'
 import AgentPage from './pages/agent/AgentPage'
+import PersonasPage from './pages/PersonasPage'
 import DiaryPage from './pages/DiaryPage'
 import ExportPage from './pages/export/ExportPage'
 import ActivationPage from './pages/ActivationPage'
@@ -77,7 +78,7 @@ type UpdateDownloadProgressPayload = {
   bytesPerSecond: number
 }
 
-const MAIN_WINDOW_NAV_ROUTES = new Set(['/home', '/agent', '/settings', '/pets', '/diary', '/export'])
+const MAIN_WINDOW_NAV_ROUTES = new Set(['/home', '/agent', '/personas', '/settings', '/pets', '/diary', '/export'])
 
 function App() {
   const navigate = useNavigate()
@@ -535,8 +536,8 @@ function App() {
   // 独立克隆好友（数字分身）聊天窗口
   if (location.pathname.startsWith('/persona-chat/')) {
     return (
-      <div className="standalone-window">
-        <TitleBar variant="standalone" />
+      <div className="standalone-window standalone-window--persona">
+        <div className="persona-chat-drag-region" aria-hidden="true" />
         <PersonaChatPage />
       </div>
     )
@@ -711,12 +712,13 @@ function App() {
   }
 
   // 主窗口 - 完整布局
-  const disableContentOverflow = ['/data-management', '/settings', '/mcp', '/agent', '/diary', '/pets'].includes(location.pathname)
+  const disableContentOverflow = ['/data-management', '/settings', '/mcp', '/agent', '/personas', '/diary', '/pets'].includes(location.pathname)
   const fullPageRoutes = ['/home']
   const isFullPage = fullPageRoutes.includes(location.pathname)
   const edgeToEdgeRoutes: string[] = []
   const isEdgeToEdge = edgeToEdgeRoutes.includes(location.pathname)
   const isAgentPage = location.pathname === '/agent'
+  const isFlushContentPage = isAgentPage || location.pathname === '/personas'
   const pendingMemoryMigrationStatus = !isLocked && memoryMigrationStatus?.needed ? memoryMigrationStatus : null
 
   return (
@@ -826,7 +828,7 @@ function App() {
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <main
           className={`flex-1 min-w-0 ${(disableContentOverflow || isFullPage || isEdgeToEdge) ? 'overflow-hidden' : 'overflow-auto'} ${navLayout === 'sidebar' && !isEdgeToEdge ? 'bg-(--bg-primary) rounded-xl mr-3 mb-3' : ''}`}
-          style={{ paddingLeft: (isFullPage || isEdgeToEdge || isAgentPage) ? 0 : 24, paddingRight: (isFullPage || isEdgeToEdge || isAgentPage) ? 0 : 24, paddingTop: (isFullPage || isEdgeToEdge || isAgentPage) ? 0 : 24 }}
+          style={{ paddingLeft: (isFullPage || isEdgeToEdge || isFlushContentPage) ? 0 : 24, paddingRight: (isFullPage || isEdgeToEdge || isFlushContentPage) ? 0 : 24, paddingTop: (isFullPage || isEdgeToEdge || isFlushContentPage) ? 0 : 24 }}
         >
           <RouteGuard>
             <Routes>
@@ -840,6 +842,7 @@ function App() {
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/mcp" element={<McpPage />} />
               <Route path="/agent" element={<AgentPage />} />
+              <Route path="/personas" element={<PersonasPage />} />
               <Route path="/diary" element={<DiaryPage />} />
               <Route path="/pets" element={<PetsPage />} />
               <Route path="/export" element={<ExportPage />} />

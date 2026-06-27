@@ -420,6 +420,9 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
 
   const manager: WindowManager = {
     createMainWindow() {
+      const configService = ctx.getConfigService() ?? new ConfigService()
+      const initialThemeMode = configService.get('themeMode')
+      const isInitialDark = initialThemeMode === 'dark' || (initialThemeMode === 'system' && nativeTheme.shouldUseDarkColors)
       const win = new BrowserWindow({
         width: 1400,
         height: 900,
@@ -436,16 +439,16 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
         titleBarStyle: 'hidden',
         titleBarOverlay: {
           color: '#00000000',
-          symbolColor: '#1a1a1a',
+          symbolColor: isInitialDark ? '#ffffff' : '#1a1a1a',
           height: 40
         },
+        backgroundColor: isInitialDark ? '#1A1A1A' : '#FFFFFF',
         show: false
       })
 
       attachWindowStartupDiagnostics(win, 'main')
       ctx.setMainWindow(win)
       markStartupMilestone('window:main-services-init-start')
-      const configService = ctx.getConfigService() ?? new ConfigService()
       ctx.setConfigService(configService)
       ctx.setDbService(new DatabaseService())
 
@@ -506,10 +509,12 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
       })
 
       if (process.env.VITE_DEV_SERVER_URL) {
-        win.loadURL(process.env.VITE_DEV_SERVER_URL)
+        win.loadURL(`${process.env.VITE_DEV_SERVER_URL}?${getThemeQueryParams(ctx)}`)
         setupDevToolsShortcut(win)
       } else {
-        win.loadFile(join(__dirname, '../dist/index.html'))
+        win.loadFile(join(__dirname, '../dist/index.html'), {
+          query: getThemeQuery(ctx)
+        })
       }
 
       return win
