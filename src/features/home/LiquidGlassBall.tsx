@@ -200,7 +200,7 @@ export function LiquidGlassBall({ size = 120, className }: LiquidGlassBallProps)
     pointerSamples.current = []
   }
 
-  const backdrop = map ? `url(#${filterId})` : undefined
+  const backdrop = map ? `url(#${filterId}) blur(1.2px)` : undefined
   // backdrop-filter 直接挂在球自身，用 left/top 定位。绝不能用 transform 移动球或其祖先，
   // 否则会创建新的 containing block，切断 backdrop-filter 对背后内容的采样，折射变空。
   const ballStyle: CSSProperties = {
