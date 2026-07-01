@@ -63,10 +63,12 @@ function AppearanceTab() {
     themeMode,
     navLayout,
     dockAutoHide,
+    homeGlassBall,
     homeBackground,
     setThemeMode,
     setNavLayout,
     setDockAutoHide,
+    setHomeGlassBall,
     setHomeBackgroundSource,
     setHomeBackgroundPreset,
     setHomeBackgroundCustom,
@@ -168,6 +170,21 @@ function AppearanceTab() {
           />
         </>
       )}
+
+      <h3 className="section-title" style={{ marginTop: '2rem' }}>首页玻璃球</h3>
+      <Switch
+        className="max-w-2xl"
+        isSelected={homeGlassBall}
+        onChange={(enabled) => setHomeGlassBall(enabled)}
+      >
+        <Switch.Control>
+          <Switch.Thumb />
+        </Switch.Control>
+        <Switch.Content>
+          <Label>首页玻璃球</Label>
+          <Description>默认开启。首页显示一个可拖动的液态玻璃球。</Description>
+        </Switch.Content>
+      </Switch>
 
       <h3 className="section-title" style={{ marginTop: '2rem' }}>首页背景</h3>
       <div className="home-background-settings">

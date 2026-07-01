@@ -18,6 +18,7 @@ import './HomePage.css'
 function HomePage() {
   const { isDbConnected } = useAppStore()
   const homeBackground = useThemeStore(s => s.homeBackground)
+  const homeGlassBall = useThemeStore(s => s.homeGlassBall)
 
   const [showWhatsNew, setShowWhatsNew] = useState(false)
   const [currentVersion, setCurrentVersion] = useState('')
@@ -179,7 +180,7 @@ function HomePage() {
         />
       )}
       <div className="home-background-tint" aria-hidden="true" />
-      <LiquidGlassBall size={120} />
+      {homeGlassBall && <LiquidGlassBall size={120} />}
       <button
         className="whats-new-btn"
         aria-label="打开开发者愿景"

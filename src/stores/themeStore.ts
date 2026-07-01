@@ -33,11 +33,13 @@ interface ThemeState {
   themeMode: ThemeMode
   navLayout: NavLayout
   dockAutoHide: boolean
+  homeGlassBall: boolean
   homeBackground: HomeBackgroundSettings
   isLoaded: boolean
   setThemeMode: (mode: ThemeMode) => void
   setNavLayout: (layout: NavLayout) => void
   setDockAutoHide: (v: boolean) => void
+  setHomeGlassBall: (v: boolean) => void
   setHomeBackgroundSource: (source: HomeBackgroundSource) => void
   setHomeBackgroundPreset: (preset: HomeBackgroundPreset) => void
   setHomeBackgroundCustom: (payload: {
@@ -85,6 +87,7 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
   themeMode: 'light',
   navLayout: 'sidebar',
   dockAutoHide: true,
+  homeGlassBall: true,
   homeBackground: DEFAULT_HOME_BACKGROUND,
   isLoaded: false,
 
@@ -113,6 +116,15 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
       await window.electronAPI.config.set('dockAutoHide', v)
     } catch (e) {
       console.error('保存 Dock 自动收起失败:', e)
+    }
+  },
+
+  setHomeGlassBall: async (v) => {
+    set({ homeGlassBall: v })
+    try {
+      await window.electronAPI.config.set('homeGlassBall', v)
+    } catch (e) {
+      console.error('保存首页玻璃球开关失败:', e)
     }
   },
 
@@ -186,6 +198,7 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
       const themeMode = await window.electronAPI.config.get('themeMode') as ThemeMode | undefined
       let navLayout = await window.electronAPI.config.get('navLayout') as NavLayout | undefined
       const dockAutoHide = await window.electronAPI.config.get('dockAutoHide') as boolean | undefined
+      const homeGlassBall = await window.electronAPI.config.get('homeGlassBall') as boolean | undefined
       const homeBackgroundSource = await window.electronAPI.config.get('homeBackgroundSource') as HomeBackgroundSource | undefined
       const homeBackgroundCustomType = await window.electronAPI.config.get('homeBackgroundCustomType') as HomeBackgroundMediaType | undefined
       const homeBackgroundCustomPath = await window.electronAPI.config.get('homeBackgroundCustomPath') as string | undefined
@@ -218,6 +231,7 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
         themeMode: nextThemeMode,
         navLayout: navLayout || 'sidebar',
         dockAutoHide: dockAutoHide ?? true,
+        homeGlassBall: homeGlassBall ?? true,
         homeBackground: nextHomeBackground,
         isLoaded: true
       })
