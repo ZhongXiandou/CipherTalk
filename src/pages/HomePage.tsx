@@ -179,7 +179,6 @@ function HomePage() {
           aria-hidden="true"
         />
       )}
-      <div className="home-background-tint" aria-hidden="true" />
       {homeGlassBall && <LiquidGlassBall size={120} />}
       <button
         className="whats-new-btn"

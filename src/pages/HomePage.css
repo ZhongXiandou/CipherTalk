@@ -26,16 +26,6 @@
   pointer-events: none;
 }
 
-.home-background-tint {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background: radial-gradient(circle at 18% 22%, color-mix(in srgb, var(--bg-primary) 12%, transparent), transparent 34%), linear-gradient(180deg, color-mix(in srgb, var(--bg-primary) 42%, transparent), color-mix(in srgb, var(--bg-primary) 66%, transparent));
-  pointer-events: none;
-}
-[data-mode=dark] .home-background-tint {
-  background: radial-gradient(circle at 18% 22%, rgba(255, 255, 255, 0.08), transparent 34%), linear-gradient(180deg, rgba(0, 0, 0, 0.34), rgba(0, 0, 0, 0.58));
-}
 
 .home-page > .random-message-card,
 .home-page > .home-header {
@@ -351,7 +341,12 @@
   max-width: 100%;
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #fff;
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.85),
+    0 -1px 0 rgba(0, 0, 0, 0.6),
+    1px 0 0 rgba(0, 0, 0, 0.6),
+    -1px 0 0 rgba(0, 0, 0, 0.6);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -382,11 +377,11 @@
 .random-message-card .random-message-body::before, .random-message-card .random-message-body::after {
   content: none;
 }
-/* 液态玻璃气泡：降低底色不透明度让折射透出（backdrop-filter 的位移贴图在组件内联注入） */
+/* 液态玻璃气泡：无底色，只保留 SVG 折射 + 细描边（位移贴图在组件内联注入） */
 .random-message-card .random-message-body--glass {
   position: relative;
-  background: color-mix(in srgb, var(--card-bg, var(--bg-secondary)) 50%, transparent);
-  border-color: color-mix(in srgb, var(--border-color) 70%, transparent);
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.22);
   isolation: isolate;
   /* 玻璃上文字用白字 + 细黑描边，保证在任何背景折射下都清晰 */
   color: #fff;
@@ -576,8 +571,8 @@
 .liquid-glass-ball-host {
   position: absolute;
   inset: 0;
-  z-index: 1;            /* 背景之上、回忆一刻卡片(也是 z-index:1)之下，互不遮挡 */
-  pointer-events: none;  /* 默认放行点击，只有球本身接收指针 */
+  z-index: 200;          /* 最高层：球浮在卡片/按钮之上，可拖到任意位置 */
+  pointer-events: none;  /* 宿主放行点击，只有球本身接收指针，不挡下层交互 */
 }
 
 .liquid-glass-ball {
