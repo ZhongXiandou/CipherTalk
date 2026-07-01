@@ -17,6 +17,7 @@ import { loopGuardCondition, withToolTimeouts } from './guards'
 import { reportAgentProgress, withAgentProgress } from './progress'
 import { getCachedStartupMemory, warmStartupMemory } from './runtimeCache'
 import { buildToolRuntimeContext } from './toolPolicy'
+import { formatAgentError } from './errorFormat'
 import type { AgentProgressReporter, AgentProviderConfig, AgentRunInput } from './types'
 
 const MAX_STEPS = 24
@@ -288,6 +289,8 @@ export async function runAgent(
     const toolSummaries: ToolOutputSummary[] = []
     const pendingToolCalls = new Map<string, { toolName: string; input?: unknown }>()
     for await (const chunk of result.toUIMessageStream({
+      // 默认 onError 只回 "An error occurred."，把真实报错（含 status code）透传给聊天区，别再靠猜
+      onError: formatAgentError,
       messageMetadata: ({ part }) => {
         if (part.type !== 'finish') return undefined
         return {

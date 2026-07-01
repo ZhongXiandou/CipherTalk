@@ -333,6 +333,20 @@ function isNativeToolCallingUnsupportedError(error: unknown): boolean {
 
 export { isNativeToolCallingUnsupportedError }
 
+// 部分模型（如 kimi-k2.6）拒绝自定义 temperature，报错格式类似 "invalid temperature: only 1 is allowed for this model"
+function isUnsupportedTemperatureError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || '')
+  const lower = message.toLowerCase()
+  return lower.includes('temperature') && lower.includes('only 1 is allowed')
+}
+
+// 命中一次后记住，同一 provider+model 后续请求直接跳过自定义 temperature，避免每次都白打一次请求再重试
+const unsupportedTemperatureModels = new Set<string>()
+
+function temperatureCacheKey(providerName: string, model: string): string {
+  return `${providerName}::${model}`
+}
+
 export function normalizeNativeToolCallingError(error: unknown): Error {
   if (isNativeToolCallingUnsupportedError(error)) {
     return new Error(NATIVE_TOOL_CALLING_UNSUPPORTED_MESSAGE)
@@ -519,17 +533,34 @@ export abstract class BaseAIProvider implements AIProvider {
 
   async chat(messages: OpenAI.Chat.ChatCompletionMessageParam[], options?: ChatOptions): Promise<string> {
     const model = this.getRequestedModel(options)
-    const response = await generateText({
-      model: this.getModelProvider(model),
-      messages: normalizeMessages(messages),
-      allowSystemInMessages: true,
-      temperature: options?.temperature ?? 0.7,
-      maxOutputTokens: options?.maxTokens,
-      timeout: 300000,
-      maxRetries: 0
-    })
+    const modelProvider = this.getModelProvider(model)
+    const normalized = normalizeMessages(messages)
+    const cacheKey = temperatureCacheKey(this.name, model)
+    let temperature: number | undefined = unsupportedTemperatureModels.has(cacheKey)
+      ? undefined
+      : (options?.temperature ?? 0.7)
 
-    return response.text || ''
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const response = await generateText({
+          model: modelProvider,
+          messages: normalized,
+          allowSystemInMessages: true,
+          temperature,
+          maxOutputTokens: options?.maxTokens,
+          timeout: 300000,
+          maxRetries: 0
+        })
+        return response.text || ''
+      } catch (error) {
+        if (attempt === 0 && temperature !== undefined && isUnsupportedTemperatureError(error)) {
+          unsupportedTemperatureModels.add(cacheKey)
+          temperature = undefined
+          continue
+        }
+        throw error
+      }
+    }
   }
 
   async chatWithTools(
@@ -537,32 +568,45 @@ export abstract class BaseAIProvider implements AIProvider {
     options: ChatWithToolsOptions
   ): Promise<NativeToolCallResult> {
     const model = this.getRequestedModel(options)
+    const modelProvider = this.getModelProvider(model)
+    const normalized = normalizeMessages(messages)
+    const cacheKey = temperatureCacheKey(this.name, model)
+    let temperature: number | undefined = unsupportedTemperatureModels.has(cacheKey)
+      ? undefined
+      : (options?.temperature ?? 0.2)
 
-    try {
-      const response = await generateText({
-        model: this.getModelProvider(model),
-        messages: normalizeMessages(messages),
-        allowSystemInMessages: true,
-        temperature: options?.temperature ?? 0.2,
-        maxOutputTokens: options?.maxTokens,
-        timeout: 300000,
-        maxRetries: 0,
-        tools: toAiToolSet(options.tools),
-        toolChoice: toAiToolChoice(options.toolChoice)
-      } as any)
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const response = await generateText({
+          model: modelProvider,
+          messages: normalized,
+          allowSystemInMessages: true,
+          temperature,
+          maxOutputTokens: options?.maxTokens,
+          timeout: 300000,
+          maxRetries: 0,
+          tools: toAiToolSet(options.tools),
+          toolChoice: toAiToolChoice(options.toolChoice)
+        } as any)
 
-      const toolCalls = (response.toolCalls || []).map(toOpenAIToolCall)
-      return {
-        message: {
-          role: 'assistant',
-          content: response.text || null,
-          reasoning_content: response.reasoningText || null,
-          ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
-        },
-        finishReason: response.finishReason || null
+        const toolCalls = (response.toolCalls || []).map(toOpenAIToolCall)
+        return {
+          message: {
+            role: 'assistant',
+            content: response.text || null,
+            reasoning_content: response.reasoningText || null,
+            ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
+          },
+          finishReason: response.finishReason || null
+        }
+      } catch (error) {
+        if (attempt === 0 && temperature !== undefined && isUnsupportedTemperatureError(error)) {
+          unsupportedTemperatureModels.add(cacheKey)
+          temperature = undefined
+          continue
+        }
+        throw normalizeNativeToolCallingError(error)
       }
-    } catch (error) {
-      throw normalizeNativeToolCallingError(error)
     }
   }
 
@@ -572,84 +616,102 @@ export abstract class BaseAIProvider implements AIProvider {
     onEvent: (event: AIStreamEvent) => void
   ): Promise<NativeToolCallResult> {
     const model = this.getRequestedModel(options)
+    const modelProvider = this.getModelProvider(model)
+    const normalized = normalizeMessages(messages)
+    const cacheKey = temperatureCacheKey(this.name, model)
+    let temperature: number | undefined = unsupportedTemperatureModels.has(cacheKey)
+      ? undefined
+      : (options?.temperature ?? 0.2)
 
-    try {
-      const result = streamText({
-        model: this.getModelProvider(model),
-        messages: normalizeMessages(messages),
-        allowSystemInMessages: true,
-        temperature: options?.temperature ?? 0.2,
-        maxOutputTokens: options?.maxTokens,
-        timeout: 300000,
-        maxRetries: 0,
-        tools: toAiToolSet(options.tools),
-        toolChoice: toAiToolChoice(options.toolChoice)
-      } as any)
+    for (let attempt = 0; ; attempt++) {
+      let emitted = false
+      try {
+        const result = streamText({
+          model: modelProvider,
+          messages: normalized,
+          allowSystemInMessages: true,
+          temperature,
+          maxOutputTokens: options?.maxTokens,
+          timeout: 300000,
+          maxRetries: 0,
+          tools: toAiToolSet(options.tools),
+          toolChoice: toAiToolChoice(options.toolChoice)
+        } as any)
 
-      let content = ''
-      let reasoningContent = ''
-      let finishReason: string | null = null
-      const toolCalls: AIStreamToolCall[] = []
-      const toolInputById = new Map<string, string>()
-      const toolNameById = new Map<string, string>()
+        let content = ''
+        let reasoningContent = ''
+        let finishReason: string | null = null
+        const toolCalls: AIStreamToolCall[] = []
+        const toolInputById = new Map<string, string>()
+        const toolNameById = new Map<string, string>()
 
-      for await (const part of result.fullStream) {
-        if (part.type === 'text-delta') {
-          content += part.text
-          onEvent({ type: 'content_delta', text: part.text })
-        } else if (part.type === 'reasoning-delta') {
-          reasoningContent += part.text
-          onEvent({ type: 'reasoning_delta', text: part.text })
-        } else if (part.type === 'tool-input-start') {
-          toolNameById.set(part.id, part.toolName)
-        } else if (part.type === 'tool-input-delta') {
-          const previous = toolInputById.get(part.id) || ''
-          toolInputById.set(part.id, previous + part.delta)
-          onEvent({ type: 'tool_call_delta', index: toolInputById.size - 1, delta: part })
-        } else if (part.type === 'tool-call') {
-          const toolCall = toOpenAIToolCall(part, toolCalls.length)
-          toolCalls.push(toolCall)
-          onEvent({ type: 'tool_call_done', toolCall })
-        } else if (part.type === 'finish-step' || part.type === 'finish') {
-          finishReason = part.finishReason || finishReason
-        } else if (part.type === 'error') {
-          throw part.error
-        }
-      }
-
-      for (const [id, args] of toolInputById.entries()) {
-        if (toolCalls.some(item => item.id === id)) continue
-        const toolCall: AIStreamToolCall = {
-          id,
-          type: 'function',
-          function: {
-            name: toolNameById.get(id) || '',
-            arguments: args
+        for await (const part of result.fullStream) {
+          if (part.type === 'text-delta') {
+            emitted = true
+            content += part.text
+            onEvent({ type: 'content_delta', text: part.text })
+          } else if (part.type === 'reasoning-delta') {
+            emitted = true
+            reasoningContent += part.text
+            onEvent({ type: 'reasoning_delta', text: part.text })
+          } else if (part.type === 'tool-input-start') {
+            toolNameById.set(part.id, part.toolName)
+          } else if (part.type === 'tool-input-delta') {
+            emitted = true
+            const previous = toolInputById.get(part.id) || ''
+            toolInputById.set(part.id, previous + part.delta)
+            onEvent({ type: 'tool_call_delta', index: toolInputById.size - 1, delta: part })
+          } else if (part.type === 'tool-call') {
+            emitted = true
+            const toolCall = toOpenAIToolCall(part, toolCalls.length)
+            toolCalls.push(toolCall)
+            onEvent({ type: 'tool_call_done', toolCall })
+          } else if (part.type === 'finish-step' || part.type === 'finish') {
+            finishReason = part.finishReason || finishReason
+          } else if (part.type === 'error') {
+            throw part.error
           }
         }
-        toolCalls.push(toolCall)
-        onEvent({ type: 'tool_call_done', toolCall })
-      }
 
-      onEvent({
-        type: 'message_done',
-        content,
-        reasoningContent: reasoningContent || undefined,
-        toolCalls,
-        finishReason
-      })
+        for (const [id, args] of toolInputById.entries()) {
+          if (toolCalls.some(item => item.id === id)) continue
+          const toolCall: AIStreamToolCall = {
+            id,
+            type: 'function',
+            function: {
+              name: toolNameById.get(id) || '',
+              arguments: args
+            }
+          }
+          toolCalls.push(toolCall)
+          onEvent({ type: 'tool_call_done', toolCall })
+        }
 
-      return {
-        message: {
-          role: 'assistant',
-          content: content || null,
-          reasoning_content: reasoningContent || null,
-          ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
-        },
-        finishReason
+        onEvent({
+          type: 'message_done',
+          content,
+          reasoningContent: reasoningContent || undefined,
+          toolCalls,
+          finishReason
+        })
+
+        return {
+          message: {
+            role: 'assistant',
+            content: content || null,
+            reasoning_content: reasoningContent || null,
+            ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
+          },
+          finishReason
+        }
+      } catch (error) {
+        if (attempt === 0 && !emitted && temperature !== undefined && isUnsupportedTemperatureError(error)) {
+          unsupportedTemperatureModels.add(cacheKey)
+          temperature = undefined
+          continue
+        }
+        throw normalizeNativeToolCallingError(error)
       }
-    } catch (error) {
-      throw normalizeNativeToolCallingError(error)
     }
   }
 
@@ -659,40 +721,62 @@ export abstract class BaseAIProvider implements AIProvider {
     onEvent: (event: AIStreamEvent) => void
   ): Promise<void> {
     const model = this.getRequestedModel(options)
-    const result = streamText({
-      model: this.getModelProvider(model),
-      messages: normalizeMessages(messages),
-      allowSystemInMessages: true,
-      temperature: options?.temperature ?? 0.7,
-      maxOutputTokens: options?.maxTokens,
-      timeout: 300000,
-      maxRetries: 0
-    })
+    const modelProvider = this.getModelProvider(model)
+    const normalized = normalizeMessages(messages)
+    const cacheKey = temperatureCacheKey(this.name, model)
+    let temperature: number | undefined = unsupportedTemperatureModels.has(cacheKey)
+      ? undefined
+      : (options?.temperature ?? 0.7)
 
-    let contentText = ''
-    let reasoningText = ''
-    let finishReason: string | null = null
+    for (let attempt = 0; ; attempt++) {
+      let emitted = false
+      try {
+        const result = streamText({
+          model: modelProvider,
+          messages: normalized,
+          allowSystemInMessages: true,
+          temperature,
+          maxOutputTokens: options?.maxTokens,
+          timeout: 300000,
+          maxRetries: 0
+        })
 
-    for await (const part of result.fullStream) {
-      if (part.type === 'text-delta') {
-        contentText += part.text
-        onEvent({ type: 'content_delta', text: part.text })
-      } else if (part.type === 'reasoning-delta') {
-        reasoningText += part.text
-        onEvent({ type: 'reasoning_delta', text: part.text })
-      } else if (part.type === 'finish-step' || part.type === 'finish') {
-        finishReason = part.finishReason || finishReason
-      } else if (part.type === 'error') {
-        throw part.error
+        let contentText = ''
+        let reasoningText = ''
+        let finishReason: string | null = null
+
+        for await (const part of result.fullStream) {
+          if (part.type === 'text-delta') {
+            emitted = true
+            contentText += part.text
+            onEvent({ type: 'content_delta', text: part.text })
+          } else if (part.type === 'reasoning-delta') {
+            emitted = true
+            reasoningText += part.text
+            onEvent({ type: 'reasoning_delta', text: part.text })
+          } else if (part.type === 'finish-step' || part.type === 'finish') {
+            finishReason = part.finishReason || finishReason
+          } else if (part.type === 'error') {
+            throw part.error
+          }
+        }
+
+        onEvent({
+          type: 'message_done',
+          content: contentText,
+          reasoningContent: reasoningText || undefined,
+          finishReason
+        })
+        return
+      } catch (error) {
+        if (attempt === 0 && !emitted && temperature !== undefined && isUnsupportedTemperatureError(error)) {
+          unsupportedTemperatureModels.add(cacheKey)
+          temperature = undefined
+          continue
+        }
+        throw error
       }
     }
-
-    onEvent({
-      type: 'message_done',
-      content: contentText,
-      reasoningContent: reasoningText || undefined,
-      finishReason
-    })
   }
 
   async testConnection(): Promise<{ success: boolean; error?: string; needsProxy?: boolean }> {

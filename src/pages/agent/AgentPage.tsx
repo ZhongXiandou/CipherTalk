@@ -3707,7 +3707,12 @@ export default function AgentPage() {
     [handleAgentProgress]
   )
   // 流式 chunk 合并到每 50ms 更新一次 UI，避免 token 级高频重渲染拖卡滚动
-  const { messages, sendMessage, regenerate, setMessages, status, stop } = useChat({ transport, experimental_throttle: 50 })
+  const { messages, sendMessage, regenerate, setMessages, status, stop } = useChat({
+    transport,
+    experimental_throttle: 50,
+    // 主进程/子进程侧的请求失败（限流、参数不支持等）此前只进日志，聊天区什么都不显示，用户分不清是没回应还是报错了
+    onError: (error) => setAgentNotice(error instanceof Error ? error.message : String(error)),
+  })
   const messagesRef = useRef<UIMessage[]>(messages)
   messagesRef.current = messages
   const lastSavedMessagesRef = useRef('')
