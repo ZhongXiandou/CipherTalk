@@ -140,6 +140,31 @@ export interface CipherTalkAPI {
   notify: {
     send(title: string, body: string): Promise<void>
   }
+  /** 需 sns:read。媒体 URL 为微信 CDN 地址，加载图片本体需 network 权限 */
+  sns: {
+    getTimeline(opts?: {
+      limit?: number; offset?: number
+      usernames?: string[]; keyword?: string
+      startTime?: number; endTime?: number
+    }): Promise<{
+      posts: Array<{
+        id: string; username: string; nickname: string; createTime: number
+        content: string; type?: number
+        media: Array<{ url: string; thumbUrl: string; width?: number; height?: number }>
+        likes: string[]
+        comments: Array<{ nickname: string; content: string; refNickname?: string }>
+      }>
+      hasMore: boolean
+    }>
+  }
+  /**
+   * 需 ai:use。走用户在宿主里配置的模型与 API Key（key 对插件不可见）。
+   * 预算：每插件 20 次/分钟，超出报错——请合并请求而不是逐条调用。
+   */
+  ai: {
+    complete(opts: { prompt: string; system?: string }): Promise<{ text: string }>
+    embed(texts: string[]): Promise<{ embeddings: number[][] }>
+  }
   /** 需 window:create */
   window: {
     open(viewId: string, opts?: { width?: number; height?: number }): Promise<void>

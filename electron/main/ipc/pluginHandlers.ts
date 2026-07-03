@@ -61,6 +61,23 @@ function release(pluginId: string): void {
   if (state && state.running > 0) state.running -= 1
 }
 
+// AI 调用花的是用户自己的 API 额度，单独做更紧的预算：每插件 20 次/分钟
+const AI_BUDGET_PER_MIN = 20
+const aiBudgets = new Map<string, { windowStart: number; count: number }>()
+
+function checkAiBudget(pluginId: string): void {
+  const now = Date.now()
+  let budget = aiBudgets.get(pluginId)
+  if (!budget || now - budget.windowStart >= 60_000) {
+    budget = { windowStart: now, count: 0 }
+    aiBudgets.set(pluginId, budget)
+  }
+  if (budget.count >= AI_BUDGET_PER_MIN) {
+    throw new Error('AI 调用超出预算（20 次/分钟），请合并请求')
+  }
+  budget.count += 1
+}
+
 // ========= 面向插件的裁剪结构（不透传内部完整行） =========
 
 function toPluginMessage(m: Message) {
@@ -521,6 +538,86 @@ const apiRegistry: Record<string, { permission: PluginPermission | null; handler
         scanned,
         truncated,
       }
+    },
+  },
+
+  // ========= 三期：朋友圈（sns:read） =========
+  'sns.getTimeline': {
+    permission: 'sns:read',
+    timeoutMs: 30_000,
+    handler: async (_p, args) => {
+      const { snsService } = await import('../../services/snsService')
+      const limit = Math.min(Number(args.limit) || 20, 100)
+      const offset = Number(args.offset) || 0
+      const usernames = Array.isArray(args.usernames) ? args.usernames.map(String).slice(0, 50) : undefined
+      const result = await snsService.getTimeline(
+        limit,
+        offset,
+        usernames,
+        args.keyword ? String(args.keyword) : undefined,
+        typeof args.startTime === 'number' ? args.startTime : undefined,
+        typeof args.endTime === 'number' ? args.endTime : undefined,
+      )
+      if (!result.success) throw new Error(result.error || '朋友圈读取失败')
+      // 裁剪结构：不透传解密密钥/token/rawXml，媒体只保留展示所需字段
+      return {
+        posts: (result.timeline ?? []).map((post) => ({
+          id: post.id,
+          username: post.username,
+          nickname: post.nickname,
+          createTime: post.createTime,
+          content: post.contentDesc,
+          type: post.type,
+          media: (post.media ?? []).map((m) => ({
+            url: m.url, thumbUrl: m.thumb, width: m.width, height: m.height,
+          })),
+          likes: post.likes ?? [],
+          comments: (post.comments ?? []).map((c) => ({
+            nickname: c.nickname, content: c.content, refNickname: c.refNickname,
+          })),
+        })),
+        hasMore: (result.timeline ?? []).length >= limit,
+      }
+    },
+  },
+
+  // ========= 三期：AI 能力（ai:use，走宿主已配置的模型与 key，key 对插件不可见） =========
+  'ai.complete': {
+    permission: 'ai:use',
+    timeoutMs: 120_000,
+    handler: async (plugin, args) => {
+      const prompt = String(args.prompt || '')
+      if (!prompt.trim()) throw new Error('prompt 必填')
+      if (prompt.length > 32_000) throw new Error('prompt 超出 32k 字符上限')
+      const system = args.system ? String(args.system).slice(0, 8_000) : undefined
+
+      checkAiBudget(plugin.manifest.id)
+      const [{ generateText }, { resolveProviderConfig }, { createLanguageModel }] = await Promise.all([
+        import('ai'),
+        import('../../services/agent/resolveProviderConfig'),
+        import('../../services/agent/provider'),
+      ])
+      const providerConfig = resolveProviderConfig()
+      const result = await generateText({
+        model: createLanguageModel(providerConfig),
+        system,
+        prompt,
+      })
+      return { text: result.text }
+    },
+  },
+  'ai.embed': {
+    permission: 'ai:use',
+    timeoutMs: 60_000,
+    handler: async (plugin, args) => {
+      const texts = Array.isArray(args.texts) ? args.texts.map(String) : []
+      if (texts.length === 0) throw new Error('texts 必填')
+      if (texts.length > 64) throw new Error('单次最多 64 条')
+      if (texts.some((t) => t.length > 8_000)) throw new Error('单条文本超出 8k 字符上限')
+
+      checkAiBudget(plugin.manifest.id)
+      const { embedTexts } = await import('../../services/ai/embeddingService')
+      return { embeddings: await embedTexts(texts) }
     },
   },
 

@@ -207,6 +207,13 @@ export function connect() {
         notify: {
           send: (title, body) => invoke('notify.send', { title, body }),
         },
+        sns: {
+          getTimeline: (opts) => invoke('sns.getTimeline', opts),
+        },
+        ai: {
+          complete: (opts) => invoke('ai.complete', opts),
+          embed: (texts) => invoke('ai.embed', { texts }),
+        },
         window: {
           open: (viewId, opts) => invoke('window.open', { viewId, ...opts }),
         },

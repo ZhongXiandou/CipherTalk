@@ -122,6 +122,13 @@ api.notify.send(title, body)
 // 独立窗口（需 window:create）
 api.window.open('some-view', { width: 900, height: 600 })
 
+// 朋友圈（需 sns:read；媒体是微信 CDN 地址，加载图片本体需 network 权限）
+api.sns.getTimeline({ limit: 20, keyword: '旅行' })          // → { posts, hasMore }
+
+// AI（需 ai:use；走用户配置的模型与 key，key 对插件不可见；20 次/分钟预算）
+api.ai.complete({ prompt: '总结这段话：…', system: '你是摘要助手' })  // → { text }
+api.ai.embed(['文本一', '文本二'])                            // → { embeddings }
+
 // 事件订阅
 api.events.on('newMessages', ({ sessionId, count }) => {})   // 需 messages:read
 api.events.on('exportProgress', (p) => {})                   // 仅发给发起导出的插件
@@ -144,10 +151,13 @@ do {
 
 manifest 里声明什么，启用时用户就确认什么；未声明的调用一律被拒。
 当前可用权限：`sessions:read`、`contacts:read`、`messages:read`、`clipboard:write`、
-`media:read`、`stt:use`、`search:use`、`stats:read`、`export:use`、`notify:send`、`window:create`。
+`media:read`、`stt:use`、`search:use`、`stats:read`、`export:use`、`notify:send`、
+`window:create`、`sns:read`、`ai:use`、`network`。
 
 **网络默认被禁止**：没有 `network` 权限的插件，CSP 在响应头层面阻止一切外联请求
-（`fetch`、`<img>` 外链等都发不出去）。`network` 权限暂未开放申请。
+（`fetch`、`<img>` 外链等都发不出去）。声明 `network` 的插件在启用确认时会以
+醒目警告展示（"数据可能被发送到外部"）——请只在真正需要时申请，无谓申请
+会显著降低用户启用意愿。
 
 ## 5. 主题与统一 UI 组件
 
