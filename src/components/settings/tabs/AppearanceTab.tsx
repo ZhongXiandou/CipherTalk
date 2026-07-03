@@ -1,6 +1,6 @@
 import { useRef, useState, type CSSProperties } from 'react'
 import { Description, Label, Radio, RadioGroup, Slider, Switch, Tabs, type Key } from '@heroui/react'
-import { ImageIcon, Moon, Monitor, PanelBottom, PanelLeft, Sun, Upload, Video } from 'lucide-react'
+import { ArrowUpToLine, Display, LayoutFooter, LayoutSideContentLeft, Moon, Picture, Sun, Video } from '@gravity-ui/icons'
 import {
   HOME_BACKGROUND_PRESETS,
   getHomeBackgroundPresetPoster,
@@ -131,9 +131,9 @@ function AppearanceTab() {
       <Tabs selectedKey={themeMode} onSelectionChange={(key) => setThemeMode(toThemeMode(key))} className="w-full max-w-md">
         <Tabs.ListContainer>
           <Tabs.List aria-label="外观模式" className="*:gap-2">
-            <Tabs.Tab id="light"><Sun size={16} aria-hidden />浅色<Tabs.Indicator /></Tabs.Tab>
-            <Tabs.Tab id="dark"><Moon size={16} aria-hidden />深色<Tabs.Indicator /></Tabs.Tab>
-            <Tabs.Tab id="system"><Monitor size={16} aria-hidden />跟随系统<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab id="light"><Sun width={16} height={16} aria-hidden />浅色<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab id="dark"><Moon width={16} height={16} aria-hidden />深色<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab id="system"><Display width={16} height={16} aria-hidden />跟随系统<Tabs.Indicator /></Tabs.Tab>
           </Tabs.List>
         </Tabs.ListContainer>
       </Tabs>
@@ -142,8 +142,8 @@ function AppearanceTab() {
       <Tabs selectedKey={navLayout} onSelectionChange={(key) => setNavLayout(toNavLayout(key))} className="w-full max-w-md">
         <Tabs.ListContainer>
           <Tabs.List aria-label="导航布局" className="*:gap-2">
-            <Tabs.Tab id="sidebar"><PanelLeft size={16} aria-hidden />侧边栏<Tabs.Indicator /></Tabs.Tab>
-            <Tabs.Tab id="dock"><PanelBottom size={16} aria-hidden />底部 Dock<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab id="sidebar"><LayoutSideContentLeft width={16} height={16} aria-hidden />侧边栏<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab id="dock"><LayoutFooter width={16} height={16} aria-hidden />底部 Dock<Tabs.Indicator /></Tabs.Tab>
           </Tabs.List>
         </Tabs.ListContainer>
       </Tabs>
@@ -195,8 +195,8 @@ function AppearanceTab() {
         >
           <Tabs.ListContainer>
             <Tabs.List aria-label="首页背景来源" className="*:gap-2">
-              <Tabs.Tab id="preset"><Video size={16} aria-hidden />预设背景<Tabs.Indicator /></Tabs.Tab>
-              <Tabs.Tab id="custom"><ImageIcon size={16} aria-hidden />自定义<Tabs.Indicator /></Tabs.Tab>
+              <Tabs.Tab id="preset"><Video width={16} height={16} aria-hidden />预设背景<Tabs.Indicator /></Tabs.Tab>
+              <Tabs.Tab id="custom"><Picture width={16} height={16} aria-hidden />自定义<Tabs.Indicator /></Tabs.Tab>
             </Tabs.List>
           </Tabs.ListContainer>
         </Tabs>
@@ -255,7 +255,7 @@ function AppearanceTab() {
                   onClick={handlePickBackground}
                   disabled={backgroundImporting}
                 >
-                  <Upload size={16} aria-hidden />
+                  <ArrowUpToLine width={16} height={16} aria-hidden />
                   {backgroundImporting ? '导入中...' : customBackgroundReady ? '更换背景' : '选择背景'}
                 </button>
                 {backgroundError && <div className="home-background-error">{backgroundError}</div>}

@@ -1,5 +1,5 @@
 import { Alert, Button, Chip, Label, ProgressBar, Separator, Typography } from '@heroui/react'
-import { Download, ExternalLink, Github, RefreshCw, ShieldCheck } from 'lucide-react'
+import { ArrowDownToLine, ArrowUpRightFromSquare, ArrowsRotateLeft, LogoGithub, ShieldCheck } from '@gravity-ui/icons'
 import type { UpdateDownloadProgressPayload } from '../../../types/electron'
 import type { UpdateInfo } from '../types'
 import { formatFileSize, formatSpeed } from '../utils'
@@ -90,7 +90,7 @@ function AboutTab({
             </div>
           ) : (
             <Button type="button" onPress={onUpdateNow} isDisabled={isDownloading}>
-              <Download size={16} /> 立即更新
+              <ArrowDownToLine width={16} height={16} /> 立即更新
             </Button>
           )}
         </div>
@@ -108,7 +108,7 @@ function AboutTab({
           onPress={onCheckUpdate}
           isDisabled={isCheckingUpdate || isDownloading}
         >
-          <RefreshCw size={16} className={isCheckingUpdate ? 'spin' : undefined} />
+          <ArrowsRotateLeft width={16} height={16} className={isCheckingUpdate ? 'spin' : undefined} />
           {isCheckingUpdate ? '检查中...' : '检查更新'}
         </Button>
       </div>
@@ -195,9 +195,9 @@ function AboutTab({
                 className="w-full justify-start"
                 onPress={() => openExternal(link.url)}
               >
-                <Github size={16} />
+                <LogoGithub width={16} height={16} />
                 {link.label}
-                <ExternalLink size={14} className="ml-auto" />
+                <ArrowUpRightFromSquare width={14} height={14} className="ml-auto" />
               </Button>
             ))}
           </div>
@@ -217,12 +217,12 @@ function AboutTab({
                 className="w-full justify-start"
                 onPress={() => openExternal(link.url)}
               >
-                <ExternalLink size={16} />
+                <ArrowUpRightFromSquare width={16} height={16} />
                 {link.label}
               </Button>
             ))}
             <Button type="button" variant="outline" className="w-full justify-start" onPress={openAgreement}>
-              <ShieldCheck size={16} />
+              <ShieldCheck width={16} height={16} />
               用户协议
             </Button>
           </div>

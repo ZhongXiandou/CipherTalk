@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button, Chip, Switch } from '@heroui/react'
-import { FolderOpen, PackagePlus, Puzzle, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react'
+import { ArrowsRotateLeft, FolderOpen, FolderPlus, Puzzle, ShieldCheck, TrashBin } from '@gravity-ui/icons'
 import { usePluginStore, ensurePluginStoreSubscribed } from '../../../stores/pluginStore'
 import type { PluginInfo } from '../../../types/electron'
 import { dialog } from '../../../services/ipc'
@@ -116,17 +116,17 @@ function PluginsTab({ showMessage }: { showMessage: (text: string, success: bool
         </div>
         <div className="flex items-center gap-2">
           <Button variant="secondary" onPress={() => { void handleInstall() }} aria-label="安装插件">
-            <PackagePlus size={16} /> 安装插件
+            <FolderPlus width={16} height={16} /> 安装插件
           </Button>
           <Button variant="ghost" onPress={() => { void handleRescan() }} aria-label="重新扫描">
-            <RefreshCw size={16} /> 重新扫描
+            <ArrowsRotateLeft width={16} height={16} /> 重新扫描
           </Button>
         </div>
       </div>
 
       {plugins.length === 0 && (
         <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-foreground-200 py-12 text-foreground-400">
-          <Puzzle size={32} />
+          <Puzzle width={32} height={32} />
           <span>还没有安装插件</span>
         </div>
       )}
@@ -174,7 +174,7 @@ function PluginsTab({ showMessage }: { showMessage: (text: string, success: bool
                 aria-label="卸载"
                 onPress={() => setConfirmUninstall(plugin)}
               >
-                <Trash2 size={16} />
+                <TrashBin width={16} height={16} />
               </Button>
             </div>
           </div>
@@ -195,7 +195,7 @@ function PluginsTab({ showMessage }: { showMessage: (text: string, success: bool
         </div>
         {devModeEnabled && (
           <Button className="mt-3" variant="secondary" onPress={() => { void handleAddDevPlugin() }}>
-            <FolderOpen size={16} /> 加载本地插件目录
+            <FolderOpen width={16} height={16} /> 加载本地插件目录
           </Button>
         )}
       </div>
@@ -203,7 +203,7 @@ function PluginsTab({ showMessage }: { showMessage: (text: string, success: bool
       {confirmEnable && (
         <ConfirmDialog
           title={`启用「${confirmEnable.name}」`}
-          titleIcon={<ShieldCheck size={20} />}
+          titleIcon={<ShieldCheck width={20} height={20} />}
           message={
             confirmEnable.permissions.length > 0 ? (
               <span>

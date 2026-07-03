@@ -1,8 +1,7 @@
 ﻿import { useEffect, useState, type ReactElement, type CSSProperties, type Key } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Avatar, Button, ScrollShadow, Separator, Tabs, Tooltip } from '@heroui/react'
-import { House, Comment, Database, Gear, ChevronLeft, ChevronRight, ArrowDownToLine, Aperture, FaceRobot, Ghost, BookOpen, PersonPlus } from '@gravity-ui/icons'
-import { MCP } from '@lobehub/icons'
+import { House, Comment, Database, Gear, ChevronLeft, ChevronRight, ArrowDownToLine, Aperture, FaceRobot, Ghost, BookOpen, LogoMcp, PersonPlus } from '@gravity-ui/icons'
 import packageJson from '../../package.json'
 import { useAppStore } from '../stores/appStore'
 import { usePluginStore, ensurePluginStoreSubscribed, selectEnabledPlugins } from '../stores/pluginStore'
@@ -94,7 +93,7 @@ function Sidebar({ autoCollapse = false }: { autoCollapse?: boolean }) {
     { key: 'moments', label: '朋友圈', icon: <Aperture width={NAV_ICON_SIZE} height={NAV_ICON_SIZE} />, type: 'action', onClick: openMomentsWindow },
     { key: 'export', label: '导出数据', icon: <ArrowDownToLine width={NAV_ICON_SIZE} height={NAV_ICON_SIZE} />, type: 'route', path: '/export' },
     { key: 'data-management', label: '数据管理', icon: <Database width={NAV_ICON_SIZE} height={NAV_ICON_SIZE} />, type: 'route', path: '/data-management' },
-    { key: 'mcp', label: 'MCP & Skills', icon: <MCP size={NAV_ICON_SIZE} />, type: 'route', path: '/mcp' },
+    { key: 'mcp', label: 'MCP & Skills', icon: <LogoMcp width={NAV_ICON_SIZE} height={NAV_ICON_SIZE} />, type: 'route', path: '/mcp' },
  ]
 
   // 插件侧边栏贡献点（声明式：只读 manifest，不执行插件代码）

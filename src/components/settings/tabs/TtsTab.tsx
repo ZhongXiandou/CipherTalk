@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { Button, Card, ComboBox, Description, Input, InputGroup, Label, ListBox, Select, Switch, TextArea, TextField } from '@heroui/react'
-import { AlertCircle, CheckCircle, ExternalLink, Volume2 } from 'lucide-react'
+import { ArrowUpRightFromSquare, CircleCheck, CircleExclamation, Volume } from '@gravity-ui/icons'
 import type { TtsConfig, TtsProviderConfig, TtsProviderId } from '@/types/electron'
 import {
   VOLCENGINE_DEFAULT_TTS,
@@ -427,7 +427,7 @@ export default function TtsTab() {
               type="button"
               variant="outline"
             >
-              <ExternalLink size={16} />
+              <ArrowUpRightFromSquare width={16} height={16} />
               官方文档
             </Button>
           )}
@@ -439,7 +439,7 @@ export default function TtsTab() {
               type="button"
               variant="outline"
             >
-              <ExternalLink size={16} />
+              <ArrowUpRightFromSquare width={16} height={16} />
               豆包控制台
             </Button>
           )}
@@ -452,7 +452,7 @@ export default function TtsTab() {
                 type="button"
                 variant="outline"
               >
-                <ExternalLink size={16} />
+                <ArrowUpRightFromSquare width={16} height={16} />
                 实时文档
               </Button>
               <Button
@@ -462,7 +462,7 @@ export default function TtsTab() {
                 type="button"
                 variant="outline"
               >
-                <ExternalLink size={16} />
+                <ArrowUpRightFromSquare width={16} height={16} />
                 复刻文档
               </Button>
             </>
@@ -893,14 +893,14 @@ export default function TtsTab() {
 
         {status && (
           <p className={`flex items-start gap-1.5 text-sm break-all ${status.ok ? 'text-green-600' : 'text-red-600'}`}>
-            {status.ok ? <CheckCircle className="mt-0.5 shrink-0" size={16} /> : <AlertCircle className="mt-0.5 shrink-0" size={16} />}
+            {status.ok ? <CircleCheck className="mt-0.5 shrink-0" width={16} height={16} /> : <CircleExclamation className="mt-0.5 shrink-0" width={16} height={16} />}
             <span>{status.text}</span>
           </p>
         )}
       </Card.Content>
       <Card.Footer className="flex flex-wrap gap-2">
         <Button isDisabled={testing || !canTest} onPress={() => void handleTest()} type="button" variant="outline">
-          <Volume2 size={16} />
+          <Volume width={16} height={16} />
           {testing ? '合成中…' : '试听'}
         </Button>
         <Button isDisabled={saving} onPress={() => void handleSave()} type="button" variant="primary">

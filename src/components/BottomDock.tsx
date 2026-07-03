@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { House, Comment, Database, Gear, ArrowDownToLine, Aperture, Boxes3, FaceRobot, PersonPlus, BookOpen, Ghost } from '@gravity-ui/icons'
+import { House, Comment, Database, Gear, ArrowDownToLine, Aperture, FaceRobot, LogoMcp, PersonPlus, BookOpen, Ghost } from '@gravity-ui/icons'
 import type { IconComponent } from '@/types/icon'
 import MacOSDock, { type DockApp } from '@/components/ui/mac-os-dock'
 import { useThemeStore } from '@/stores/themeStore'
@@ -124,7 +124,7 @@ function BottomDock() {
     { id: 'moments', name: '朋友圈', icon: makeIcon(Aperture) },
     { id: 'export', name: '导出数据', icon: makeIcon(ArrowDownToLine) },
     { id: 'data-management', name: '数据管理', icon: makeIcon(Database) },
-    { id: 'mcp', name: 'MCP & Skills', icon: makeIcon(Boxes3) },
+    { id: 'mcp', name: 'MCP & Skills', icon: makeIcon(LogoMcp) },
     { id: 'settings', name: '设置', icon: makeIcon(Gear) },
     { id: 'device-connect', name: 'ClawLink', icon: (
       <div className="relative w-full h-full p-1">

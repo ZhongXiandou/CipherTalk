@@ -3,7 +3,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Button, Card, Description, InputGroup, Label, Switch, TextField } from '@heroui/react'
-import { AlertCircle, CheckCircle, Plug } from 'lucide-react'
+import { CircleCheck, CircleExclamation, PlugConnection } from '@gravity-ui/icons'
 import type { RerankConfig } from '@/types/electron'
 
 const DEFAULT_CFG: RerankConfig = {
@@ -113,14 +113,14 @@ export default function RerankTab() {
 
         {status && (
           <p className={`flex items-center gap-1.5 text-sm ${status.ok ? 'text-green-600' : 'text-red-600'}`}>
-            {status.ok ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
+            {status.ok ? <CircleCheck width={16} height={16} /> : <CircleExclamation width={16} height={16} />}
             {status.text}
           </p>
         )}
       </Card.Content>
       <Card.Footer className="flex flex-wrap gap-2">
         <Button isDisabled={testing || !cfg.apiKey || !cfg.baseURL || !cfg.model} onPress={() => void handleTest()} type="button" variant="outline">
-          <Plug size={16} />
+          <PlugConnection width={16} height={16} />
           {testing ? '测试中…' : '测试连接'}
         </Button>
         <Button isDisabled={saving} onPress={() => void handleSave()} type="button" variant="primary">

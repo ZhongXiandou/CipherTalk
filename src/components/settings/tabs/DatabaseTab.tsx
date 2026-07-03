@@ -1,7 +1,7 @@
 ﻿import { useEffect, useState } from 'react'
 import { Alert, Avatar, Button, Card, Chip, ComboBox, Description, Fieldset, Input, InputGroup, Label, ListBox, Separator, TextField, Typography } from '@heroui/react'
 import { useRef, type ReactNode } from 'react'
-import { Check, CheckCircle, Copy, Eye, EyeOff, FolderOpen, ImageIcon, Key, Plug, RefreshCw, RotateCcw, Search, ShieldCheck, X, Zap } from 'lucide-react'
+import { ArrowRotateLeft, ArrowsRotateLeft, Check, CircleCheck, Copy, Eye, EyeSlash, FolderOpen, Key, Magnifier, Picture, PlugConnection, ShieldCheck, Thunderbolt, Xmark } from '@gravity-ui/icons'
 import { useAppStore } from '../../../stores/appStore'
 import type { AccountProfile } from '../../../types/account'
 import { dialog } from '../../../services/ipc'
@@ -523,12 +523,12 @@ function DatabaseTab({ showMessage }: DatabaseTabProps) {
           <InputGroup.Suffix className="pr-0">
             {onBrowse && (
               <Button type="button" variant="ghost" size="sm" isIconOnly onPress={onBrowse} aria-label={browseLabel}>
-                <FolderOpen size={16} />
+                <FolderOpen width={16} height={16} />
               </Button>
             )}
             {onReset && (
               <Button type="button" variant="ghost" size="sm" isIconOnly onPress={onReset} aria-label={resetLabel}>
-                <RotateCcw size={16} />
+                <ArrowRotateLeft width={16} height={16} />
               </Button>
             )}
           </InputGroup.Suffix>
@@ -563,7 +563,7 @@ function DatabaseTab({ showMessage }: DatabaseTabProps) {
               onPress={() => toggleSecretVisibility(id)}
               aria-label={visible ? '隐藏密钥' : '显示密钥'}
             >
-              {visible ? <EyeOff size={16} /> : <Eye size={16} />}
+              {visible ? <EyeSlash width={16} height={16} /> : <Eye width={16} height={16} />}
             </Button>
             <Button
               type="button"
@@ -574,7 +574,7 @@ function DatabaseTab({ showMessage }: DatabaseTabProps) {
               isDisabled={!value}
               aria-label={copied ? '密钥已复制' : '复制密钥'}
             >
-              {copied ? <Check size={16} /> : <Copy size={16} />}
+              {copied ? <Check width={16} height={16} /> : <Copy width={16} height={16} />}
             </Button>
           </InputGroup.Suffix>
         </InputGroup>
@@ -592,7 +592,7 @@ function DatabaseTab({ showMessage }: DatabaseTabProps) {
             账号管理
           </Typography.Heading>
           <Button type="button" variant="primary" size="sm" onPress={handleOpenWelcomeWindow}>
-            <Zap size={16} /> 新增账号
+            <Thunderbolt width={16} height={16} /> 新增账号
           </Button>
         </div>
 
@@ -620,7 +620,7 @@ function DatabaseTab({ showMessage }: DatabaseTabProps) {
                         <Card.Title className="truncate text-base">{displayName}</Card.Title>
                         {isActive && (
                           <Chip size="sm" variant="primary" color="success">
-                            <CheckCircle size={12} />
+                            <CircleCheck width={12} height={12} />
                             <Chip.Label>当前激活</Chip.Label>
                           </Chip>
                         )}
@@ -651,7 +651,7 @@ function DatabaseTab({ showMessage }: DatabaseTabProps) {
                         onPress={() => handleSwitchAccountAndReconnect(account)}
                         isDisabled={isActive || isLoading}
                       >
-                        <RefreshCw size={16} className={isLoading && !isActive ? 'spin' : undefined} />
+                        <ArrowsRotateLeft width={16} height={16} className={isLoading && !isActive ? 'spin' : undefined} />
                         {isActive ? '当前账号' : '切换并重连'}
                       </Button>
                     </Card.Footer>
@@ -714,11 +714,11 @@ function DatabaseTab({ showMessage }: DatabaseTabProps) {
               </Card.Content>
               <Card.Footer className="flex flex-wrap gap-2">
                 <Button type="button" variant="primary" size="sm" onPress={handleGetKey} isDisabled={isGettingKey}>
-                  <Key size={16} /> {isGettingKey ? '获取中...' : '自动获取密钥'}
+                  <Key width={16} height={16} /> {isGettingKey ? '获取中...' : '自动获取密钥'}
                 </Button>
                 {isGettingKey && (
                   <Button type="button" variant="outline" size="sm" onPress={handleCancelGetKey}>
-                    <X size={16} /> 取消
+                    <Xmark width={16} height={16} /> 取消
                   </Button>
                 )}
               </Card.Footer>
@@ -776,13 +776,13 @@ function DatabaseTab({ showMessage }: DatabaseTabProps) {
               </Card.Content>
               <Card.Footer className="flex flex-wrap items-center gap-2">
                 <Button type="button" variant="outline" size="sm" onPress={handleScanWxid} isDisabled={isScanningWxid || !dbPath}>
-                  <Search size={16} className={isScanningWxid ? 'spin' : undefined} /> {isScanningWxid ? '扫描中...' : '扫描账号'}
+                  <Magnifier width={16} height={16} className={isScanningWxid ? 'spin' : undefined} /> {isScanningWxid ? '扫描中...' : '扫描账号'}
                 </Button>
                 <Button type="button" variant="outline" size="sm" onPress={handleVerifyAccountDirectory} isDisabled={isVerifyingAccount || !dbPath || !decryptKey || !wxid}>
-                  <ShieldCheck size={16} /> {isVerifyingAccount ? '验证中...' : '验证账号'}
+                  <ShieldCheck width={16} height={16} /> {isVerifyingAccount ? '验证中...' : '验证账号'}
                 </Button>
                 <Button type="button" variant="secondary" size="sm" onPress={handleTestConnection} isDisabled={isTesting || !isAccountVerified}>
-                  <Plug size={16} /> {isTesting ? '测试中...' : '测试连接'}
+                  <PlugConnection width={16} height={16} /> {isTesting ? '测试中...' : '测试连接'}
                 </Button>
               </Card.Footer>
             </Card>
@@ -844,7 +844,7 @@ function DatabaseTab({ showMessage }: DatabaseTabProps) {
               </Card.Content>
               <Card.Footer>
                 <Button type="button" variant="primary" size="sm" onPress={handleGetImageKey} isDisabled={isGettingImageKey}>
-                  <ImageIcon size={16} /> {isGettingImageKey ? '获取中...' : '自动获取图片密钥'}
+                  <Picture width={16} height={16} /> {isGettingImageKey ? '获取中...' : '自动获取图片密钥'}
                 </Button>
               </Card.Footer>
             </Card>

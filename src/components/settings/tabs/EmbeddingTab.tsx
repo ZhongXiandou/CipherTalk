@@ -6,7 +6,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Button, Card, Description, InputGroup, Label, ListBox, Select, Switch, TextField } from '@heroui/react'
-import { AlertCircle, CheckCircle, ExternalLink, Image, Plug } from 'lucide-react'
+import { ArrowUpRightFromSquare, CircleCheck, CircleExclamation, Picture, PlugConnection } from '@gravity-ui/icons'
 import type { EmbeddingConfig } from '@/types/electron'
 
 const SILICONFLOW_REFERRAL_URL = 'https://cloud.siliconflow.cn/i/lNl8YK1m'
@@ -99,7 +99,7 @@ export default function EmbeddingTab() {
             供 AI 助手做语义/向量检索，独立于聊天模型。需 OpenAI 兼容的嵌入接口（如硅基流动 bge-m3、通义、智谱、OpenAI）。
           </Card.Description>
           <Button className="mt-3" onPress={handleOpenSiliconFlowReferral} size="sm" type="button" variant="outline">
-            <ExternalLink size={14} />
+            <ArrowUpRightFromSquare width={14} height={14} />
             推荐：硅基流动
           </Button>
         </div>
@@ -155,7 +155,7 @@ export default function EmbeddingTab() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
               <Label className="flex items-center gap-2">
-                <Image size={16} />
+                <Picture width={16} height={16} />
                 图片向量化
               </Label>
               <Description>
@@ -207,14 +207,14 @@ export default function EmbeddingTab() {
 
         {status && (
           <p className={`flex items-center gap-1.5 text-sm ${status.ok ? 'text-green-600' : 'text-red-600'}`}>
-            {status.ok ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
+            {status.ok ? <CircleCheck width={16} height={16} /> : <CircleExclamation width={16} height={16} />}
             {status.text}
           </p>
         )}
       </Card.Content>
       <Card.Footer className="flex flex-wrap gap-2">
         <Button isDisabled={testing || !cfg.apiKey || !cfg.model} onPress={() => void handleTest()} type="button" variant="outline">
-          <Plug size={16} />
+          <PlugConnection width={16} height={16} />
           {testing ? '测试中…' : '测试连接'}
         </Button>
         <Button isDisabled={saving} onPress={() => void handleSave()} type="button" variant="primary">

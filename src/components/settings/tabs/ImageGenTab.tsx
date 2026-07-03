@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Button, Card, Description, InputGroup, Label, ListBox, Select, Switch, TextField } from '@heroui/react'
-import { AlertCircle, CheckCircle, ImagePlus } from 'lucide-react'
+import { CircleCheck, CircleExclamation, Picture } from '@gravity-ui/icons'
 import type { ImageGenConfig } from '@/types/electron'
 
 const DEFAULT_CFG: ImageGenConfig = {
@@ -178,7 +178,7 @@ export default function ImageGenTab() {
 
         {status && (
           <p className={`flex items-center gap-1.5 text-sm ${status.ok ? 'text-green-600' : 'text-red-600'}`}>
-            {status.ok ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
+            {status.ok ? <CircleCheck width={16} height={16} /> : <CircleExclamation width={16} height={16} />}
             {status.text}
           </p>
         )}
@@ -200,7 +200,7 @@ export default function ImageGenTab() {
       </Card.Content>
       <Card.Footer className="flex flex-wrap gap-2">
         <Button isDisabled={testing || !cfg.apiKey || !cfg.model} onPress={() => void handleTest()} type="button" variant="outline">
-          <ImagePlus size={16} />
+          <Picture width={16} height={16} />
           {testing ? '生成中…' : '测试生成（消耗少量额度）'}
         </Button>
         <Button isDisabled={saving} onPress={() => void handleSave()} type="button" variant="primary">

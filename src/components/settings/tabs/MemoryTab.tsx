@@ -17,7 +17,7 @@ import {
   Typography,
   type Key,
 } from '@heroui/react'
-import { Check, Download, FileText, ListChecks, Pencil, Plus, RefreshCw, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { ArrowDownToLine, ArrowsRotateLeft, Check, FileText, ListCheck, Magnifier, Pencil, Plus, Sparkles, TrashBin, Xmark } from '@gravity-ui/icons'
 import type { AgentMemoryItem, AgentMemorySourceType, MemoryBankNoteInfo, MemoryBankNoteKind } from '../../../types/electron'
 import { useSettingsStore } from '../settingsStore'
 
@@ -451,11 +451,11 @@ export default function MemoryTab({ showMessage }: MemoryTabProps) {
 
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="primary" onPress={() => void handleSave()}>
-            <Check size={16} />
+            <Check width={16} height={16} />
             保存
           </Button>
           <Button type="button" variant="tertiary" onPress={cancelEdit}>
-            <X size={16} />
+            <Xmark width={16} height={16} />
             取消
           </Button>
         </div>
@@ -491,17 +491,17 @@ export default function MemoryTab({ showMessage }: MemoryTabProps) {
         <div className="mt-3 flex flex-wrap gap-2">
           {isPendingMemory(item) && (
             <Button size="sm" type="button" variant="secondary" onPress={() => void handleConfirmMemory(item)}>
-              <Check size={14} />
+              <Check width={14} height={14} />
               确认
             </Button>
           )}
           <Button size="sm" type="button" variant="tertiary" onPress={() => startEdit(item)}>
-            <Pencil size={14} />
+            <Pencil width={14} height={14} />
             编辑
           </Button>
           <AlertDialog>
             <Button size="sm" type="button" variant="danger">
-              <Trash2 size={14} />
+              <TrashBin width={14} height={14} />
               删除
             </Button>
             <AlertDialog.Backdrop>
@@ -562,7 +562,7 @@ export default function MemoryTab({ showMessage }: MemoryTabProps) {
         <span className="min-w-0 flex-1 truncate text-xs text-muted">{note.fileName}</span>
         <AlertDialog>
           <Button size="sm" type="button" variant="danger">
-            <Trash2 size={14} />
+            <TrashBin width={14} height={14} />
             删除
           </Button>
           <AlertDialog.Backdrop>
@@ -630,19 +630,19 @@ export default function MemoryTab({ showMessage }: MemoryTabProps) {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="secondary" onPress={startCreate}>
-            <Plus size={16} />
+            <Plus width={16} height={16} />
             新增
           </Button>
           <Button isDisabled={loading} type="button" variant="secondary" onPress={() => void load()}>
-            <RefreshCw className={loading ? 'animate-spin' : ''} size={16} />
+            <ArrowsRotateLeft className={loading ? 'animate-spin' : ''} width={16} height={16} />
             刷新
           </Button>
           <Button isDisabled={consolidating} type="button" variant="secondary" onPress={() => void handleConsolidate()}>
-            <Sparkles size={16} />
+            <Sparkles width={16} height={16} />
             {consolidating ? '整理中...' : '整理'}
           </Button>
           <Button isDisabled={exporting} type="button" variant="secondary" onPress={() => void handleExportMarkdown()}>
-            <Download size={16} />
+            <ArrowDownToLine width={16} height={16} />
             导出
           </Button>
         </div>
@@ -654,7 +654,7 @@ export default function MemoryTab({ showMessage }: MemoryTabProps) {
             <Label>搜索</Label>
             <InputGroup fullWidth variant="secondary">
               <InputGroup.Prefix>
-                <Search size={15} />
+                <Magnifier width={15} height={15} />
               </InputGroup.Prefix>
               <InputGroup.Input placeholder="搜索内容或标签" />
             </InputGroup>
@@ -702,17 +702,17 @@ export default function MemoryTab({ showMessage }: MemoryTabProps) {
         <div className="flex flex-wrap gap-2">
           <ButtonGroup variant="tertiary">
             <Button onPress={() => setBankNoteKind('tasks')} variant={bankNoteKind === 'tasks' ? 'secondary' : 'tertiary'}>
-              <ListChecks size={16} />
+              <ListCheck width={16} height={16} />
               任务
             </Button>
             <Button onPress={() => setBankNoteKind('notes')} variant={bankNoteKind === 'notes' ? 'secondary' : 'tertiary'}>
               <ButtonGroup.Separator />
-              <FileText size={16} />
+              <FileText width={16} height={16} />
               笔记
             </Button>
           </ButtonGroup>
           <Button isDisabled={bankNoteLoading} type="button" variant="secondary" onPress={() => void loadBankNotes()}>
-            <RefreshCw className={bankNoteLoading ? 'animate-spin' : ''} size={16} />
+            <ArrowsRotateLeft className={bankNoteLoading ? 'animate-spin' : ''} width={16} height={16} />
             刷新
           </Button>
         </div>
@@ -723,7 +723,7 @@ export default function MemoryTab({ showMessage }: MemoryTabProps) {
           <Label>搜索</Label>
           <InputGroup fullWidth variant="secondary">
             <InputGroup.Prefix>
-              <Search size={15} />
+              <Magnifier width={15} height={15} />
             </InputGroup.Prefix>
             <InputGroup.Input placeholder="搜索标题、内容、标签或文件名" />
           </InputGroup>

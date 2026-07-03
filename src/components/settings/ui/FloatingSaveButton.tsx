@@ -1,5 +1,5 @@
 import { Button } from '@heroui/react'
-import { Save } from 'lucide-react'
+import { FloppyDisk } from '@gravity-ui/icons'
 
 interface FloatingSaveButtonProps {
   hasChanges: boolean
@@ -18,7 +18,7 @@ function FloatingSaveButton({ hasChanges, disabled = false, onClick }: FloatingS
       size="lg"
       variant={hasChanges ? 'danger' : 'primary'}
     >
-      <Save size={20} />
+      <FloppyDisk width={20} height={20} />
     </Button>
   )
 }

@@ -16,12 +16,7 @@ import { useSettingsStore } from './settingsStore'
 import { usePluginStore, ensurePluginStoreSubscribed, selectEnabledPlugins } from '../../stores/pluginStore'
 import PluginHost from '../../features/plugins/PluginHost'
 import { ConfirmDialog, FloatingSaveButton } from './ui'
-import {
-  Eye, EyeOff, Key, FolderSearch, FolderOpen, Search,
-  RotateCcw, Trash2, Plug, X, Check,
-  Palette, Database, ImageIcon, Download, HardDrive, Info, RefreshCw, Shield, CheckCircle, AlertCircle, Mic,
-  Zap, Layers, User, Sparkles, Lock, ShieldCheck, Minus, Plus, Smile, ChevronDown, Brain
-} from 'lucide-react'
+import { ArrowDownToLine, ArrowRotateLeft, ArrowsRotateLeft, Bulb, Check, ChevronDown, CircleCheck, CircleExclamation, CircleInfo, Database, Eye, EyeSlash, FaceSmile, FolderMagnifier, FolderOpen, HardDrive, Key, Layers, Lock, Magnifier, Microphone, Minus, Palette, Person, Picture, PlugConnection, Plus, Shield, ShieldCheck, Sparkles, Thunderbolt, TrashBin, Xmark } from '@gravity-ui/icons'
 import '../../pages/SettingsPage.css'
 
 const AISummarySettings = lazy(() => import('../ai/AISummarySettings'))
@@ -37,13 +32,13 @@ const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
   { id: 'appearance', label: '外观', icon: Palette },
   { id: 'database', label: '数据解密', icon: Database },
   { id: 'security', label: '安全设置', icon: Lock },
-  { id: 'stt', label: '语音转文字', icon: Mic },
+  { id: 'stt', label: '语音转文字', icon: Microphone },
   { id: 'ai', label: 'AI 接入', icon: Sparkles },
-  { id: 'memory', label: '记忆', icon: Brain },
+  { id: 'memory', label: '记忆', icon: Bulb },
   { id: 'data', label: '数据管理', icon: HardDrive },
-  { id: 'plugins', label: '插件', icon: Plug },
+  { id: 'plugins', label: '插件', icon: PlugConnection },
   // { id: 'activation', label: '激活', icon: Shield },
-  { id: 'about', label: '关于', icon: Info }
+  { id: 'about', label: '关于', icon: CircleInfo }
 ]
 
 const sttLanguageOptions = [
@@ -1370,7 +1365,7 @@ function SettingsLayout() {
       {securityConfirm.show && (
         <ConfirmDialog
           title={securityConfirm.title}
-          titleIcon={<AlertCircle className="text-warning" size={20} color="#f59e0b" />}
+          titleIcon={<CircleExclamation className="text-warning" width={20} height={20} color="#f59e0b" />}
           message={securityConfirm.message}
           actions={(
             <>
@@ -1394,14 +1389,14 @@ function SettingsLayout() {
           <Tabs.List aria-label="设置分类">
             {tabs.map(tab => (
               <Tabs.Tab key={tab.id} id={tab.id}>
-                <tab.icon size={16} />
+                <tab.icon width={16} height={16} />
                 {tab.label}
                 <Tabs.Indicator />
               </Tabs.Tab>
             ))}
             {pluginTabs.map(tab => (
               <Tabs.Tab key={tab.id} id={tab.id}>
-                <Plug size={16} />
+                <PlugConnection width={16} height={16} />
                 {tab.label}
                 <Tabs.Indicator />
               </Tabs.Tab>

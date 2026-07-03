@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Alert, AlertDialog, Button, Card, Chip, Description, InputGroup, Label, ListBox, Radio, RadioGroup, ScrollShadow, Tabs, TextField, Typography, type Key } from '@heroui/react'
-import { Database, FolderOpen, ImageIcon, KeyRound, Layers, RefreshCw, RotateCcw, Smile, Trash2 } from 'lucide-react'
+import { ArrowRotateLeft, ArrowsRotateLeft, Database, FaceSmile, FolderOpen, Key as KeyIcon, Layers, Picture, TrashBin } from '@gravity-ui/icons'
 import { dialog } from '../../../services/ipc'
 import { formatFileSize } from '../utils'
 import { useSettingsStore } from '../settingsStore'
@@ -255,10 +255,10 @@ function DataManagementTab({ showMessage, reloadConfig }: DataManagementTabProps
               <InputGroup.Input placeholder={defaultExportPath || '系统下载目录'} />
               <InputGroup.Suffix className="pr-0">
                 <Button type="button" variant="ghost" size="sm" isIconOnly aria-label="选择导出目录" onPress={handleSelectExportPath}>
-                  <FolderOpen size={16} />
+                  <FolderOpen width={16} height={16} />
                 </Button>
                 <Button type="button" variant="ghost" size="sm" isIconOnly aria-label="恢复默认目录" onPress={() => void handleResetExportPath()}>
-                  <RotateCcw size={16} />
+                  <ArrowRotateLeft width={16} height={16} />
                 </Button>
               </InputGroup.Suffix>
             </InputGroup>
@@ -333,7 +333,7 @@ function DataManagementTab({ showMessage, reloadConfig }: DataManagementTabProps
       </Card.Header>
       <Card.Footer className="mt-auto">
         <Button type="button" variant={actionVariant} size="sm" fullWidth onPress={onAction}>
-          <Trash2 size={16} /> {actionLabel}
+          <TrashBin width={16} height={16} /> {actionLabel}
         </Button>
       </Card.Footer>
     </Card>
@@ -347,7 +347,7 @@ function DataManagementTab({ showMessage, reloadConfig }: DataManagementTabProps
           <Typography.Paragraph size="sm" color="muted">查看缓存占用并清理本地生成数据。</Typography.Paragraph>
         </div>
         <Button type="button" variant="outline" size="sm" onPress={() => void loadCacheSize()} isDisabled={isLoadingCacheSize}>
-          <RefreshCw size={16} className={isLoadingCacheSize ? 'spin' : undefined} /> 刷新缓存大小
+          <ArrowsRotateLeft width={16} height={16} className={isLoadingCacheSize ? 'spin' : undefined} /> 刷新缓存大小
         </Button>
       </div>
 
@@ -361,7 +361,7 @@ function DataManagementTab({ showMessage, reloadConfig }: DataManagementTabProps
       ) : cacheSize ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {renderCacheCard({
-            icon: <ImageIcon size={20} />,
+            icon: <Picture width={20} height={20} />,
             title: '图片缓存',
             size: cacheSize.images,
             description: '解密后的图片文件',
@@ -369,7 +369,7 @@ function DataManagementTab({ showMessage, reloadConfig }: DataManagementTabProps
             onAction: handleClearImages
           })}
           {renderCacheCard({
-            icon: <Smile size={20} />,
+            icon: <FaceSmile width={20} height={20} />,
             title: '表情包缓存',
             size: cacheSize.emojis,
             description: '解密后的表情包文件',
@@ -377,7 +377,7 @@ function DataManagementTab({ showMessage, reloadConfig }: DataManagementTabProps
             onAction: handleClearEmojis
           })}
           {renderCacheCard({
-            icon: <Database size={20} />,
+            icon: <Database width={20} height={20} />,
             title: 'AI 数据',
             size: cacheSize.aiData,
             description: '历史摘要、记忆、语义索引',
@@ -385,14 +385,14 @@ function DataManagementTab({ showMessage, reloadConfig }: DataManagementTabProps
             onAction: handleClearAIData
           })}
           {renderCacheCard({
-            icon: <KeyRound size={20} />,
+            icon: <KeyIcon width={20} height={20} />,
             title: '当前账号配置',
             description: '密钥、路径等账号级配置',
             actionLabel: '清除当前账号',
             onAction: handleClearCurrentAccount
           })}
           {renderCacheCard({
-            icon: <KeyRound size={20} />,
+            icon: <KeyIcon width={20} height={20} />,
             title: '当前账号与本地数据',
             description: '配置与该账号对应的本地缓存',
             actionLabel: '删除并清理数据',
@@ -400,7 +400,7 @@ function DataManagementTab({ showMessage, reloadConfig }: DataManagementTabProps
             onAction: handleClearCurrentAccountWithData
           })}
           {renderCacheCard({
-            icon: <Layers size={20} />,
+            icon: <Layers width={20} height={20} />,
             title: '全部缓存',
             size: cacheSize.total,
             description: '图片、表情包、日志和 AI 数据',
@@ -409,7 +409,7 @@ function DataManagementTab({ showMessage, reloadConfig }: DataManagementTabProps
             onAction: handleClearAllCache
           })}
           {renderCacheCard({
-            icon: <KeyRound size={20} />,
+            icon: <KeyIcon width={20} height={20} />,
             title: '全部账号配置',
             description: '所有账号级密钥和路径信息',
             actionLabel: '清空全部账号配置',
@@ -453,13 +453,13 @@ function DataManagementTab({ showMessage, reloadConfig }: DataManagementTabProps
           </Card.Content>
           <Card.Footer className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" onPress={handleOpenLogDirectory}>
-              <FolderOpen size={16} /> 打开目录
+              <FolderOpen width={16} height={16} /> 打开目录
             </Button>
             <Button type="button" variant="outline" size="sm" onPress={() => void loadLogFiles()} isDisabled={isLoadingLogs}>
-              <RefreshCw size={16} className={isLoadingLogs ? 'spin' : undefined} /> 刷新
+              <ArrowsRotateLeft width={16} height={16} className={isLoadingLogs ? 'spin' : undefined} /> 刷新
             </Button>
             <Button type="button" variant="danger" size="sm" onPress={handleClearLogs}>
-              <Trash2 size={16} /> 清除日志
+              <TrashBin width={16} height={16} /> 清除日志
             </Button>
           </Card.Footer>
         </Card>
@@ -596,9 +596,9 @@ function DataManagementTab({ showMessage, reloadConfig }: DataManagementTabProps
       <Tabs selectedKey={activePanel} onSelectionChange={(key: Key) => setActivePanel(String(key) as DataManagementTabKey)} className="w-full">
         <Tabs.ListContainer>
           <Tabs.List aria-label="数据管理分类" className="w-full *:flex-1 *:gap-2">
-            <Tabs.Tab id="export"><FolderOpen size={16} aria-hidden />导出设置<Tabs.Indicator /></Tabs.Tab>
-            <Tabs.Tab id="cache"><Database size={16} aria-hidden />缓存管理<Tabs.Indicator /></Tabs.Tab>
-            <Tabs.Tab id="logs"><RefreshCw size={16} aria-hidden />日志管理<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab id="export"><FolderOpen width={16} height={16} aria-hidden />导出设置<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab id="cache"><Database width={16} height={16} aria-hidden />缓存管理<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab id="logs"><ArrowsRotateLeft width={16} height={16} aria-hidden />日志管理<Tabs.Indicator /></Tabs.Tab>
           </Tabs.List>
         </Tabs.ListContainer>
 

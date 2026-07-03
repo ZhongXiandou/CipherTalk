@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AlertDialog, Button, Card, Chip, Description, InputGroup, Label, TextField, Typography } from '@heroui/react'
-import { Check, Fingerprint, KeyRound, Lock, Save, ShieldCheck } from 'lucide-react'
+import { Check, Fingerprint, FloppyDisk, Key, Lock, ShieldCheck } from '@gravity-ui/icons'
 import { useAuthStore } from '../../../stores/authStore'
 
 interface SecurityTabProps {
@@ -109,7 +109,7 @@ function SecurityTab({ isMac, showMessage }: SecurityTabProps) {
           <Card.Header className="flex-row items-start justify-between gap-3">
             <div className="flex min-w-0 gap-3">
               <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-default text-foreground">
-                <Fingerprint size={20} />
+                <Fingerprint width={20} height={20} />
               </div>
               <div className="min-w-0">
                 <Card.Title>{biometricLabel}</Card.Title>
@@ -122,7 +122,7 @@ function SecurityTab({ isMac, showMessage }: SecurityTabProps) {
             </div>
             {isBiometricActive && (
               <Chip size="sm" variant="soft" color="success">
-                <Check size={12} />
+                <Check width={12} height={12} />
                 <Chip.Label>已启用</Chip.Label>
               </Chip>
             )}
@@ -138,7 +138,7 @@ function SecurityTab({ isMac, showMessage }: SecurityTabProps) {
               variant={isBiometricActive ? 'outline' : 'primary'}
               onPress={() => void handleSecurityMethodSelect('biometric')}
             >
-              <Lock size={16} />
+              <Lock width={16} height={16} />
               {isBiometricActive ? '关闭应用锁' : `启用${biometricLabel}`}
             </Button>
           </Card.Footer>
@@ -148,7 +148,7 @@ function SecurityTab({ isMac, showMessage }: SecurityTabProps) {
           <Card.Header className="flex-row items-start justify-between gap-3">
             <div className="flex min-w-0 gap-3">
               <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-default text-foreground">
-                <ShieldCheck size={20} />
+                <ShieldCheck width={20} height={20} />
               </div>
               <div className="min-w-0">
                 <Card.Title>自定义应用密码</Card.Title>
@@ -161,7 +161,7 @@ function SecurityTab({ isMac, showMessage }: SecurityTabProps) {
             </div>
             {isPasswordActive && (
               <Chip size="sm" variant="soft" color="success">
-                <Check size={12} />
+                <Check width={12} height={12} />
                 <Chip.Label>已启用</Chip.Label>
               </Chip>
             )}
@@ -177,7 +177,7 @@ function SecurityTab({ isMac, showMessage }: SecurityTabProps) {
                 <Label>{isPasswordActive ? '修改密码（留空不修改）' : '设置新密码'}</Label>
                 <InputGroup fullWidth variant="secondary">
                   <InputGroup.Prefix>
-                    <KeyRound size={16} />
+                    <Key width={16} height={16} />
                   </InputGroup.Prefix>
                   <InputGroup.Input type="password" placeholder="请输入应用密码" />
                 </InputGroup>
@@ -191,7 +191,7 @@ function SecurityTab({ isMac, showMessage }: SecurityTabProps) {
               variant={isPasswordActive ? 'outline' : 'primary'}
               onPress={() => void handleSecurityMethodSelect('password')}
             >
-              <Lock size={16} />
+              <Lock width={16} height={16} />
               {isPasswordActive ? '关闭应用锁' : '启用密码锁'}
             </Button>
             {shouldShowPasswordSetup && (
@@ -201,7 +201,7 @@ function SecurityTab({ isMac, showMessage }: SecurityTabProps) {
                 onPress={() => void savePassword()}
                 isDisabled={!passwordInput}
               >
-                <Save size={16} /> 保存密码
+                <FloppyDisk width={16} height={16} /> 保存密码
               </Button>
             )}
           </Card.Footer>

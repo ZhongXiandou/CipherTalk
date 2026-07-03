@@ -1,6 +1,6 @@
 import { type SetStateAction, useEffect, useState } from 'react'
 import { Alert, AlertDialog, Button, Card, Checkbox, CheckboxGroup, Chip, Description, InputGroup, Label, ListBox, NumberField, ProgressBar, Radio, RadioGroup, Select, Switch, Tabs, TextField, Typography, type Key } from '@heroui/react'
-import { AlertCircle, CheckCircle, Download, Layers, Pause, Plug, RefreshCw, Trash2, Zap } from 'lucide-react'
+import { ArrowDownToLine, ArrowsRotateLeft, CircleCheck, CircleExclamation, Cloud, Cpu, Gpu, Layers, Pause, PlugConnection, Thunderbolt, TrashBin } from '@gravity-ui/icons'
 import * as configService from '../../../services/config'
 import { formatFileSize } from '../utils'
 import { useSettingsStore } from '../settingsStore'
@@ -530,7 +530,7 @@ function SttTab({ active, showMessage }: SttTabProps) {
 
   const renderStatusChip = (ready: boolean, readyText = '已就绪', missingText = '未下载') => (
     <Chip size="sm" variant="soft" color={ready ? 'success' : 'warning'}>
-      {ready ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
+      {ready ? <CircleCheck width={12} height={12} /> : <CircleExclamation width={12} height={12} />}
       <Chip.Label>{ready ? readyText : missingText}</Chip.Label>
     </Chip>
   )
@@ -552,7 +552,7 @@ function SttTab({ active, showMessage }: SttTabProps) {
         </ProgressBar.Track>
       </ProgressBar>
       <Button type="button" variant="outline" size="sm" onPress={() => void onPause()}>
-        <Pause size={16} /> 暂停下载
+        <Pause width={16} height={16} /> 暂停下载
       </Button>
     </div>
   )
@@ -624,7 +624,7 @@ function SttTab({ active, showMessage }: SttTabProps) {
                 <Radio.Content className="pr-8">
                   <div className="flex items-start gap-3">
                     <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-default text-foreground">
-                      {option.value === 'int8' ? <Zap size={18} /> : <Layers size={18} />}
+                      {option.value === 'int8' ? <Thunderbolt width={18} height={18} /> : <Layers width={18} height={18} />}
                     </div>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -646,16 +646,16 @@ function SttTab({ active, showMessage }: SttTabProps) {
         <Card.Footer className="flex flex-wrap gap-2">
           {!sttModelStatus?.exists && (
             <Button type="button" variant="primary" onPress={() => void handleDownloadSttModel()} isDisabled={isDownloadingSttModel}>
-              <Download size={16} /> {isDownloadingSttModel ? '下载中...' : '下载模型'}
+              <ArrowDownToLine width={16} height={16} /> {isDownloadingSttModel ? '下载中...' : '下载模型'}
             </Button>
           )}
           {sttModelStatus?.exists && (
             <Button type="button" variant="danger" onPress={handleClearSttModel}>
-              <Trash2 size={16} /> 清除模型
+              <TrashBin width={16} height={16} /> 清除模型
             </Button>
           )}
           <Button type="button" variant="outline" onPress={() => void loadSttModelStatus()} isDisabled={isLoadingSttStatus}>
-            <RefreshCw size={16} className={isLoadingSttStatus ? 'spin' : undefined} /> 刷新状态
+            <ArrowsRotateLeft width={16} height={16} className={isLoadingSttStatus ? 'spin' : undefined} /> 刷新状态
           </Button>
         </Card.Footer>
       </Card>
@@ -724,7 +724,7 @@ function SttTab({ active, showMessage }: SttTabProps) {
                   <Radio.Content className="pr-8">
                     <div className="flex items-start gap-3">
                       <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-default text-foreground">
-                        <Zap size={18} />
+                        <Thunderbolt width={18} height={18} />
                       </div>
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
@@ -746,16 +746,16 @@ function SttTab({ active, showMessage }: SttTabProps) {
           <Card.Footer className="flex flex-wrap gap-2">
             {!whisperModelStatus?.exists && (
               <Button type="button" variant="primary" onPress={() => void handleDownloadWhisperModel()} isDisabled={isDownloadingWhisperModel}>
-                <Download size={16} /> {isDownloadingWhisperModel ? '下载中...' : '下载模型'}
+                <ArrowDownToLine width={16} height={16} /> {isDownloadingWhisperModel ? '下载中...' : '下载模型'}
               </Button>
             )}
             {whisperModelStatus?.exists && (
               <Button type="button" variant="danger" onPress={handleClearWhisperModel}>
-                <Trash2 size={16} /> 清除模型
+                <TrashBin width={16} height={16} /> 清除模型
               </Button>
             )}
             <Button type="button" variant="outline" onPress={() => void loadWhisperStatus()} isDisabled={isLoadingWhisperStatus}>
-              <RefreshCw size={16} className={isLoadingWhisperStatus ? 'spin' : undefined} /> 刷新状态
+              <ArrowsRotateLeft width={16} height={16} className={isLoadingWhisperStatus ? 'spin' : undefined} /> 刷新状态
             </Button>
           </Card.Footer>
         </Card>
@@ -818,7 +818,7 @@ function SttTab({ active, showMessage }: SttTabProps) {
           {!gpuComponentsStatus?.installed && (
             <Card.Footer>
               <Button type="button" variant="primary" className="w-full" onPress={() => void handleDownloadGpuComponents()} isDisabled={isDownloadingGpuComponents}>
-                <Download size={16} /> {isDownloadingGpuComponents ? '下载中...' : '下载 GPU 组件'}
+                <ArrowDownToLine width={16} height={16} /> {isDownloadingGpuComponents ? '下载中...' : '下载 GPU 组件'}
               </Button>
             </Card.Footer>
           )}
@@ -1002,7 +1002,7 @@ function SttTab({ active, showMessage }: SttTabProps) {
         </Card.Content>
         <Card.Footer>
           <Button type="button" variant="secondary" onPress={() => void handleTestOnlineSttConfig()}>
-            <Plug size={16} /> 测试在线配置
+            <PlugConnection width={16} height={16} /> 测试在线配置
           </Button>
         </Card.Footer>
       </Card>
@@ -1069,9 +1069,9 @@ function SttTab({ active, showMessage }: SttTabProps) {
       <Tabs selectedKey={sttMode} onSelectionChange={(key) => void handleSttModeChange(toSttMode(key))} className="w-full">
         <Tabs.ListContainer>
           <Tabs.List aria-label="语音转文字模式" className="w-full *:flex-1 *:gap-2">
-            <Tabs.Tab id="cpu"><Layers size={16} aria-hidden />CPU 模式<Tabs.Indicator /></Tabs.Tab>
-            <Tabs.Tab id="gpu"><Zap size={16} aria-hidden />GPU 模式<Tabs.Indicator /></Tabs.Tab>
-            <Tabs.Tab id="online"><Plug size={16} aria-hidden />在线模式<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab id="cpu"><Cpu width={16} height={16} aria-hidden />CPU 模式<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab id="gpu"><Gpu width={16} height={16} aria-hidden />GPU 模式<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab id="online"><Cloud width={16} height={16} aria-hidden />在线模式<Tabs.Indicator /></Tabs.Tab>
           </Tabs.List>
         </Tabs.ListContainer>
 

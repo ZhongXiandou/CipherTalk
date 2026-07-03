@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { CheckCircle, AlertCircle, Clock, RefreshCw, Key } from 'lucide-react'
+import { ArrowsRotateLeft, CircleCheck, CircleExclamation, Clock, Key } from '@gravity-ui/icons'
 import { useActivationStore } from '../../../stores/activationStore'
 
 function getTypeDisplayName(type: string | null) {
@@ -35,9 +35,9 @@ function ActivationTab() {
       <div className={`activation-status-card ${activationStatus?.isActivated ? 'activated' : 'inactive'}`}>
         <div className="status-icon">
           {activationStatus?.isActivated ? (
-            <CheckCircle size={48} />
+            <CircleCheck width={48} height={48} />
           ) : (
-            <AlertCircle size={48} />
+            <CircleExclamation width={48} height={48} />
           )}
         </div>
         <div className="status-content">
@@ -47,7 +47,7 @@ function ActivationTab() {
               <p className="status-type">{getTypeDisplayName(activationStatus.type)}</p>
               {activationStatus.daysRemaining !== null && activationStatus.type !== 'permanent' && (
                 <p className="status-expires">
-                  <Clock size={14} />
+                  <Clock width={14} height={14} />
                   {activationStatus.daysRemaining > 0
                     ? `剩余 ${activationStatus.daysRemaining} 天`
                     : '已过期'}
@@ -74,10 +74,10 @@ function ActivationTab() {
 
       <div className="activation-actions">
         <button className="btn btn-secondary" onClick={() => checkActivationStatus()}>
-          <RefreshCw size={16} /> 刷新状态
+          <ArrowsRotateLeft width={16} height={16} /> 刷新状态
         </button>
         <button className="btn btn-primary" onClick={() => window.electronAPI.window.openPurchaseWindow()}>
-          <Key size={16} /> 获取激活码
+          <Key width={16} height={16} /> 获取激活码
         </button>
       </div>
     </div>

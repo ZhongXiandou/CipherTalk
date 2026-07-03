@@ -26,7 +26,7 @@ import {
   useOverlayState,
   type Key
 } from '@heroui/react'
-import { ArrowUpRight, Brain, Braces, CheckCircle2, Coins, Eye, EyeOff, FileText, Gauge, HelpCircle, Image as ImageIcon, Pencil, Plus, RefreshCw, Settings2, Sparkles, Trash2, Wrench } from 'lucide-react'
+import { ArrowUpRight, ArrowsRotateLeft, Bulb, CircleCheck, CircleQuestion, CurlyBrackets, Eye, EyeSlash, FileText, GearDot, Pencil, Picture, Plus, Sparkles, Speedometer, TrashBin, Wallet, Wrench } from '@gravity-ui/icons'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { getAIProviders, type AIModelInfo, type AIProviderInfo } from '../../types/ai'
@@ -177,7 +177,7 @@ function ModelCapabilityStrip({ modelDetail, compact = false }: { modelDetail?: 
   const isFree = isFreeModelCost(modelDetail)
   const status = formatModelStatus(modelDetail.status)
   const metrics = [
-    { key: 'context', label: '上下文', value: context || '--', active: !!context, icon: Gauge, tooltip: context ? `上下文 ${context}` : '上下文未知' },
+    { key: 'context', label: '上下文', value: context || '--', active: !!context, icon: Speedometer, tooltip: context ? `上下文 ${context}` : '上下文未知' },
     { key: 'output', label: '输出', value: output || '--', active: !!output, icon: ArrowUpRight, tooltip: output ? `最大输出 ${output}` : '最大输出未知' },
     {
       key: 'price',
@@ -185,17 +185,17 @@ function ModelCapabilityStrip({ modelDetail, compact = false }: { modelDetail?: 
       value: price || '--',
       active: !!price,
       color: isFree ? 'success' as const : undefined,
-      icon: Coins,
+      icon: Wallet,
       tooltip: price
         ? (isFree ? '免费模型：输入和输出价格均为 0' : `${modelDetail.cost?.input}/1M input, ${modelDetail.cost?.output}/1M output`)
         : '价格未知'
     }
   ]
   const capabilities = [
-    { key: 'reasoning', label: '推理', enabled: modelDetail.capabilities.reasoning, icon: Brain },
+    { key: 'reasoning', label: '推理', enabled: modelDetail.capabilities.reasoning, icon: Bulb },
     { key: 'tool', label: '工具调用', enabled: modelDetail.capabilities.toolCall, icon: Wrench },
-    { key: 'structured', label: '结构化输出', enabled: modelDetail.capabilities.structuredOutput, icon: Braces },
-    { key: 'image', label: '图像输入', enabled: modelDetail.modalities.input.includes('image'), icon: ImageIcon },
+    { key: 'structured', label: '结构化输出', enabled: modelDetail.capabilities.structuredOutput, icon: CurlyBrackets },
+    { key: 'image', label: '图像输入', enabled: modelDetail.modalities.input.includes('image'), icon: Picture },
     { key: 'pdf', label: 'PDF', enabled: modelDetail.modalities.input.includes('pdf'), icon: FileText }
   ]
 
@@ -214,7 +214,7 @@ function ModelCapabilityStrip({ modelDetail, compact = false }: { modelDetail?: 
         return (
           <Tooltip key={item.key} delay={0}>
             <Chip size="md" variant="soft" color={item.color || (item.active ? 'accent' : 'default')} className={cn(!item.active && 'opacity-60')}>
-              <Icon size={12} />
+              <Icon width={12} height={12} />
               <Chip.Label>{item.value}</Chip.Label>
             </Chip>
             <Tooltip.Content>{item.tooltip}</Tooltip.Content>
@@ -226,7 +226,7 @@ function ModelCapabilityStrip({ modelDetail, compact = false }: { modelDetail?: 
         return (
           <Tooltip key={item.key} delay={0}>
             <Chip size="md" variant="soft" color={item.enabled ? 'success' : 'default'} className={cn(!item.enabled && 'opacity-60')}>
-              <Icon size={12} />
+              <Icon width={12} height={12} />
               {!compact && <Chip.Label>{item.label}</Chip.Label>}
             </Chip>
             <Tooltip.Content>{`${item.label}: ${item.enabled ? '支持' : '不支持'}`}</Tooltip.Content>
@@ -755,10 +755,10 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
             {configMode === 'llm' && (
               <>
                 <Button type="button" variant="primary" size="sm" onPress={openPresetDialogFromCurrent}>
-                  <Plus size={16} /> 添加预设
+                  <Plus width={16} height={16} /> 添加预设
                 </Button>
                 <Button type="button" variant="outline" size="sm" onPress={() => setShowPresetDrawer(true)}>
-                  <Settings2 size={16} /> 预设管理
+                  <GearDot width={16} height={16} /> 预设管理
                 </Button>
               </>
             )}
@@ -837,7 +837,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
                                 onPress={provider === 'ollama' ? openOllamaGuide : openCustomGuide}
                                 aria-label="查看接入指南"
                               >
-                                <HelpCircle size={18} />
+                                <CircleQuestion width={18} height={18} />
                               </Button>
                               <Tooltip.Content>查看接入指南</Tooltip.Content>
                             </Tooltip>
@@ -892,7 +892,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
                             onPress={() => setShowApiKey(!showApiKey)}
                             aria-label={showApiKey ? '隐藏 API 密钥' : '显示 API 密钥'}
                           >
-                            {showApiKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                            {showApiKey ? <EyeSlash width={18} height={18} /> : <Eye width={18} height={18} />}
                           </Button>
                           <Tooltip.Content>{showApiKey ? '隐藏 API 密钥' : '显示 API 密钥'}</Tooltip.Content>
                         </Tooltip>
@@ -941,7 +941,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
                           isDisabled={isLoadingModels || !canFetchModels}
                           aria-label="刷新模型列表"
                         >
-                          {isLoadingModels ? <Spinner size="sm" /> : <RefreshCw size={16} />}
+                          {isLoadingModels ? <Spinner size="sm" /> : <ArrowsRotateLeft width={16} height={16} />}
                         </Button>
                         <Tooltip.Content>刷新模型列表</Tooltip.Content>
                       </Tooltip>
@@ -964,7 +964,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
 
               <Card.Footer className="justify-end gap-3">
                 <Button type="button" variant="outline" size="sm" onPress={handleTestConnection} isDisabled={isTesting}>
-                  {isTesting ? <Spinner size="sm" /> : <Sparkles size={16} />}
+                  {isTesting ? <Spinner size="sm" /> : <Sparkles width={16} height={16} />}
                   {isTesting ? '测试中...' : '测试连接'}
                 </Button>
                 <Button type="submit" variant="primary" size="sm">
@@ -1088,7 +1088,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
                                 size="sm"
                                 onPress={() => { void handleLoadPreset(preset.id); setShowPresetDrawer(false) }}
                               >
-                                <CheckCircle2 size={15} />
+                                <CircleCheck width={15} height={15} />
                                 加载
                               </Button>
                               <Button
@@ -1097,7 +1097,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
                                 size="sm"
                                 onPress={() => handleEditPreset(preset)}
                               >
-                                <Pencil size={15} />
+                                <Pencil width={15} height={15} />
                                 编辑
                               </Button>
                               <Button
@@ -1106,7 +1106,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
                                 size="sm"
                                 onPress={() => void handleDeletePreset(preset.id)}
                               >
-                                <Trash2 size={15} />
+                                <TrashBin width={15} height={15} />
                                 删除
                               </Button>
                             </div>
