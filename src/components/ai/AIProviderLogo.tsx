@@ -1,4 +1,5 @@
-import { Anthropic, Clipdrop, DeepSeek, Doubao, Gemini, Kimi, Ollama, OpenAI, ProviderIcon, Qwen, SiliconCloud, XiaomiMiMo, XAI, Yuanbao, Zhipu } from '@lobehub/icons'
+import { Anthropic, DeepSeek, Doubao, Gemini, Kimi, Ollama, OpenAI, ProviderIcon, Qwen, SiliconCloud, XiaomiMiMo, XAI, Yuanbao, Zhipu } from '@lobehub/icons'
+import { Sparkles } from '@gravity-ui/icons'
 
 type AIProviderLogoProps = {
   providerId?: string
@@ -46,7 +47,7 @@ export default function AIProviderLogo({ providerId, logo, alt, className, size 
   const unifiedClassName = iconClassName(className)
 
   if (normalizedProviderId === 'custom') {
-    return <Clipdrop size={size} className={unifiedClassName} color="currentColor" />
+    return <Sparkles width={size} height={size} className={unifiedClassName} />
   }
 
   if (normalizedProviderId === 'gemini') {

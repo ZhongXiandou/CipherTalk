@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type Key } from 'react'
 import { Button as HeroButton, Input, Label, ListBox, Modal, ScrollShadow, Select, Switch, Tabs, TextArea, TextField, toast } from '@heroui/react'
-import { Bell, Bot, CalendarClock, Check, Download, FileArchive, HelpCircle, Loader2, Monitor, Plus, Search, Trash2, Volume2 } from 'lucide-react'
+import { ArrowDownToLine, Bell, Calendar, Check, CircleDashed, CircleQuestion, Display, FaceRobot, FileZipper, Magnifier, Plus, TrashBin, Volume } from '@gravity-ui/icons'
 import { cn } from '../lib/utils'
 import { PetSprite } from '../features/pets/PetSprite'
 import type { PersonaRecordInfo } from '../types/electron'
@@ -268,10 +268,10 @@ export default function PetsPage() {
             size="sm"
             variant="ghost"
           >
-            <HelpCircle className="size-4.5" />
+            <CircleQuestion className="size-4.5" />
           </HeroButton>
           <label className="flex shrink-0 cursor-pointer items-center gap-2 text-foreground text-sm">
-            <Monitor className="size-4 text-muted" />
+            <Display className="size-4 text-muted" />
             桌面桌宠
             <Switch aria-label="桌面悬浮桌宠" isSelected={desktopEnabled} onChange={(selected) => void toggleDesktop(Boolean(selected))}>
               <Switch.Control>
@@ -290,7 +290,7 @@ export default function PetsPage() {
                 petdex.dev 开源画廊{online ? ` · ${filteredOnline.length} 只可领养` : ''}
               </span>
               <div className="relative">
-                <Search className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted" />
+                <Magnifier className="-translate-y-1/2 absolute top-1/2 left-2.5 size-4 text-muted" />
                 <input
                   className="h-9 w-60 rounded-full border border-border bg-surface pr-3 pl-8 text-foreground text-sm outline-none placeholder:text-muted focus:border-primary"
                   onChange={(event) => {
@@ -304,7 +304,7 @@ export default function PetsPage() {
             </div>
             {!online && !onlineError && (
               <p className="flex items-center gap-2 px-1 py-6 text-muted text-sm">
-                <Loader2 className="size-4 animate-spin" />
+                <CircleDashed className="size-4 animate-spin" />
                 正在加载在线宠物库…
               </p>
             )}
@@ -332,8 +332,8 @@ export default function PetsPage() {
                         variant="secondary"
                       >
                         {installingSlug === pet.slug
-                          ? <Loader2 className="size-3 animate-spin" />
-                          : <Download className="size-3" />}
+                          ? <CircleDashed className="size-3 animate-spin" />
+                          : <ArrowDownToLine className="size-3" />}
                         领养
                       </HeroButton>
                     </div>
@@ -360,7 +360,7 @@ export default function PetsPage() {
                 size="sm"
                 variant="secondary"
               >
-                {importing ? <Loader2 className="size-3.5 animate-spin" /> : <FileArchive className="size-3.5" />}
+                {importing ? <CircleDashed className="size-3.5 animate-spin" /> : <FileZipper className="size-3.5" />}
                 导入压缩包
               </HeroButton>
             </div>
@@ -405,7 +405,7 @@ export default function PetsPage() {
                           role="button"
                           title="删除宠物"
                         >
-                          <Trash2 className="size-3.5" />
+                          <TrashBin className="size-3.5" />
                         </span>
                       )}
                     </button>
@@ -420,7 +420,7 @@ export default function PetsPage() {
               <div className="rounded-2xl border border-border bg-surface p-4">
                 <div className="mb-4 flex items-start gap-3">
                   <span className="rounded-full bg-primary/10 p-2 text-primary">
-                    <Bot className="size-4.5" />
+                    <FaceRobot className="size-4.5" />
                   </span>
                   <div className="min-w-0">
                     <h2 className="font-semibold text-foreground text-sm">数字分身实体</h2>
@@ -464,7 +464,7 @@ export default function PetsPage() {
               <div className="rounded-2xl border border-border bg-surface p-4">
                 <div className="mb-4 flex items-start gap-3">
                   <span className="rounded-full bg-primary/10 p-2 text-primary">
-                    <Volume2 className="size-4.5" />
+                    <Volume className="size-4.5" />
                   </span>
                   <div className="min-w-0">
                     <h2 className="font-semibold text-foreground text-sm">播报</h2>
@@ -495,7 +495,7 @@ export default function PetsPage() {
             <div className="rounded-2xl border border-border bg-surface p-4">
               <div className="mb-4 flex items-start gap-3">
                 <span className="rounded-full bg-primary/10 p-2 text-primary">
-                  <CalendarClock className="size-4.5" />
+                  <Calendar className="size-4.5" />
                 </span>
                 <div className="min-w-0">
                   <h2 className="font-semibold text-foreground text-sm">纪念日 / 定时提醒</h2>
@@ -582,7 +582,7 @@ export default function PetsPage() {
                       size="sm"
                       variant="ghost"
                     >
-                      <Trash2 className="size-3.5" />
+                      <TrashBin className="size-3.5" />
                     </HeroButton>
                   </div>
                 ))}

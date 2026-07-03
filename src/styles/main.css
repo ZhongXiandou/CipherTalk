@@ -200,11 +200,6 @@ img {
   background-clip: content-box;
 }
 
-.agent-prompt-input [data-slot='input-group']:has([data-slot='input-group-control']:focus-visible) {
-  border-color: var(--border) !important;
-  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05) !important;
-}
-
 /* 滚动到底部按钮液态玻璃折射质感：圆形 36px，复用朋友圈媒体按钮的位移贴图参数。
    贴图由 AgentGlassDefs 运行时生成，注入 #agent-glass-36；就绪后用位移折射替换普通模糊。 */
 .agent-glass-defs {

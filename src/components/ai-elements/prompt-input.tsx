@@ -29,18 +29,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { createLiquidGlassMap, type GlassFilterMap } from "@/utils/liquidGlass";
 import { Button as HeroButton, ButtonGroup, Dropdown, Label, Toolbar } from "@heroui/react";
 import type { ChatStatus, FileUIPart } from "ai";
 import {
-  ArrowUpIcon,
-  CircleStopIcon,
-  FileIcon,
-  ImageIcon,
-  Loader2Icon,
-  MicIcon,
-  PlusIcon,
-  XIcon,
-} from "lucide-react";
+  ArrowUp,
+  ArrowsRotateLeft,
+  CircleStop,
+  File,
+  Microphone,
+  Picture,
+  Plus,
+  Xmark,
+} from "@gravity-ui/icons";
 import { nanoid } from "nanoid";
 import {
   type ChangeEvent,
@@ -60,6 +61,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -320,7 +322,7 @@ export function PromptInputAttachment({
                 />
               ) : (
                 <div className="flex size-5 items-center justify-center text-muted-foreground">
-                  <FileIcon className="size-3" />
+                  <File className="size-3" />
                 </div>
               )}
             </div>
@@ -334,7 +336,7 @@ export function PromptInputAttachment({
               type="button"
               variant="ghost"
             >
-              <XIcon />
+              <Xmark />
               <span className="sr-only">Remove</span>
             </Button>
           </div>
@@ -424,7 +426,7 @@ export const PromptInputActionAddAttachments = ({
         attachments.openFileDialog();
       }}
     >
-      <ImageIcon className="size-4 shrink-0 text-muted" />
+      <Picture className="size-4 shrink-0 text-muted" />
       <Label>{label}</Label>
     </Dropdown.Item>
   );
@@ -434,6 +436,9 @@ export type PromptInputMessage = {
   text: string;
   files: FileUIPart[];
 };
+
+// 液态玻璃位移贴图参数：与 LiquidGlassBubble 同源的边缘折射带方案
+const PROMPT_GLASS = { halfX: 0.22, halfY: 0.14, radius: 0.7, edge: 0.2, feather: 1.2, strength: 1.6 };
 
 export type PromptInputProps = Omit<
   HTMLAttributes<HTMLFormElement>,
@@ -478,6 +483,33 @@ export const PromptInput = ({
   // Refs
   const inputRef = useRef<HTMLInputElement | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
+
+  // ----- 液态玻璃：按 InputGroup 实际尺寸生成位移贴图，textarea 撑高/窗口缩放时跟随重建
+  const glassRef = useRef<HTMLDivElement | null>(null);
+  const [glassId] = useState(() => `prompt-input-glass-${nanoid(6)}`);
+  const [glassMap, setGlassMap] = useState<GlassFilterMap | null>(null);
+
+  useLayoutEffect(() => {
+    const el = glassRef.current;
+    if (!el) return;
+    const update = () => {
+      const rect = el.getBoundingClientRect();
+      const next = createLiquidGlassMap(
+        Math.round(rect.width),
+        Math.round(rect.height),
+        PROMPT_GLASS
+      );
+      if (next) setGlassMap(next);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const glassBackdrop = glassMap
+    ? `url(#${glassId}) blur(3px) saturate(180%) brightness(1.05)`
+    : undefined;
 
   // ----- Local attachments (only used when no provider)
   const [items, setItems] = useState<PromptInputFilePart[]>([]);
@@ -807,7 +839,53 @@ export const PromptInput = ({
         ref={formRef}
         {...props}
       >
-        <InputGroup className="overflow-visible rounded-[40px] [corner-shape:superellipse(1.7)]">{children}</InputGroup>
+        {glassMap && (
+          <svg
+            aria-hidden="true"
+            focusable="false"
+            style={{ position: "absolute", width: 0, height: 0, pointerEvents: "none" }}
+          >
+            <filter
+              id={glassId}
+              colorInterpolationFilters="sRGB"
+              filterUnits="userSpaceOnUse"
+              x="0"
+              y="0"
+              width={glassMap.width}
+              height={glassMap.height}
+            >
+              <feImage
+                href={glassMap.href}
+                xlinkHref={glassMap.href}
+                width={glassMap.width}
+                height={glassMap.height}
+                result="displacementMap"
+              />
+              <feDisplacementMap
+                in="SourceGraphic"
+                in2="displacementMap"
+                scale={glassMap.scale}
+                xChannelSelector="R"
+                yChannelSelector="G"
+              />
+            </filter>
+          </svg>
+        )}
+        <InputGroup
+          className={cn(
+            "overflow-visible rounded-[40px] [corner-shape:superellipse(1.7)]",
+            "has-[[data-slot=input-group-control]:focus-visible]:border-border!",
+            "has-[[data-slot=input-group-control]:focus-visible]:ring-0!"
+          )}
+          ref={glassRef}
+          style={
+            glassBackdrop
+              ? { backdropFilter: glassBackdrop, WebkitBackdropFilter: glassBackdrop }
+              : undefined
+          }
+        >
+          {children}
+        </InputGroup>
       </form>
     </>
   );
@@ -1047,7 +1125,7 @@ export const PromptInputActionMenuTrigger = ({
   ...props
 }: PromptInputActionMenuTriggerProps) => (
   <PromptInputButton className={className} {...props}>
-    {children ?? <PlusIcon className="size-4" />}
+    {children ?? <Plus className="size-4" />}
   </PromptInputButton>
 );
 
@@ -1103,12 +1181,12 @@ export const PromptInputSubmit = ({
   children,
   ...props
 }: PromptInputSubmitProps) => {
-  let Icon = <ArrowUpIcon className="size-4" />;
+  let Icon = <ArrowUp className="size-4" />;
 
   if (status === "submitted" || status === "streaming") {
-    Icon = <CircleStopIcon className="size-4 animate-pulse" />;
+    Icon = <CircleStop className="size-4 animate-pulse" />;
   } else if (status === "error") {
-    Icon = <XIcon className="size-4" />;
+    Icon = <Xmark className="size-4" />;
   }
 
   return (
@@ -1599,9 +1677,9 @@ export const PromptInputSpeechButton = ({
       {...props}
     >
       {isPreparingRecording || isTranscribing ? (
-        <Loader2Icon className="size-4 animate-spin" />
+        <ArrowsRotateLeft className="size-4 animate-spin" />
       ) : (
-        <MicIcon className="size-4" />
+        <Microphone className="size-4" />
       )}
     </PromptInputButton>
   );

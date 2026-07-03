@@ -1775,22 +1775,13 @@ export default function AgentPage() {
       </Conversation>
 
       <div className="pointer-events-none absolute right-0 bottom-0 left-0 h-44">
-        <div
-          aria-hidden="true"
-          className="absolute inset-0 backdrop-blur-[2px]"
-          style={{
-            background: 'linear-gradient(to top, var(--bg-primary) 0%, color-mix(in srgb, var(--bg-primary) 82%, transparent) 48%, transparent 100%)',
-            maskImage: 'linear-gradient(to top, black 0%, black 58%, transparent 100%)',
-            WebkitMaskImage: 'linear-gradient(to top, black 0%, black 58%, transparent 100%)',
-          }}
-        />
         <div className="absolute right-0 bottom-3 left-0 grid place-items-center px-5">
           <div className="pointer-events-auto w-full max-w-4xl">
         <PromptInputProvider>
           <PromptInputControllerBridge controllerRef={promptInputControllerRef} />
           <PromptInput
             accept="image/*,.txt,.md,.json,.csv,.pdf,application/pdf"
-            className={`agent-prompt-input w-full **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-lg ${workspaceFileDragOver ? '**:data-[slot=input-group]:ring-2 **:data-[slot=input-group]:ring-primary/45' : ''}`}
+            className={`agent-prompt-input w-full **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface/55 **:data-[slot=input-group]:shadow-lg ${workspaceFileDragOver ? '**:data-[slot=input-group]:ring-2 **:data-[slot=input-group]:ring-primary/45' : ''}`}
             maxFiles={6}
             maxFileSize={8 * 1024 * 1024}
             multiple

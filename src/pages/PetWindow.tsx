@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Loader2, Send, X } from 'lucide-react'
+import { CircleDashed, PaperPlane, Xmark } from '@gravity-ui/icons'
 import { useCurrentPetLoader } from '@/features/pets/PetContext'
 import { PetSprite } from '@/features/pets/PetSprite'
 import { PET_STATES, petStateForAgent, type PetAgentState, type PetStateId } from '@/features/pets/petStates'
@@ -98,7 +98,7 @@ function PetNotice({ notice, onClose }: { notice: NotifyPayload; onClose: () => 
         }}
         type="button"
       >
-        <X className="size-3" />
+        <Xmark className="size-3" />
       </button>
     </div>
   )
@@ -126,7 +126,7 @@ function PetTextBubble({ title, text, onClose }: { title: string; text: string; 
         }}
         type="button"
       >
-        <X className="size-3" />
+        <Xmark className="size-3" />
       </button>
     </div>
   )
@@ -626,7 +626,7 @@ export default function PetWindow() {
                   onClick={() => setChatOpen(false)}
                   type="button"
                 >
-                  <X className="size-3" />
+                  <Xmark className="size-3" />
                 </button>
               </div>
               {(chatBusy || chatReply || chatError) && (
@@ -654,7 +654,7 @@ export default function PetWindow() {
                   onClick={() => void sendChat()}
                   type="button"
                 >
-                  {chatBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+                  {chatBusy ? <CircleDashed className="size-3.5 animate-spin" /> : <PaperPlane className="size-3.5" />}
                 </button>
               </div>
             </div>
@@ -667,7 +667,7 @@ export default function PetWindow() {
               className="pet-notice mb-1 flex max-w-70 items-center gap-1.5 rounded-2xl px-2.5 py-1.5"
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             >
-              <Loader2 className="size-3 shrink-0 animate-spin text-white/70" />
+              <CircleDashed className="size-3 shrink-0 animate-spin text-white/70" />
               <span className="truncate text-[10px] text-white/85">
                 {progress.title}
                 {progress.detail ? `：${progress.detail}` : ''}
@@ -691,7 +691,7 @@ export default function PetWindow() {
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           type="button"
         >
-          <X className="size-3.5" />
+          <Xmark className="size-3.5" />
         </button>
         {pet ? (
           <>

@@ -8,7 +8,7 @@ import { ArrowsRotateLeft, CircleCheck, CircleDashed, CircleExclamation, Clock, 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useChat } from '@ai-sdk/react'
-import { AlertDialog, Button, ProgressBar, Dropdown, Header, Label, Modal, Skeleton, Tooltip } from '@heroui/react'
+import { AlertDialog, Button, ProgressBar, Dropdown, Header, Label, Modal, ScrollShadow, Skeleton, Tooltip } from '@heroui/react'
 import type { FileUIPart, UIMessage } from 'ai'
 import {
   PromptInput,
@@ -1292,7 +1292,7 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
       </Modal.Backdrop>
 
       {/* 消息区 */}
-      <div
+      <ScrollShadow
         ref={scrollRef}
         className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-6 pt-5 pb-52"
         onLoadCapture={handleMessageMediaLoad}
@@ -1403,24 +1403,15 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
             <span>{error.message || '生成失败，请重试'}</span>
           </div>
         )}
-      </div>
+      </ScrollShadow>
 
       {/* 输入栏 */}
       <div className="pointer-events-none absolute right-0 bottom-0 left-0 h-56">
-        <div
-          aria-hidden="true"
-          className="absolute inset-0 backdrop-blur-[2px]"
-          style={{
-            background: 'linear-gradient(to top, var(--bg-primary) 0%, color-mix(in srgb, var(--bg-primary) 82%, transparent) 48%, transparent 100%)',
-            maskImage: 'linear-gradient(to top, black 0%, black 58%, transparent 100%)',
-            WebkitMaskImage: 'linear-gradient(to top, black 0%, black 58%, transparent 100%)',
-          }}
-        />
         <div className="absolute right-0 bottom-4 left-0 grid place-items-center px-5">
         <div className="pointer-events-auto w-full max-w-[min(64rem,calc(100%-2.5rem))]">
           <PromptInput
             accept="image/*"
-            className="persona-prompt-input w-full **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-lg"
+            className="persona-prompt-input w-full **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface/55 **:data-[slot=input-group]:shadow-lg"
             maxFiles={6}
             maxFileSize={8 * 1024 * 1024}
             multiple
