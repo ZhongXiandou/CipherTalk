@@ -4,7 +4,8 @@
  */
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { Button as HeroButton, ButtonGroup, Dropdown, Header, Label } from '@heroui/react'
-import { ChevronDown, Slash, Sparkles } from 'lucide-react'
+import { ChevronDown, Sparkles } from '@gravity-ui/icons'
+import type { IconComponent } from '@/types/icon'
 import type { ChatStatus } from 'ai'
 import {
   PromptInputSpeechButton,
@@ -122,7 +123,7 @@ export type SlashCommandItem = {
   aliases?: string[]
   commands: string[]
   description: string
-  icon: typeof Slash
+  icon: IconComponent
   id: string
   label: string
   action: () => void | Promise<void>
@@ -188,7 +189,7 @@ export function SlashCommandButton({
     <Dropdown isOpen={isOpen} onOpenChange={handleOpenChange}>
       <HeroButton aria-label="打开斜杠命令" isIconOnly size="sm" variant="tertiary" onPress={openSlashMenu}>
         {showGroupSeparator && <ButtonGroup.Separator />}
-        <Slash className="size-3.5" />
+        <span aria-hidden className="text-sm font-semibold leading-none">/</span>
       </HeroButton>
       <Dropdown.Popover className="ct-agent-scrollbar max-h-72 min-w-72 overflow-y-auto" placement="top start">
         <Dropdown.Menu>

@@ -12,7 +12,7 @@
  */
 import { memo } from 'react'
 import { Button as HeroButton } from '@heroui/react'
-import { Brain, Play, Search, Users, Wrench } from 'lucide-react'
+import { Bulb, Magnifier, Persons, Play, Wrench } from '@gravity-ui/icons'
 import type { ChatStatus, UIMessage } from 'ai'
 import {
   ChainOfThoughtSearchResult,
@@ -193,7 +193,7 @@ function AgentMessageItemImpl({
           const reasoningActive = isReasoningStreaming && index === message.parts.length - 1
           return (
             <ChainOfThoughtStep
-              icon={Brain}
+              icon={Bulb}
               key={`chain-${index}`}
               label={renderChainLabel('Reasoning', reasoningActive)}
               status={reasoningActive ? 'active' : 'complete'}
@@ -227,7 +227,7 @@ function AgentMessageItemImpl({
         }
         return (
           <ChainOfThoughtStep
-            icon={toolName.includes('search') ? Search : Wrench}
+            icon={toolName.includes('search') ? Magnifier : Wrench}
             key={`chain-${index}`}
             label={renderChainLabel(label, !done)}
             status={done ? 'complete' : 'active'}
@@ -365,7 +365,7 @@ function AgentMessageItemImpl({
               </HeroButton>
               {planNeedsDelegateAnalysis && (
                 <span className="inline-flex items-center gap-1 rounded-(--agent-radius,12px) border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-700 text-xs dark:text-amber-300">
-                  <Users className="size-3.5" />
+                  <Persons className="size-3.5" />
                   预计会委托子助手
                 </span>
               )}

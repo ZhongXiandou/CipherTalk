@@ -4,7 +4,7 @@
  */
 import type { ReactNode } from 'react'
 import { Button as HeroButton, Modal, Table } from '@heroui/react'
-import { CheckIcon, Copy, Info, RefreshCcw, Volume2 } from 'lucide-react'
+import { ArrowsRotateLeft, Check, CircleInfo, Copy, Volume } from '@gravity-ui/icons'
 import type { UIMessage } from 'ai'
 import { MessageAction, MessageActions } from '@/components/ai-elements/message'
 import type { AIModelInfo } from '@/types/ai'
@@ -195,7 +195,7 @@ export function MessageUsageStats({
             onClick={onCopy}
             tooltip={copied ? '已复制' : '复制'}
           >
-            {copied ? <CheckIcon className="size-3.5" /> : <Copy className="size-3.5" />}
+            {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
           </MessageAction>
           <MessageAction
             disabled={!messageText}
@@ -203,7 +203,7 @@ export function MessageUsageStats({
             onClick={onSpeak}
             tooltip={speaking ? '停止播放' : '播放'}
           >
-            <Volume2 className={`size-3.5 ${speaking ? 'text-accent-foreground' : ''}`} />
+            <Volume className={`size-3.5 ${speaking ? 'text-accent-foreground' : ''}`} />
           </MessageAction>
           <MessageAction
             disabled={!canRegenerate || regenerating}
@@ -211,7 +211,7 @@ export function MessageUsageStats({
             onClick={onRegenerate}
             tooltip="重新生成"
           >
-            <RefreshCcw className={`size-3.5 ${regenerating ? 'animate-spin' : ''}`} />
+            <ArrowsRotateLeft className={`size-3.5 ${regenerating ? 'animate-spin' : ''}`} />
           </MessageAction>
           <MessageAction
             disabled={!parsed}
@@ -220,7 +220,7 @@ export function MessageUsageStats({
             startsGroup
             tooltip="详情"
           >
-            <Info className="size-3.5" />
+            <CircleInfo className="size-3.5" />
           </MessageAction>
         </MessageActions>
       </div>

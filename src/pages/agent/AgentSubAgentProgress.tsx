@@ -3,7 +3,7 @@
  * 从 AgentPage.tsx 拆出。
  */
 import { useEffect, useState } from 'react'
-import { Info, Search, Sparkles, Wrench } from 'lucide-react'
+import { CircleInfo, Magnifier, Sparkles, Wrench } from '@gravity-ui/icons'
 import type { AgentProgressEvent } from '@/features/aiagent/transport/ipcChatTransport'
 import { Loader } from '@/components/ai-elements/loader'
 import { Shimmer } from '@/components/ai-elements/shimmer'
@@ -86,9 +86,9 @@ function formatSubAgentProgressMeta(progress: AgentProgressEvent): string[] {
 }
 
 function subAgentProgressIcon(progress: AgentProgressEvent) {
-  if (progress.stage === 'searching') return Search
+  if (progress.stage === 'searching') return Magnifier
   if (progress.stage === 'indexing') return Sparkles
-  if (progress.stage === 'error') return Info
+  if (progress.stage === 'error') return CircleInfo
   return Wrench
 }
 

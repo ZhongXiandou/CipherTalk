@@ -4,7 +4,7 @@
  */
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Dropdown, Label } from '@heroui/react'
-import { Braces, Brain, CheckIcon, ChevronDown, Copy, FileText, Image as ImageIcon, ListChecks, PenLine, RefreshCcw, Wrench } from 'lucide-react'
+import { ArrowsRotateLeft, Bulb, Check, ChevronDown, Copy, CurlyBrackets, FileText, ListCheck, PencilToLine, Picture, Wrench } from '@gravity-ui/icons'
 import {
   ChainOfThought,
   ChainOfThoughtContent,
@@ -25,10 +25,10 @@ export type AgentModelItem = {
 
 // 与设置页 ModelCapabilityStrip 同一套能力图标
 const CAPABILITY_ICONS = [
-  { key: 'reasoning', label: '推理', icon: Brain, on: (d: AIModelInfo) => d.capabilities.reasoning },
+  { key: 'reasoning', label: '推理', icon: Bulb, on: (d: AIModelInfo) => d.capabilities.reasoning },
   { key: 'tool', label: '工具调用', icon: Wrench, on: (d: AIModelInfo) => d.capabilities.toolCall },
-  { key: 'structured', label: '结构化输出', icon: Braces, on: (d: AIModelInfo) => d.capabilities.structuredOutput },
-  { key: 'image', label: '图像输入', icon: ImageIcon, on: (d: AIModelInfo) => d.modalities.input.includes('image') },
+  { key: 'structured', label: '结构化输出', icon: CurlyBrackets, on: (d: AIModelInfo) => d.capabilities.structuredOutput },
+  { key: 'image', label: '图像输入', icon: Picture, on: (d: AIModelInfo) => d.modalities.input.includes('image') },
   { key: 'pdf', label: 'PDF', icon: FileText, on: (d: AIModelInfo) => d.modalities.input.includes('pdf') },
 ]
 
@@ -74,7 +74,7 @@ export function PlanCard({ text, streaming }: { text: string; streaming: boolean
         onClick={() => setOpen((value) => !value)}
         type="button"
       >
-        <ListChecks className="size-4 shrink-0 text-muted-foreground" />
+        <ListCheck className="size-4 shrink-0 text-muted-foreground" />
         <span>执行计划</span>
         {streaming
           ? <span className="font-normal text-muted-foreground text-xs">生成中…</span>
@@ -173,7 +173,7 @@ export function UserMessageActions({
           onClick={onCopy}
           tooltip={copied ? '已复制' : '复制'}
         >
-          {copied ? <CheckIcon className="size-3.5" /> : <Copy className="size-3.5" />}
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
         </MessageAction>
         <MessageAction
           disabled={!canRetry || retrying}
@@ -181,7 +181,7 @@ export function UserMessageActions({
           onClick={onRetry}
           tooltip="重试"
         >
-          <RefreshCcw className={`size-3.5 ${retrying ? 'animate-spin' : ''}`} />
+          <ArrowsRotateLeft className={`size-3.5 ${retrying ? 'animate-spin' : ''}`} />
         </MessageAction>
         <MessageAction
           disabled={retrying}
@@ -189,7 +189,7 @@ export function UserMessageActions({
           onClick={onEdit}
           tooltip="编辑"
         >
-          <PenLine className="size-3.5" />
+          <PencilToLine className="size-3.5" />
         </MessageAction>
       </MessageActions>
     </div>

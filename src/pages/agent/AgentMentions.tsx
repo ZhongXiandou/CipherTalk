@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useMemo, useState, type UIEvent } from 'react'
 import { Button as HeroButton, ButtonGroup } from '@heroui/react'
-import { AtSign, Code2, Users, X } from 'lucide-react'
+import { At, Code, Persons, Xmark } from '@gravity-ui/icons'
 import {
   PromptInputAttachment,
   PromptInputAttachments,
@@ -282,7 +282,7 @@ export function MentionAvatar({ target, className = 'size-7' }: { target: Mentio
           onError={() => setImageError(true)}
         />
       ) : target.kind === 'group' ? (
-        <Users className="size-4" />
+        <Persons className="size-4" />
       ) : (
         <span>{getAvatarLetter(target.displayName || target.username)}</span>
       )}
@@ -319,7 +319,7 @@ export function MentionTargetChips({
               onMouseDown={(event) => event.preventDefault()}
               type="button"
             >
-              <X className="size-3" />
+              <Xmark className="size-3" />
             </button>
           )}
         </span>
@@ -346,7 +346,7 @@ export function WorkspaceFileReferenceChips({
           key={ref.path}
           title={ref.path}
         >
-          <Code2 className="size-3.5 shrink-0 text-accent" />
+          <Code className="size-3.5 shrink-0 text-accent" />
           <span className="truncate">{ref.name || displayBasename(ref.path)}</span>
           {onRemove && (
             <button
@@ -355,7 +355,7 @@ export function WorkspaceFileReferenceChips({
               onClick={() => onRemove(ref.path)}
               type="button"
             >
-              <X className="size-3" />
+              <Xmark className="size-3" />
             </button>
           )}
         </span>
@@ -567,7 +567,7 @@ export function MentionTriggerButton({ showGroupSeparator = false }: { showGroup
       variant="tertiary"
     >
       {showGroupSeparator && <ButtonGroup.Separator />}
-      <AtSign className="size-3.5" />
+      <At className="size-3.5" />
     </HeroButton>
   )
 }

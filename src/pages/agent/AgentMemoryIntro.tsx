@@ -4,7 +4,7 @@
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Button as HeroButton, Input, Switch, TextField } from '@heroui/react'
-import { CheckIcon, Volume2, VolumeX } from 'lucide-react'
+import { Check, Volume, VolumeXmark } from '@gravity-ui/icons'
 import * as configService from '@/services/config'
 
 export type AgentMemoryIntroStatus = 'checking' | 'hidden' | 'needed'
@@ -593,9 +593,9 @@ export function AgentMemoryIntro({ onMemoryCreated }: { onMemoryCreated: () => v
               <Switch.Thumb>
                 <Switch.Icon>
                   {audioEnabled ? (
-                    <Volume2 className="size-3" />
+                    <Volume className="size-3" />
                   ) : (
-                    <VolumeX className="size-3 opacity-70" />
+                    <VolumeXmark className="size-3 opacity-70" />
                   )}
                 </Switch.Icon>
               </Switch.Thumb>
@@ -669,7 +669,7 @@ export function AgentMemoryIntro({ onMemoryCreated }: { onMemoryCreated: () => v
                   size="lg"
                   variant="primary"
                 >
-                  <CheckIcon className="size-4" />
+                  <Check className="size-4" />
                   {step >= MEMORY_INTRO_QUESTIONS.length - 1 ? '完成' : '继续'}
                 </HeroButton>
                 <div

@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { useChat } from '@ai-sdk/react'
 import { isToolUIPart, type UIMessage } from 'ai'
 import { AlertDialog, Button as HeroButton, ButtonGroup, Dropdown, Header, Label, Modal, SearchField, Separator, Spinner, Surface, Switch, Toolbar, Tooltip, toast } from '@heroui/react'
-import { Brain, CheckIcon, ChevronDown, Clock3, Download, Globe, History, Info, ListChecks, Monitor, PanelLeft, PenLine, Share2, SquarePen, Terminal, Trash2, X } from 'lucide-react'
+import { ArrowDownToLine, ArrowUpRightFromSquare, Bulb, Check, ChevronDown, CircleInfo, Clock, Display, Globe, LayoutSideContentLeft, ListCheck, PencilToLine, PencilToSquare, Terminal, TrashBin, Xmark } from '@gravity-ui/icons'
 import { toPng } from 'dom-to-image-more'
 import {
   Conversation,
@@ -1082,7 +1082,7 @@ export default function AgentPage() {
       aliases: ['zhuangtai', '状态'],
       label: '查看状态',
       description: '显示模型、工作区、预览和 token 状态',
-      icon: Info,
+      icon: CircleInfo,
       action: () => {
         const workspace = codeWorkspaceState?.workspace
         const devServer = codeWorkspaceState?.devServer
@@ -1106,7 +1106,7 @@ export default function AgentPage() {
       aliases: ['jihua', '计划'],
       label: planMode ? '关闭计划模式' : '开启计划模式',
       description: '切换下一轮是否先生成执行计划',
-      icon: ListChecks,
+      icon: ListCheck,
       action: () => setPlanMode((value) => !value),
     },
     {
@@ -1115,7 +1115,7 @@ export default function AgentPage() {
       aliases: ['qingkong', 'xin', '清空', '新对话'],
       label: '新对话 / 清空',
       description: '清空当前线程并回到新对话',
-      icon: SquarePen,
+      icon: PencilToSquare,
       action: handleNewConversation,
     },
     {
@@ -1124,7 +1124,7 @@ export default function AgentPage() {
       aliases: ['code', 'files', '工作区', '文件'],
       label: '打开工作区',
       description: '打开左侧文件树和工作区选择',
-      icon: PanelLeft,
+      icon: LayoutSideContentLeft,
       action: () => setWorkspaceSidebarOpen(true),
     },
     {
@@ -1133,7 +1133,7 @@ export default function AgentPage() {
       aliases: ['yulan', '预览'],
       label: '打开预览',
       description: '打开代码工作区预览面板',
-      icon: Monitor,
+      icon: Display,
       action: () => {
         setCodeWorkspacePanelTab('preview')
         setCodeWorkspacePanelOpen(true)
@@ -1157,7 +1157,7 @@ export default function AgentPage() {
       aliases: ['moxing', '模型'],
       label: '选择模型',
       description: '打开模型和思考强度选择',
-      icon: Brain,
+      icon: Bulb,
       action: () => setModelOpen(true),
     },
     {
@@ -1591,7 +1591,7 @@ export default function AgentPage() {
               size="md"
               variant={workspaceSidebarOpen ? 'secondary' : 'tertiary'}
             >
-              <PanelLeft className="size-4.5" />
+              <LayoutSideContentLeft className="size-4.5" />
             </HeroButton>
             <Tooltip.Content placement="bottom">{workspaceSidebarOpen ? '隐藏工作区文件树' : '显示工作区文件树'}</Tooltip.Content>
           </Tooltip>
@@ -1632,7 +1632,7 @@ export default function AgentPage() {
                 <span className="truncate font-medium text-sm text-foreground">
                   {titleSaving ? '保存中...' : titleLoading ? '生成标题中...' : conversationTitle}
                 </span>
-                <PenLine className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                <PencilToLine className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
               </button>
               <Tooltip.Content placement="bottom">
                 {titleLoading ? '正在生成标题' : `编辑对话名称：${conversationTitle}`}
@@ -1673,7 +1673,7 @@ export default function AgentPage() {
                   size="md"
                   variant="tertiary"
                 >
-                  <Share2 className="size-4.5" />
+                  <ArrowUpRightFromSquare className="size-4.5" />
                 </HeroButton>
                 <Tooltip.Content placement="bottom">{busy ? '输出结束后可分享' : '分享对话'}</Tooltip.Content>
               </Tooltip>
@@ -1686,7 +1686,7 @@ export default function AgentPage() {
                   size="md"
                   variant="tertiary"
                 >
-                  <SquarePen className="size-4.5" />
+                  <PencilToSquare className="size-4.5" />
                 </HeroButton>
                 <Tooltip.Content placement="bottom">新建对话</Tooltip.Content>
               </Tooltip>
@@ -1833,7 +1833,7 @@ export default function AgentPage() {
                         textValue="计划模式"
                         onAction={() => setPlanMode((value) => !value)}
                       >
-                        <ListChecks className="size-4 shrink-0 text-muted" />
+                        <ListCheck className="size-4 shrink-0 text-muted" />
                         <Label>计划模式</Label>
                         <span className="ml-auto inline-flex pointer-events-none">
                           <Switch aria-label="计划模式" isSelected={planMode}>
@@ -1876,9 +1876,9 @@ export default function AgentPage() {
                     size="sm"
                     variant="secondary"
                   >
-                    <ListChecks className="size-3.5" />
+                    <ListCheck className="size-3.5" />
                     计划模式
-                    <X className="size-3" />
+                    <Xmark className="size-3" />
                   </HeroButton>
                 )}
 
@@ -1892,7 +1892,7 @@ export default function AgentPage() {
                   >
                     <Globe className="size-3.5" />
                     联网搜索
-                    <X className="size-3" />
+                    <Xmark className="size-3" />
                   </HeroButton>
                 )}
 
@@ -1924,7 +1924,7 @@ export default function AgentPage() {
                     >
                       <Dropdown.SubmenuTrigger>
                         <Dropdown.Item id="reasoning-effort" textValue="思考强度">
-                          <Brain className="size-4 shrink-0 text-muted" />
+                          <Bulb className="size-4 shrink-0 text-muted" />
                           <Label className="min-w-0 flex-1 text-left">思考强度</Label>
                           <span className="shrink-0 text-muted-foreground text-xs">
                             {reasoningEffortLabel(reasoningEffort, true)}
@@ -2009,7 +2009,7 @@ export default function AgentPage() {
           <AlertDialog.Dialog className="sm:max-w-100">
             <AlertDialog.Header>
               <AlertDialog.Icon status="danger">
-                <Trash2 className="size-5" />
+                <TrashBin className="size-5" />
               </AlertDialog.Icon>
               <AlertDialog.Heading>删除这条对话记录？</AlertDialog.Heading>
             </AlertDialog.Header>
@@ -2046,7 +2046,7 @@ export default function AgentPage() {
             <Modal.CloseTrigger />
             <Modal.Header>
               <Modal.Icon className="bg-accent-soft text-accent-soft-foreground">
-                <Share2 className="size-5" />
+                <ArrowUpRightFromSquare className="size-5" />
               </Modal.Icon>
               <Modal.Heading>分享 Agent 对话</Modal.Heading>
             </Modal.Header>
@@ -2087,14 +2087,14 @@ export default function AgentPage() {
                           onClick={() => { void loadShareConversation(record) }}
                           type="button"
                         >
-                          <Clock3 className="size-4 shrink-0 opacity-70" />
+                          <Clock className="size-4 shrink-0 opacity-70" />
                           <span className="min-w-0 flex-1">
                             <span className="block truncate font-medium text-sm">{record.title}</span>
                             <span className="block truncate text-muted-foreground text-xs">
                               {new Date(record.updatedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                             </span>
                           </span>
-                          {selected && <CheckIcon className="size-4 shrink-0" />}
+                          {selected && <Check className="size-4 shrink-0" />}
                         </button>
                       )
                     })}
@@ -2161,7 +2161,7 @@ export default function AgentPage() {
               >
                 {({ isPending }) => (
                   <>
-                    {isPending ? <Spinner color="current" size="sm" /> : <Download className="size-4" />}
+                    {isPending ? <Spinner color="current" size="sm" /> : <ArrowDownToLine className="size-4" />}
                     保存图片
                   </>
                 )}

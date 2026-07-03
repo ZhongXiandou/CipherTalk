@@ -3,7 +3,7 @@
  * 从 AgentPage.tsx 拆出，供主组件和 AgentSubAgentProgress 等复用。
  */
 import { Tooltip } from '@heroui/react'
-import { BarChart3, Code2, Link2, Quote, Table2 } from 'lucide-react'
+import { ChartColumn, Code, LayoutHeaderCellsLarge, Link, QuoteOpen } from '@gravity-ui/icons'
 import { isToolUIPart, type UIMessage } from 'ai'
 import { Sources, SourcesContent, SourcesTrigger } from '@/components/ai-elements/sources'
 import { type MessageRenderActivity } from '@/components/ai-elements/message'
@@ -103,11 +103,11 @@ export function renderChainLabel(label: string, active: boolean) {
 }
 
 export function renderOutputActivitySteps(activity: MessageRenderActivity, isStreaming: boolean) {
-  const steps: Array<{ key: string; icon: typeof BarChart3; label: string; doneLabel: string; active: boolean }> = []
+  const steps: Array<{ key: string; icon: typeof ChartColumn; label: string; doneLabel: string; active: boolean }> = []
   if (activity.hasChart || activity.pendingChart) {
     steps.push({
       key: 'chart',
-      icon: BarChart3,
+      icon: ChartColumn,
       label: '正在生成图表',
       doneLabel: '已生成图表',
       active: isStreaming,
@@ -116,7 +116,7 @@ export function renderOutputActivitySteps(activity: MessageRenderActivity, isStr
   if (activity.hasTable || activity.pendingTable) {
     steps.push({
       key: 'table',
-      icon: Table2,
+      icon: LayoutHeaderCellsLarge,
       label: '正在整理表格',
       doneLabel: '已整理表格',
       active: isStreaming,
@@ -125,7 +125,7 @@ export function renderOutputActivitySteps(activity: MessageRenderActivity, isStr
   if (activity.hasCode || activity.pendingCode) {
     steps.push({
       key: 'code',
-      icon: Code2,
+      icon: Code,
       label: '正在生成代码块',
       doneLabel: '已生成代码块',
       active: isStreaming,
@@ -134,7 +134,7 @@ export function renderOutputActivitySteps(activity: MessageRenderActivity, isStr
   if (activity.hasLink || activity.pendingLink) {
     steps.push({
       key: 'link',
-      icon: Link2,
+      icon: Link,
       label: '正在处理链接',
       doneLabel: activity.linkCount > 0 ? `已处理链接 ${activity.linkCount} 条` : '已处理链接',
       active: isStreaming && (activity.pendingLink || activity.hasLink),
@@ -351,7 +351,7 @@ export function MessageSources({
   return (
     <Sources>
       <SourcesTrigger count={items.length}>
-        <Quote className="size-3.5" />
+        <QuoteOpen className="size-3.5" />
         <span className="font-medium">出处 {items.length} 条</span>
       </SourcesTrigger>
       <SourcesContent className="w-full flex-row flex-wrap gap-1.5">
@@ -361,7 +361,7 @@ export function MessageSources({
             <Tooltip closeDelay={80} delay={120} key={it.id}>
               <Tooltip.Trigger>
                 <span className="inline-flex max-w-40 items-center gap-1 rounded-full border border-border/60 bg-card/60 px-2 py-0.5 text-[11px] text-muted-foreground">
-                  <Quote className="size-3 shrink-0 opacity-70" />
+                  <QuoteOpen className="size-3 shrink-0 opacity-70" />
                   <span className="shrink-0">{index + 1}</span>
                   <span className="truncate">{senderName}</span>
                 </span>

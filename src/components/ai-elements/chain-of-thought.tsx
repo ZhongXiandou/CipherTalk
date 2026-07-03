@@ -7,8 +7,8 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import type { LucideIcon } from "lucide-react";
-import { BrainIcon, ChevronDownIcon, DotIcon } from "lucide-react";
+import type { IconComponent } from "@/types/icon";
+import { Bulb, ChevronDown, CircleFill } from "@gravity-ui/icons";
 import type { ComponentProps, ReactNode } from "react";
 import {
   createContext,
@@ -116,11 +116,11 @@ export const ChainOfThoughtHeader = memo(
           )}
           {...props}
         >
-          <BrainIcon className="size-4" />
+          <Bulb className="size-4" />
           <span className="truncate text-left">
             {children ?? "Chain of Thought"}
           </span>
-          <ChevronDownIcon
+          <ChevronDown
             className={cn(
               "size-4 transition-transform",
               isOpen ? "rotate-180" : "rotate-0"
@@ -133,7 +133,7 @@ export const ChainOfThoughtHeader = memo(
 );
 
 export type ChainOfThoughtStepProps = ComponentProps<"div"> & {
-  icon?: LucideIcon;
+  icon?: IconComponent;
   label: ReactNode;
   description?: ReactNode;
   status?: "complete" | "active" | "pending";
@@ -148,7 +148,7 @@ const stepStatusStyles = {
 export const ChainOfThoughtStep = memo(
   ({
     className,
-    icon: Icon = DotIcon,
+    icon: Icon = CircleFill,
     label,
     description,
     status = "complete",

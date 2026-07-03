@@ -15,7 +15,7 @@
  */
 import { memo, useEffect, useMemo, useState } from 'react'
 import { Button as HeroButton, Dropdown, Label, SearchField } from '@heroui/react'
-import { Clock3, History, Trash2 } from 'lucide-react'
+import { Clock, ClockArrowRotateLeft, TrashBin } from '@gravity-ui/icons'
 import type { AgentConversationRecord } from './agentConversationHelpers'
 
 /** 打开时最多渲染多少条 Item——再多就靠搜索框收窄，而不是全量挂 DOM。 */
@@ -80,7 +80,7 @@ function AgentRecordsMenuImpl({
         size="md"
         variant="tertiary"
       >
-        <History className="size-4.5" />
+        <ClockArrowRotateLeft className="size-4.5" />
         <span
           aria-hidden
           className="pointer-events-none absolute top-[calc(100%+0.375rem)] right-0 z-50 whitespace-nowrap rounded-(--agent-radius,12px) border border-border bg-popover px-2 py-1 text-popover-foreground text-xs opacity-0 shadow-lg transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
@@ -137,7 +137,7 @@ function AgentRecordsMenuImpl({
                   textValue={record.title}
                 >
                   <Dropdown.ItemIndicator />
-                  <Clock3 className="size-4 shrink-0 text-muted" />
+                  <Clock className="size-4 shrink-0 text-muted" />
                   <span className="min-w-0 flex-1">
                     <Label className="block truncate font-medium text-sm">{record.title}</Label>
                     <span className="block truncate text-muted-foreground text-xs">
@@ -158,7 +158,7 @@ function AgentRecordsMenuImpl({
                       variant="ghost"
                       onPress={() => onDeleteRecord(record)}
                     >
-                      <Trash2 className="size-4" />
+                      <TrashBin className="size-4" />
                     </HeroButton>
                   </span>
                 </Dropdown.Item>

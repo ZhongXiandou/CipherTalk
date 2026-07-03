@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { AlertDialog, Button as HeroButton, Label, Popover, Tabs } from '@heroui/react'
-import { ChevronRight, Code2, ExternalLink, File, Folder, FolderOpen, Monitor, RefreshCcw, ShieldAlert, Square, Terminal, X } from 'lucide-react'
+import { ArrowsRotateLeft, ArrowUpRightFromSquare, ChevronRight, Code, Display, File, Folder, FolderOpen, ShieldExclamation, Square, Terminal, Xmark } from '@gravity-ui/icons'
 import type { CodeWorkspaceApprovalRequest, CodeWorkspaceFileItem, CodeWorkspaceState } from '@/types/electron'
 
 export const CODE_WORKSPACE_FILE_REF_MIME = 'application/x-ciphertalk-code-workspace-file'
@@ -279,7 +279,7 @@ export function CodeWorkspaceSidebar({
               size="sm"
               variant="ghost"
             >
-              <RefreshCcw className="size-3.5" />
+              <ArrowsRotateLeft className="size-3.5" />
             </HeroButton>
           )}
           <HeroButton className="h-7 px-2 text-xs" onPress={onSelect} size="sm" variant="secondary">
@@ -291,7 +291,7 @@ export function CodeWorkspaceSidebar({
       <div className="ct-agent-scrollbar min-h-0 flex-1 overflow-auto p-2">
         {!workspace ? (
           <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 text-center text-muted-foreground text-xs">
-            <Code2 className="size-5" />
+            <Code className="size-5" />
             <span>选择工作区后显示文件树</span>
           </div>
         ) : rootItems.length > 0 ? (
@@ -370,7 +370,7 @@ function WorkspacePanelContent({
               size="sm"
               variant="ghost"
             >
-              <ExternalLink className="size-3.5" />
+              <ArrowUpRightFromSquare className="size-3.5" />
               打开
             </HeroButton>
           )}
@@ -388,7 +388,7 @@ function WorkspacePanelContent({
             size="sm"
             variant="ghost"
           >
-            <X className="size-4" />
+            <Xmark className="size-4" />
           </HeroButton>
         </div>
       </div>
@@ -438,7 +438,7 @@ export function CodeWorkspacePanelPopover(props: CodeWorkspacePanelPopoverProps)
         size="md"
         variant={devServerRunning ? 'secondary' : 'tertiary'}
       >
-        <Monitor className="size-4.5" />
+        <Display className="size-4.5" />
         {devServerRunning && (
           <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-emerald-500" />
         )}
@@ -480,7 +480,7 @@ export function CodeWorkspacePanel({
           {workspace ? (
             <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
               <span className="inline-flex h-5 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-muted/30 px-2">
-                <Code2 className="size-3 shrink-0 text-accent" />
+                <Code className="size-3 shrink-0 text-accent" />
                 <span className="shrink-0 text-muted-foreground">代码工作区</span>
                 <span className="min-w-0 truncate font-medium text-foreground">{basename(workspace.root)}</span>
                 {devServer?.running && (
@@ -493,7 +493,7 @@ export function CodeWorkspacePanel({
             </div>
           ) : (
             <div className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
-              <Code2 className="size-3 shrink-0" />
+              <Code className="size-3 shrink-0" />
               <span>未选择代码工作区</span>
             </div>
           )}
@@ -505,7 +505,7 @@ export function CodeWorkspacePanel({
           <AlertDialog.Dialog className="sm:max-w-3xl">
             <AlertDialog.Header>
               <div className="flex items-center gap-2">
-                <ShieldAlert className="size-4 text-amber-500" />
+                <ShieldExclamation className="size-4 text-amber-500" />
                 代码工作区确认
               </div>
             </AlertDialog.Header>

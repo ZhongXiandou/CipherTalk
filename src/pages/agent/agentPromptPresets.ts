@@ -1,7 +1,8 @@
 /**
  * 提示词预设 + 思考强度 / 代码工作区权限选项：纯数据 + 小工具函数，从 AgentPage.tsx 拆出。
  */
-import { BarChart3, Brain, Clock3, Hand, History, Link2, ListChecks, Quote, RefreshCcw, Search, ShieldAlert, ShieldCheck, SquarePen, Table2, Users, type LucideIcon } from 'lucide-react'
+import { ArrowsRotateLeft, Bulb, ChartColumn, Clock, ClockArrowRotateLeft, Hand, LayoutHeaderCellsLarge, Link, ListCheck, Magnifier, PencilToSquare, Persons, QuoteOpen, ShieldCheck, ShieldExclamation } from '@gravity-ui/icons'
+import type { IconComponent } from '@/types/icon'
 import type { AgentReasoningEffort } from '@/features/aiagent/transport/ipcChatTransport'
 import type { CodeWorkspaceApprovalPolicy } from '@/types/electron'
 
@@ -20,7 +21,7 @@ export const PROMPT_PRESET_GROUPS = [
 3. 给出 3-5 条值得我优先关注的后续行动。
 4. 引用关键原话或聊天片段作为依据，不要凭空推断。
 5. 如果数据不足，请说明缺口和你需要我补充的信息。`,
-        icon: Clock3,
+        icon: Clock,
       },
       {
         label: '总结和某人的聊天',
@@ -32,7 +33,7 @@ export const PROMPT_PRESET_GROUPS = [
 3. 分析交流氛围与情绪变化，但要区分“有证据的判断”和“可能的推测”。
 4. 列出对方明确表达过的需求、偏好或边界。
 5. 最后给出我下一步可以怎么回复或跟进的建议，并附关键证据。`,
-        icon: Users,
+        icon: Persons,
       },
       {
         label: '回顾某天的聊天',
@@ -46,7 +47,7 @@ export const PROMPT_PRESET_GROUPS = [
 3. 标出重要原话、文件、图片、链接或决定。
 4. 单独列出当天最重要的 3 件事。
 5. 如果某些记录缺少上下文，请明确说明。`,
-        icon: History,
+        icon: ClockArrowRotateLeft,
       },
     ],
   },
@@ -65,7 +66,7 @@ export const PROMPT_PRESET_GROUPS = [
 3. 将结果分为“高度相关 / 可能相关 / 背景资料”。
 4. 如果存在多个同名对象或歧义，请先列出歧义并说明你如何判断。
 5. 最后总结这件事目前可确认的事实和仍不确定的信息。`,
-        icon: Search,
+        icon: Magnifier,
       },
       {
         label: '查证某件事',
@@ -79,7 +80,7 @@ export const PROMPT_PRESET_GROUPS = [
 3. 引用关键原话，并解释前后文语境。
 4. 区分事实、转述、猜测、玩笑或情绪表达。
 5. 最后给出可信度判断，以及还需要哪些证据才能确认。`,
-        icon: Quote,
+        icon: QuoteOpen,
       },
       {
         label: '找某个主题',
@@ -93,7 +94,7 @@ export const PROMPT_PRESET_GROUPS = [
 3. 标出高频观点、分歧点、重复出现的问题和已达成的结论。
 4. 用时间线补充这个主题的发展变化。
 5. 最后输出一份可复用的主题摘要和关键证据列表。`,
-        icon: Link2,
+        icon: Link,
       },
     ],
   },
@@ -110,7 +111,7 @@ export const PROMPT_PRESET_GROUPS = [
 3. 给出 Top 10 排名，并说明每个人的主要聊天主题。
 4. 分析互动高峰、异常变化和可能原因。
 5. 如适合，请用表格或图表展示，并说明统计口径。`,
-        icon: BarChart3,
+        icon: ChartColumn,
       },
       {
         label: '群活跃排行',
@@ -122,7 +123,7 @@ export const PROMPT_PRESET_GROUPS = [
 3. 分析活跃度峰值对应的事件或讨论。
 4. 用图表展示排行和趋势，并说明统计口径。
 5. 避免把表情、撤回、系统消息等无效内容计入核心分析。`,
-        icon: Table2,
+        icon: LayoutHeaderCellsLarge,
       },
       {
         label: '聊天量趋势',
@@ -134,7 +135,7 @@ export const PROMPT_PRESET_GROUPS = [
 3. 区分私聊、群聊和朋友圈相关互动（如果数据支持）。
 4. 用折线图或柱状图展示趋势，并给出简短结论。
 5. 最后总结我的沟通节奏变化和可能需要关注的信号。`,
-        icon: RefreshCcw,
+        icon: ArrowsRotateLeft,
       },
     ],
   },
@@ -151,7 +152,7 @@ export const PROMPT_PRESET_GROUPS = [
 3. 标出互动较多或信息量较高的动态。
 4. 分析时必须基于可见内容，避免过度解读隐私或动机。
 5. 最后给出一份简短画像和我适合如何开启话题的建议。`,
-        icon: SquarePen,
+        icon: PencilToSquare,
       },
       {
         label: '朋友圈之最',
@@ -163,7 +164,7 @@ export const PROMPT_PRESET_GROUPS = [
 3. 识别异常高互动内容，并总结可能原因。
 4. 用表格或图表展示关键排行。
 5. 最后给出我社交圈近期关注点和互动结构的总结。`,
-        icon: ListChecks,
+        icon: ListCheck,
       },
     ],
   },
@@ -180,7 +181,7 @@ export const PROMPT_PRESET_GROUPS = [
 3. 找出互相矛盾、含糊、过时或不应继续保留的记忆。
 4. 对每条可疑记忆给出建议：保留、修改、删除或需要我确认。
 5. 最后列出你还缺少哪些高价值信息，但不要主动编造。`,
-        icon: Brain,
+        icon: Bulb,
       },
     ],
   },
@@ -198,7 +199,7 @@ export const CODE_WORKSPACE_APPROVAL_POLICY_OPTIONS: Array<{
   value: CodeWorkspaceApprovalPolicy
   label: string
   description: string
-  icon: LucideIcon
+  icon: IconComponent
 }> = [
   {
     value: 'on-request',
@@ -210,7 +211,7 @@ export const CODE_WORKSPACE_APPROVAL_POLICY_OPTIONS: Array<{
     value: 'risk-based',
     label: '替我审批',
     description: '仅对高风险操作请求批准',
-    icon: ShieldAlert,
+    icon: ShieldExclamation,
   },
   {
     value: 'full-access',
