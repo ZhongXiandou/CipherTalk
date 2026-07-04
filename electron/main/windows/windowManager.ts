@@ -20,7 +20,7 @@ import { mcpProxyService } from '../../services/mcp/proxyService'
 import { voiceTranscribeServiceWhisper } from '../../services/voiceTranscribeServiceWhisper'
 import { attachWindowStartupDiagnostics, markStartupMilestone, logStartupError } from '../startupDiagnostics'
 import type { ImageViewerOpenOptions, MainProcessContext, ReplyTileEntry, WindowManager } from '../context'
-import { probeWeChatWindow } from '../../services/wechatWindowTracker'
+import { probeWeChatWindow, watchWeChatWindowEvents } from '../../services/wechatWindowTracker'
 
 type ReleaseAnnouncementPayload = {
   version: string
@@ -280,6 +280,10 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
   let petWindow: BrowserWindow | null = null
   let replyTileWindow: BrowserWindow | null = null
   let replyTileTimer: NodeJS.Timeout | null = null
+  let replyTileEventWatchDisposer: (() => void) | null = null
+  let replyTileEventWatchStartedAt = 0
+  let replyTileRepositionQueued = false
+  let replyTileLastFallbackPollAt = 0
   let replyTileLastBounds = ''
   let replyTileFloating = true
   let replyTileEnabled = false
@@ -308,8 +312,12 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
 
   const closeReplyTileInternal = (): void => {
     if (replyTileTimer) { clearInterval(replyTileTimer); replyTileTimer = null }
+    if (replyTileEventWatchDisposer) { replyTileEventWatchDisposer(); replyTileEventWatchDisposer = null }
+    replyTileEventWatchStartedAt = 0
     if (replyTileWindow && !replyTileWindow.isDestroyed()) replyTileWindow.close()
     replyTileWindow = null
+    replyTileRepositionQueued = false
+    replyTileLastFallbackPollAt = 0
     replyTileLastBounds = ''
     replyTileFloating = true
   }
@@ -349,6 +357,28 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
     if (!replyTileWindow.isVisible()) replyTileWindow.showInactive()
   }
 
+  const scheduleReplyTileReposition = (): void => {
+    if (replyTileRepositionQueued) return
+    replyTileRepositionQueued = true
+    setImmediate(() => {
+      replyTileRepositionQueued = false
+      repositionReplyTile()
+    })
+  }
+
+  const startReplyTileEventWatch = (): void => {
+    if (replyTileEventWatchDisposer) return
+    replyTileEventWatchDisposer = watchWeChatWindowEvents(scheduleReplyTileReposition)
+    replyTileEventWatchStartedAt = replyTileEventWatchDisposer ? Date.now() : 0
+  }
+
+  const refreshReplyTileEventWatch = (): void => {
+    if (replyTileEventWatchDisposer && Date.now() - replyTileEventWatchStartedAt < 10000) return
+    if (replyTileEventWatchDisposer) { replyTileEventWatchDisposer(); replyTileEventWatchDisposer = null }
+    replyTileEventWatchStartedAt = 0
+    startReplyTileEventWatch()
+  }
+
   const openReplyTileWindow = (): void => {
     if (replyTileWindow && !replyTileWindow.isDestroyed()) return
     replyTileWindow = new BrowserWindow({
@@ -376,7 +406,11 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
     replyTileWindow.setAlwaysOnTop(true, 'screen-saver')
     replyTileWindow.on('closed', () => {
       if (replyTileTimer) { clearInterval(replyTileTimer); replyTileTimer = null }
+      if (replyTileEventWatchDisposer) { replyTileEventWatchDisposer(); replyTileEventWatchDisposer = null }
+      replyTileEventWatchStartedAt = 0
       replyTileWindow = null
+      replyTileRepositionQueued = false
+      replyTileLastFallbackPollAt = 0
       replyTileLastBounds = ''
       replyTileFloating = true
     })
@@ -388,8 +422,18 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
       }
     })
     loadWindowRoute(ctx, replyTileWindow, '/reply-tile-window')
-    replyTileTimer = setInterval(repositionReplyTile, 120)
+    startReplyTileEventWatch()
+    replyTileTimer = setInterval(() => {
+      const now = Date.now()
+      const fallbackMs = replyTileEventWatchDisposer ? 1000 : 120
+      if (now - replyTileLastFallbackPollAt >= fallbackMs) {
+        replyTileLastFallbackPollAt = now
+        repositionReplyTile()
+      }
+      refreshReplyTileEventWatch()
+    }, 120)
     replyTileTimer.unref?.()
+    repositionReplyTile()
   }
 
   const setPetWindowMaterial = (_expanded: boolean): void => {

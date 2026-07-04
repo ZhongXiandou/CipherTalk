@@ -22,6 +22,14 @@ const NOT_FOUND: WeChatWindowState = { found: false, minimized: false, foregroun
 
 const GW_HWNDNEXT = 2
 const DWMWA_EXTENDED_FRAME_BOUNDS = 9
+const WINEVENT_OUTOFCONTEXT = 0x0000
+const WINEVENT_SKIPOWNPROCESS = 0x0002
+const EVENT_SYSTEM_FOREGROUND = 0x0003
+const EVENT_SYSTEM_MINIMIZESTART = 0x0016
+const EVENT_SYSTEM_MINIMIZEEND = 0x0017
+const EVENT_OBJECT_LOCATIONCHANGE = 0x800B
+const OBJID_WINDOW = 0
+const CHILDID_SELF = 0
 
 let loaded = false
 let unavailable = false
@@ -29,12 +37,14 @@ let koffi: any = null
 let GetTopWindow: any, GetWindow: any, GetWindowThreadProcessId: any
 let IsWindowVisible: any, IsIconic: any, GetWindowTextLengthW: any, GetWindowTextW: any
 let GetWindowRect: any, GetForegroundWindow: any, DwmGetWindowAttribute: any
+let SetWinEventHook: any, UnhookWinEvent: any, WinEventProc: any
 let pidBuf: any = null
 let rectBuf: any = null
 let titleBuf: Buffer | null = null
 
 let cachedPid: number | null = null
 let lastPidProbe = 0
+let cachedMainHwndAddr = 0n
 
 function ensureLoaded(): boolean {
   if (loaded) return !unavailable
@@ -52,6 +62,9 @@ function ensureLoaded(): boolean {
     GetWindowTextW = user32.func('int32 GetWindowTextW(void* hwnd, void* text, int32 maxCount)')
     GetWindowRect = user32.func('bool GetWindowRect(void* hwnd, void* rect)')
     GetForegroundWindow = user32.func('void* GetForegroundWindow()')
+    SetWinEventHook = user32.func('void* SetWinEventHook(uint32 eventMin, uint32 eventMax, void* hmodWinEventProc, void* pfnWinEventProc, uint32 idProcess, uint32 idThread, uint32 dwFlags)')
+    UnhookWinEvent = user32.func('bool UnhookWinEvent(void* hWinEventHook)')
+    WinEventProc = koffi.proto('void __stdcall WinEventProc(void* hWinEventHook, uint32 event, void* hwnd, int32 idObject, int32 idChild, uint32 idEventThread, uint32 dwmsEventTime)')
     DwmGetWindowAttribute = dwmapi.func('int32 DwmGetWindowAttribute(void* hwnd, uint32 attr, void* rect, uint32 cb)')
     pidBuf = koffi.alloc('uint32', 1)
     rectBuf = koffi.alloc('int32', 4)
@@ -133,9 +146,63 @@ export function probeWeChatWindow(): WeChatWindowState {
   }
   if (!pid || !main) return NOT_FOUND
 
+  cachedMainHwndAddr = main.hwndAddr
   const minimized = IsIconic(main.hwnd)
   const foregroundActive = foregroundHwndAddress() === main.hwndAddr
   const { left, top, right, bottom } = main.rect
   const dip = screen.screenToDipRect(null, { x: left, y: top, width: right - left, height: bottom - top })
   return { found: true, minimized, foregroundActive, bounds: { x: dip.x, y: dip.y, width: dip.width, height: dip.height } }
+}
+
+function getWeChatPidForHook(): number | null {
+  if (cachedPid) return cachedPid
+  cachedPid = wxKeyService.getWeChatPid()
+  return cachedPid
+}
+
+function shouldHandleWinEvent(pid: number, event: number, hwnd: any, idObject: number, idChild: number): boolean {
+  if (!hwnd) return false
+  if (event === EVENT_OBJECT_LOCATIONCHANGE && (idObject !== OBJID_WINDOW || idChild !== CHILDID_SELF)) return false
+
+  const addr = hwndAddress(hwnd)
+  if (cachedMainHwndAddr && addr === cachedMainHwndAddr) return true
+
+  const main = findMainWindow(pid)
+  if (!main) return false
+  cachedMainHwndAddr = main.hwndAddr
+  return addr === main.hwndAddr
+}
+
+export function watchWeChatWindowEvents(onChange: () => void): (() => void) | null {
+  if (process.platform !== 'win32' || !ensureLoaded()) return null
+
+  const pid = getWeChatPidForHook()
+  if (!pid) return null
+
+  const callback = koffi.register((hook: unknown, event: number, hwnd: unknown, idObject: number, idChild: number) => {
+    try {
+      if (shouldHandleWinEvent(pid, event, hwnd, idObject, idChild)) onChange()
+    } catch {
+      // Keep native callbacks noexcept; the fallback poll will recover state.
+    }
+  }, koffi.pointer(WinEventProc))
+
+  const flags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS
+  const hooks = [
+    SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, null, callback, pid, 0, flags),
+    SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, null, callback, pid, 0, flags),
+    SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND, null, callback, pid, 0, flags),
+  ].filter(Boolean)
+
+  if (hooks.length === 0) {
+    koffi.unregister(callback)
+    return null
+  }
+
+  return () => {
+    for (const hook of hooks) {
+      try { UnhookWinEvent(hook) } catch { /* ignore */ }
+    }
+    try { koffi.unregister(callback) } catch { /* ignore */ }
+  }
 }
