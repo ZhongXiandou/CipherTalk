@@ -20,7 +20,7 @@ import { mcpProxyService } from '../../services/mcp/proxyService'
 import { voiceTranscribeServiceWhisper } from '../../services/voiceTranscribeServiceWhisper'
 import { attachWindowStartupDiagnostics, markStartupMilestone, logStartupError } from '../startupDiagnostics'
 import type { ImageViewerOpenOptions, MainProcessContext, ReplyTileEntry, WindowManager } from '../context'
-import { probeWeChatWindow, watchWeChatWindowEvents } from '../../services/wechatWindowTracker'
+import { placeNativeWindowBehindForeground, probeWeChatWindow, watchWeChatWindowEvents } from '../../services/wechatWindowTracker'
 
 type ReleaseAnnouncementPayload = {
   version: string
@@ -329,6 +329,13 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
     else replyTileWindow.setAlwaysOnTop(false)
   }
 
+  const rectsOverlap = (
+    a: { x: number; y: number; width: number; height: number },
+    b: { x: number; y: number; width: number; height: number }
+  ): boolean => {
+    return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+  }
+
   // Reply tile follows the WeChat main window edge.
   // Do not hide it just because another app becomes foreground; hide only when WeChat is missing/minimized.
   const repositionReplyTile = (): void => {
@@ -340,7 +347,8 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
       return
     }
     const tileFocused = replyTileWindow.isFocused()
-    setReplyTileFloating(state.foregroundActive || tileFocused)
+    const shouldFloat = state.foregroundActive || tileFocused
+    setReplyTileFloating(shouldFloat)
     const wx = state.bounds!
     const wa = screen.getDisplayMatching(wx).workArea
     let x = wx.x + wx.width
@@ -355,6 +363,9 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
       replyTileLastBounds = key
     }
     if (!replyTileWindow.isVisible()) replyTileWindow.showInactive()
+    if (!shouldFloat && state.otherForegroundActive && state.foregroundBounds && rectsOverlap(bounds, state.foregroundBounds)) {
+      placeNativeWindowBehindForeground(replyTileWindow.getNativeWindowHandle())
+    }
   }
 
   const scheduleReplyTileReposition = (): void => {

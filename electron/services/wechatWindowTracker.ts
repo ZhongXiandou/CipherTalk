@@ -14,11 +14,14 @@ export type WeChatWindowState = {
   minimized: boolean
   /** True only when the foreground window is the real Chinese-titled WeChat main window. */
   foregroundActive: boolean
+  /** True when the foreground window is neither WeChat nor absent. */
+  otherForegroundActive: boolean
+  foregroundBounds: { x: number; y: number; width: number; height: number } | null
   /** DIP bounds; null when found is false. */
   bounds: { x: number; y: number; width: number; height: number } | null
 }
 
-const NOT_FOUND: WeChatWindowState = { found: false, minimized: false, foregroundActive: false, bounds: null }
+const NOT_FOUND: WeChatWindowState = { found: false, minimized: false, foregroundActive: false, otherForegroundActive: false, foregroundBounds: null, bounds: null }
 
 const GW_HWNDNEXT = 2
 const DWMWA_EXTENDED_FRAME_BOUNDS = 9
@@ -30,6 +33,10 @@ const EVENT_SYSTEM_MINIMIZEEND = 0x0017
 const EVENT_OBJECT_LOCATIONCHANGE = 0x800B
 const OBJID_WINDOW = 0
 const CHILDID_SELF = 0
+const SWP_NOSIZE = 0x0001
+const SWP_NOMOVE = 0x0002
+const SWP_NOACTIVATE = 0x0010
+const SWP_NOOWNERZORDER = 0x0200
 
 let loaded = false
 let unavailable = false
@@ -37,6 +44,7 @@ let koffi: any = null
 let GetTopWindow: any, GetWindow: any, GetWindowThreadProcessId: any
 let IsWindowVisible: any, IsIconic: any, GetWindowTextLengthW: any, GetWindowTextW: any
 let GetWindowRect: any, GetForegroundWindow: any, DwmGetWindowAttribute: any
+let GetForegroundWindowHandle: any, SetWindowPos: any
 let SetWinEventHook: any, UnhookWinEvent: any, WinEventProc: any
 let pidBuf: any = null
 let rectBuf: any = null
@@ -62,6 +70,8 @@ function ensureLoaded(): boolean {
     GetWindowTextW = user32.func('int32 GetWindowTextW(void* hwnd, void* text, int32 maxCount)')
     GetWindowRect = user32.func('bool GetWindowRect(void* hwnd, void* rect)')
     GetForegroundWindow = user32.func('void* GetForegroundWindow()')
+    GetForegroundWindowHandle = user32.func('uintptr GetForegroundWindow()')
+    SetWindowPos = user32.func('bool SetWindowPos(uintptr hWnd, uintptr hWndInsertAfter, int32 X, int32 Y, int32 cx, int32 cy, uint32 uFlags)')
     SetWinEventHook = user32.func('void* SetWinEventHook(uint32 eventMin, uint32 eventMax, void* hmodWinEventProc, void* pfnWinEventProc, uint32 idProcess, uint32 idThread, uint32 dwFlags)')
     UnhookWinEvent = user32.func('bool UnhookWinEvent(void* hWinEventHook)')
     WinEventProc = koffi.proto('void __stdcall WinEventProc(void* hWinEventHook, uint32 event, void* hwnd, int32 idObject, int32 idChild, uint32 idEventThread, uint32 dwmsEventTime)')
@@ -124,10 +134,14 @@ function findMainWindow(pid: number): { hwnd: any; hwndAddr: bigint; rect: { lef
   return best ? { hwnd: best.hwnd, hwndAddr: best.hwndAddr, rect: best.rect } : null
 }
 
-function foregroundHwndAddress(): bigint {
+function foregroundWindow(): { hwnd: any; hwndAddr: bigint; bounds: { x: number; y: number; width: number; height: number } | null } | null {
   const hwnd = GetForegroundWindow()
-  if (!hwnd) return 0n
-  return hwndAddress(hwnd)
+  if (!hwnd) return null
+  const rect = readRect(hwnd)
+  const bounds = rect
+    ? screen.screenToDipRect(null, { x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top })
+    : null
+  return { hwnd, hwndAddr: hwndAddress(hwnd), bounds }
 }
 
 export function probeWeChatWindow(): WeChatWindowState {
@@ -148,10 +162,18 @@ export function probeWeChatWindow(): WeChatWindowState {
 
   cachedMainHwndAddr = main.hwndAddr
   const minimized = IsIconic(main.hwnd)
-  const foregroundActive = foregroundHwndAddress() === main.hwndAddr
+  const foreground = foregroundWindow()
+  const foregroundActive = foreground?.hwndAddr === main.hwndAddr
   const { left, top, right, bottom } = main.rect
   const dip = screen.screenToDipRect(null, { x: left, y: top, width: right - left, height: bottom - top })
-  return { found: true, minimized, foregroundActive, bounds: { x: dip.x, y: dip.y, width: dip.width, height: dip.height } }
+  return {
+    found: true,
+    minimized,
+    foregroundActive,
+    otherForegroundActive: Boolean(foreground && !foregroundActive),
+    foregroundBounds: foreground?.bounds || null,
+    bounds: { x: dip.x, y: dip.y, width: dip.width, height: dip.height },
+  }
 }
 
 function getWeChatPidForHook(): number | null {
@@ -162,6 +184,7 @@ function getWeChatPidForHook(): number | null {
 
 function shouldHandleWinEvent(pid: number, event: number, hwnd: any, idObject: number, idChild: number): boolean {
   if (!hwnd) return false
+  if (event === EVENT_SYSTEM_FOREGROUND) return true
   if (event === EVENT_OBJECT_LOCATIONCHANGE && (idObject !== OBJID_WINDOW || idChild !== CHILDID_SELF)) return false
 
   const addr = hwndAddress(hwnd)
@@ -190,8 +213,8 @@ export function watchWeChatWindowEvents(onChange: () => void): (() => void) | nu
   const flags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS
   const hooks = [
     SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, null, callback, pid, 0, flags),
-    SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, null, callback, pid, 0, flags),
     SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND, null, callback, pid, 0, flags),
+    SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, null, callback, 0, 0, WINEVENT_OUTOFCONTEXT),
   ].filter(Boolean)
 
   if (hooks.length === 0) {
@@ -204,5 +227,24 @@ export function watchWeChatWindowEvents(onChange: () => void): (() => void) | nu
       try { UnhookWinEvent(hook) } catch { /* ignore */ }
     }
     try { koffi.unregister(callback) } catch { /* ignore */ }
+  }
+}
+
+function nativeWindowHandleToBigInt(handle: Buffer): bigint {
+  if (handle.length >= 8) return handle.readBigUInt64LE(0)
+  if (handle.length >= 4) return BigInt(handle.readUInt32LE(0))
+  return 0n
+}
+
+export function placeNativeWindowBehindForeground(nativeWindowHandle: Buffer): boolean {
+  if (process.platform !== 'win32' || !ensureLoaded()) return false
+  const hwnd = nativeWindowHandleToBigInt(nativeWindowHandle)
+  const foreground = BigInt(GetForegroundWindowHandle() || 0)
+  if (!hwnd || !foreground || hwnd === foreground) return false
+  const flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER
+  try {
+    return Boolean(SetWindowPos(hwnd, foreground, 0, 0, 0, 0, flags))
+  } catch {
+    return false
   }
 }
