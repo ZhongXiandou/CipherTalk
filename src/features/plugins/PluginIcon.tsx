@@ -1,39 +1,58 @@
+import type { SVGProps } from 'react'
 import {
-  BarChart3, BookOpen, Calendar, Clock, Database, Download, FileText, Globe,
-  Heart, Image, MessageSquare, Mic, Puzzle, Search, Smile, Sparkles, Star,
-  Tag, Users, Zap,
-} from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+  ArrowDownToLine,
+  BookOpen,
+  Calendar,
+  Clock,
+  Comment,
+  Database,
+  FaceSmile,
+  FileText,
+  Globe,
+  Heart,
+  Magnifier,
+  Microphone,
+  Persons,
+  Picture,
+  Puzzle,
+  Sparkles,
+  Star,
+  Tag,
+  Thunderbolt,
+  ChartColumn,
+} from '@gravity-ui/icons'
 
 /**
- * 插件贡献点图标：manifest 里声明图标名，宿主用内置 lucide 集合渲染。
+ * 插件贡献点图标：manifest 里声明图标名，宿主用内置图标集合渲染。
  * 未知名字回退 Puzzle——渲染贡献点不执行任何插件代码。
  */
-const ICON_MAP: Record<string, LucideIcon> = {
-  'bar-chart': BarChart3,
-  'chart-bar': BarChart3,
+type PluginIconComponent = (props: SVGProps<SVGSVGElement>) => React.JSX.Element
+
+const ICON_MAP: Record<string, PluginIconComponent> = {
+  'bar-chart': ChartColumn,
+  'chart-bar': ChartColumn,
   'book-open': BookOpen,
   calendar: Calendar,
   clock: Clock,
   database: Database,
-  download: Download,
+  download: ArrowDownToLine,
   'file-text': FileText,
   globe: Globe,
   heart: Heart,
-  image: Image,
-  'message-square': MessageSquare,
-  mic: Mic,
+  image: Picture,
+  'message-square': Comment,
+  mic: Microphone,
   puzzle: Puzzle,
-  search: Search,
-  smile: Smile,
+  search: Magnifier,
+  smile: FaceSmile,
   sparkles: Sparkles,
   star: Star,
   tag: Tag,
-  users: Users,
-  zap: Zap,
+  users: Persons,
+  zap: Thunderbolt,
 }
 
 export function PluginIcon({ name, size }: { name?: string; size?: number }) {
   const Icon = (name && ICON_MAP[name]) || Puzzle
-  return <Icon size={size} />
+  return <Icon width={size} height={size} />
 }

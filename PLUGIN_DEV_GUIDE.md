@@ -510,19 +510,19 @@ const api = await connect()           // connect 负责注入 .ct-* 样式
 
 ### 6.2 图标
 
-组件库不含图标。推荐 [`lucide-react`](https://lucide.dev)（与宿主同款风格），
+组件库不含图标。推荐 [`@gravity-ui/icons`](https://gravity-ui.com/icons)（与宿主同款风格），
 自行安装引入：
 
 ```bash
-npm i lucide-react
+npm i @gravity-ui/icons
 ```
 
 ```jsx
-import { Search } from 'lucide-react'
-<Button variant="primary"><Search size={16} /> 搜索</Button>
+import { Magnifier } from '@gravity-ui/icons'
+<Button variant="primary"><Magnifier width={16} height={16} /> 搜索</Button>
 ```
 
-非 React 插件可用 lucide 的 [静态 SVG](https://lucide.dev)（复制 SVG 内联即可）。
+非 React 插件可用 Gravity UI Icons 的静态 SVG（复制 SVG 内联即可）。
 
 ## 7. 主题与暗色模式
 

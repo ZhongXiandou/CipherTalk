@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { IconComponent } from "@/types/icon";
-import { XIcon } from "lucide-react";
+import { Xmark } from "@gravity-ui/icons";
 import type { ComponentProps, HTMLAttributes } from "react";
 
 export type ArtifactProps = HTMLAttributes<HTMLDivElement>;
@@ -58,7 +58,7 @@ export const ArtifactClose = ({
     variant={variant}
     {...props}
   >
-    {children ?? <XIcon className="size-4" />}
+    {children ?? <Xmark className="size-4" />}
     <span className="sr-only">Close</span>
   </Button>
 );

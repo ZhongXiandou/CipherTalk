@@ -9,13 +9,13 @@ import {
 import { cn } from "@/lib/utils";
 import type { ToolUIPart } from "ai";
 import {
-  CheckCircleIcon,
-  ChevronDownIcon,
-  CircleIcon,
-  ClockIcon,
-  WrenchIcon,
-  XCircleIcon,
-} from "lucide-react";
+  CircleCheck,
+  ChevronDown,
+  Circle,
+  Clock,
+  Wrench,
+  CircleXmark,
+} from "@gravity-ui/icons";
 import type { ComponentProps, ReactNode } from "react";
 import { isValidElement } from "react";
 import { CodeBlock } from "./code-block";
@@ -48,13 +48,13 @@ const getStatusBadge = (status: ToolUIPart["state"]) => {
   };
 
   const icons: Record<ToolUIPart["state"], ReactNode> = {
-    "input-streaming": <CircleIcon className="size-4" />,
-    "input-available": <ClockIcon className="size-4 animate-pulse" />,
-    "approval-requested": <ClockIcon className="size-4 text-yellow-600" />,
-    "approval-responded": <CheckCircleIcon className="size-4 text-blue-600" />,
-    "output-available": <CheckCircleIcon className="size-4 text-green-600" />,
-    "output-error": <XCircleIcon className="size-4 text-red-600" />,
-    "output-denied": <XCircleIcon className="size-4 text-orange-600" />,
+    "input-streaming": <Circle className="size-4" />,
+    "input-available": <Clock className="size-4 animate-pulse" />,
+    "approval-requested": <Clock className="size-4 text-yellow-600" />,
+    "approval-responded": <CircleCheck className="size-4 text-blue-600" />,
+    "output-available": <CircleCheck className="size-4 text-green-600" />,
+    "output-error": <CircleXmark className="size-4 text-red-600" />,
+    "output-denied": <CircleXmark className="size-4 text-orange-600" />,
   };
 
   return (
@@ -80,13 +80,13 @@ export const ToolHeader = ({
     {...props}
   >
     <div className="flex items-center gap-2">
-      <WrenchIcon className="size-4 text-muted-foreground" />
+      <Wrench className="size-4 text-muted-foreground" />
       <span className="font-medium text-sm">
         {title ?? type.split("-").slice(1).join("-")}
       </span>
       {getStatusBadge(state)}
     </div>
-    <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+    <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
   </CollapsibleTrigger>
 );
 

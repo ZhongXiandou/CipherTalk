@@ -3,7 +3,7 @@
 import { cn } from "@/lib/utils";
 import * as echarts from "echarts";
 import type { ECharts, EChartsOption } from "echarts";
-import { AlertCircleIcon } from "lucide-react";
+import { CircleExclamation } from "@gravity-ui/icons";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 
 export type ChartBlockProps = {
@@ -236,7 +236,7 @@ export const ChartBlock = forwardRef<ChartBlockHandle, ChartBlockProps>(function
   if (!isUsableChartOption(option)) {
     return (
       <div className={cn("flex h-full items-center justify-center gap-2 text-muted-foreground text-sm", className)}>
-        <AlertCircleIcon className="size-4" />
+        <CircleExclamation className="size-4" />
         <span>图表配置无效</span>
       </div>
     );

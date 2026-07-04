@@ -186,7 +186,7 @@ const setSttLanguagesState = (v: string[]) => setField('sttLanguages', v)
 - `themeMode` / `currentTheme` / `setThemeMode` / `setTheme` / `themes` —— 来自
   `useThemeStore`(`src/stores/themeStore.ts`),组件内直接 `import { useThemeStore, themes }`。
 - `quoteStyle` / `closeToTray` —— 改为 store 叶子选择器 + `setField`。
-- 图标 `Sun, Moon, Monitor, Check`(lucide-react)。
+- 图标 `Sun, Moon, Monitor, Check`（已迁移到 `@gravity-ui/icons` 对应图标）。
 
 `AppearanceTab` 无需 props(全部自取 store)。`SettingsPage` 里 `renderAppearanceTab` 删除,
 `{activeTab === 'appearance' && renderAppearanceTab()}` 换成 `<AppearanceTab />`。

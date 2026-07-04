@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, type CSSProperties } from 'react'
 import { Avatar, Button } from '@heroui/react'
 import { useAppStore } from '../stores/appStore'
 import { useAuthStore } from '../stores/authStore'
-import { Lock, Fingerprint, AlertCircle, ChevronRight } from 'lucide-react'
+import { ChevronRight, CircleExclamation, Fingerprint, Lock } from '@gravity-ui/icons'
 import './LockScreen.css'
 
 const noDragStyle = { WebkitAppRegion: 'no-drag' } as CSSProperties
@@ -80,11 +80,11 @@ export default function LockScreen() {
                             <Avatar.Image src={userInfo.avatarUrl} alt={userDisplayName} />
                         ) : null}
                         <Avatar.Fallback>
-                            {avatarFallback || <Lock size={32} />}
+                            {avatarFallback || <Lock width={32} height={32} />}
                         </Avatar.Fallback>
                     </Avatar>
                     <div className="lock-icon">
-                        <Lock size={14} />
+                        <Lock width={14} height={14} />
                     </div>
                 </div>
 
@@ -103,7 +103,7 @@ export default function LockScreen() {
                         isPending={isVerifying}
                         isDisabled={isVerifying}
                     >
-                        <Fingerprint size={20} />
+                        <Fingerprint width={20} height={20} />
                         {isVerifying ? '正在验证...' : platformInfo.platform === 'darwin' ? '使用 Touch ID 解锁' : '使用 Windows Hello 解锁'}
                     </Button>
                 ) : (
@@ -133,7 +133,7 @@ export default function LockScreen() {
                                 disabled={isVerifying || !password}
                                 style={noDragStyle}
                             >
-                                <ChevronRight size={20} />
+                                <ChevronRight width={20} height={20} />
                             </button>
                         </div>
                     </form>
@@ -141,7 +141,7 @@ export default function LockScreen() {
 
                 {error && (
                     <div className="error-message">
-                        <AlertCircle size={14} />
+                        <CircleExclamation width={14} height={14} />
                         <span>{error}</span>
                     </div>
                 )}

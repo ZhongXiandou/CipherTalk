@@ -1,6 +1,6 @@
 import { Button, DateField, DateRangePicker as HeroDateRangePicker, RangeCalendar } from '@heroui/react'
 import { getLocalTimeZone, parseDate, today, type DateValue } from '@internationalized/date'
-import { X } from 'lucide-react'
+import { Xmark } from '@gravity-ui/icons'
 
 interface DateRangePickerProps {
   startDate: string
@@ -113,7 +113,7 @@ function DateRangePicker({
       </HeroDateRangePicker>
       {hasValue && (
         <Button type="button" variant="ghost" size="sm" isIconOnly onPress={handleClear} aria-label="清除时间范围">
-          <X size={14} />
+          <Xmark width={14} height={14} />
         </Button>
       )}
     </div>

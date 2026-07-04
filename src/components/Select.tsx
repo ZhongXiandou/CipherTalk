@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import { Check, ChevronDown } from 'lucide-react'
+import { Check, ChevronDown } from '@gravity-ui/icons'
 import './Select.scss'
 
 export interface SelectOption<T extends string | number = string> {
@@ -148,7 +148,7 @@ function Select<T extends string | number = string>({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => setOpen((v) => !v)}
             >
-              <ChevronDown size={16} className="glass-select-arrow" />
+              <ChevronDown width={16} height={16} className="glass-select-arrow" />
             </button>
           </div>
         ) : (
@@ -167,7 +167,7 @@ function Select<T extends string | number = string>({
                 {adornment}
               </span>
             )}
-            <ChevronDown size={16} className="glass-select-arrow" />
+            <ChevronDown width={16} height={16} className="glass-select-arrow" />
           </button>
         )}
         <div
@@ -206,7 +206,7 @@ function Select<T extends string | number = string>({
                 </span>
               )}
               {option.value === value && (
-                <Check size={15} className="glass-select-option-check" />
+                <Check width={15} height={15} className="glass-select-option-check" />
               )}
             </button>
           ))}
@@ -223,7 +223,7 @@ function Select<T extends string | number = string>({
                   使用自定义值：{String(value)}
                 </span>
               </span>
-              <Check size={15} className="glass-select-option-check" />
+              <Check width={15} height={15} className="glass-select-option-check" />
             </button>
           )}
         </div>

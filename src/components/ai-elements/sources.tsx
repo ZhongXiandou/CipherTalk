@@ -2,7 +2,7 @@
 
 import { Disclosure, Link } from "@heroui/react";
 import { cn } from "@/lib/utils";
-import { BookIcon, ChevronDownIcon } from "lucide-react";
+import { Book, ChevronDown } from "@gravity-ui/icons";
 import type { ComponentProps } from "react";
 
 export type SourcesProps = ComponentProps<typeof Disclosure>;
@@ -33,7 +33,7 @@ export const SourcesTrigger = ({
         <>
           <p className="font-medium">Used {count} sources</p>
           <Disclosure.Indicator>
-            <ChevronDownIcon className="h-4 w-4" />
+            <ChevronDown className="h-4 w-4" />
           </Disclosure.Indicator>
         </>
       )}
@@ -84,7 +84,7 @@ export const Source = ({ href, title, children, ...props }: SourceProps) => {
     >
       {children ?? (
         <>
-          <BookIcon className="h-4 w-4" />
+          <Book className="h-4 w-4" />
           <span className="block font-medium">{title}</span>
         </>
       )}

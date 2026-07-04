@@ -1,4 +1,4 @@
-import { X, Copy, Check } from 'lucide-react'
+import { Check, Copy, Xmark } from '@gravity-ui/icons'
 import { useState, useMemo } from 'react'
 import './JsonViewerModal.scss'
 
@@ -50,11 +50,11 @@ export function JsonViewerModal({ data, title = '原始数据', onClose }: JsonV
               onClick={handleCopy}
               title="复制到剪贴板"
             >
-              {copied ? <Check size={16} /> : <Copy size={16} />}
+              {copied ? <Check width={16} height={16} /> : <Copy width={16} height={16} />}
               {copied ? '已复制' : '复制'}
             </button>
             <button className="close-btn" onClick={onClose} title="关闭">
-              <X size={20} />
+              <Xmark width={20} height={20} />
             </button>
           </div>
         </div>

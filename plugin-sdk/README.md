@@ -78,7 +78,7 @@ function App() {
 | 交互 | `Tabs` `Menu` `MenuItem` `Dialog` |
 | 数据 | `LazyList`（滚动懒加载）`DataTable`（排序 + 可选分页）`BarChart`（柱状图） |
 
-图标不内置，推荐 [`lucide-react`](https://lucide.dev)（与宿主同款风格）。
+图标不内置，推荐 [`@gravity-ui/icons`](https://gravity-ui.com/icons)（与宿主同款风格）。
 
 ## CLI
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Wifi, WifiOff, RefreshCw } from 'lucide-react'
+import { ArrowsRotateRight, CloudSlash, Globe } from '@gravity-ui/icons'
 import './ProxyStatus.scss'
 
 /**
@@ -72,14 +72,14 @@ export function ProxyStatus() {
       <div className="proxy-status-content">
         {proxyStatus.hasProxy ? (
           <>
-            <Wifi size={14} className="proxy-icon active" />
+            <Globe width={14} height={14} className="proxy-icon active" />
             <span className="proxy-text">
               代理: <code>{proxyStatus.proxyUrl}</code>
             </span>
           </>
         ) : (
           <>
-            <WifiOff size={14} className="proxy-icon inactive" />
+            <CloudSlash width={14} height={14} className="proxy-icon inactive" />
             <span className="proxy-text">直连</span>
           </>
         )}
@@ -91,7 +91,7 @@ export function ProxyStatus() {
         disabled={refreshing}
         title="刷新代理配置"
       >
-        <RefreshCw size={14} className={refreshing ? 'spinning' : ''} />
+        <ArrowsRotateRight width={14} height={14} className={refreshing ? 'spinning' : ''} />
       </button>
     </div>
   )

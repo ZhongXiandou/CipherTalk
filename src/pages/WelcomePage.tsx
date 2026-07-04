@@ -18,13 +18,10 @@ import {
   Tooltip,
   Typography
 } from '@heroui/react'
+import { ArrowLeft, ArrowRight, ArrowsRotateLeft, BookOpen, CircleCheck, Eye, EyeSlash, Fingerprint, FolderOpen, Lock, ShieldCheck, Sparkles } from '@gravity-ui/icons'
 import { useAppStore } from '../stores/appStore'
 import { dialog } from '../services/ipc'
 import * as configService from '../services/config'
-import {
-  ArrowLeft, ArrowRight, CheckCircle2, Eye, EyeOff,
-  FolderOpen, ShieldCheck, Wand2, RotateCcw, Fingerprint, Lock, BookOpen
-} from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import './WelcomePage.css'
 
@@ -676,7 +673,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
     <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
       {items.map((item, index) => (
         <li key={index} className="flex min-w-0 items-start gap-2 text-sm leading-6 text-foreground">
-          <CheckCircle2 size={15} className="mt-1 shrink-0 text-accent" />
+          <CircleCheck width={15} height={15} className="mt-1 shrink-0 text-accent" />
           <span>{item}</span>
         </li>
       ))}
@@ -833,16 +830,16 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
       <div className="flex flex-wrap items-center gap-2.5">
         <Button className="min-w-33 justify-center" type="button" variant="primary" onPress={() => void handleAutoDetectPath()} isPending={isDetectingPath}>
           <span className="grid size-4 shrink-0 place-items-center">
-            {isDetectingPath ? <Spinner size="sm" color="current" /> : <Wand2 size={16} />}
+            {isDetectingPath ? <Spinner size="sm" color="current" /> : <Sparkles width={16} height={16} />}
           </span>
           <span className="min-w-[5em] text-left">{isDetectingPath ? '自动检测中' : '自动检测'}</span>
         </Button>
         <Button type="button" variant="secondary" onPress={() => void handleSelectPath()}>
-          <FolderOpen size={16} /> 浏览选择目录
+          <FolderOpen width={16} height={16} /> 浏览选择目录
         </Button>
         {dbPath && (
           <Button type="button" variant="tertiary" onPress={() => void handleOpenDetectedPath()}>
-            <FolderOpen size={16} /> 打开此文件夹
+            <FolderOpen width={16} height={16} /> 打开此文件夹
           </Button>
         )}
       </div>
@@ -858,10 +855,10 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
       })}
       <div className="flex flex-wrap items-center gap-2.5">
         <Button type="button" variant="primary" onPress={() => void handleSelectCachePath()}>
-          <FolderOpen size={16} /> 浏览选择
+          <FolderOpen width={16} height={16} /> 浏览选择
         </Button>
         <Button type="button" variant="secondary" onPress={() => void handleResetCachePath()}>
-          <RotateCcw size={16} /> 恢复默认
+          <ArrowsRotateLeft width={16} height={16} /> 恢复默认
         </Button>
       </div>
     </div>
@@ -907,7 +904,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
               {wxidOptions.map((id) => (
                 <ListBox.Item key={id} id={id} textValue={id}>
                   <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
-                    <FolderOpen size={16} />
+                    <FolderOpen width={16} height={16} />
                   </div>
                   <div className="flex min-w-0 flex-1 flex-col">
                     <Label className="truncate">{id}</Label>
@@ -938,7 +935,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
           isDisabled={isVerifyingAccount || !wxid || decryptKey.length !== 64}
           isPending={isVerifyingAccount}
         >
-          {isVerifyingAccount ? <Spinner size="sm" color="current" /> : <ShieldCheck size={16} />}
+          {isVerifyingAccount ? <Spinner size="sm" color="current" /> : <ShieldCheck width={16} height={16} />}
           {isVerifyingAccount ? '验证中' : '验证账号目录'}
         </Button>
         <Button
@@ -948,7 +945,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
           isDisabled={!dbPath || isScanningWxid}
           isPending={isScanningWxid}
         >
-          {isScanningWxid ? <Spinner size="sm" color="current" /> : <FolderOpen size={16} />}
+          {isScanningWxid ? <Spinner size="sm" color="current" /> : <FolderOpen width={16} height={16} />}
           扫描账号目录
         </Button>
       </div>
@@ -966,7 +963,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
               aria-label={showDecryptKey ? '隐藏密钥' : '显示密钥'}
               onPress={() => setShowDecryptKey(!showDecryptKey)}
             >
-              {showDecryptKey ? <EyeOff size={16} /> : <Eye size={16} />}
+              {showDecryptKey ? <EyeSlash width={16} height={16} /> : <Eye width={16} height={16} />}
             </Button>
             <Tooltip.Content>{showDecryptKey ? '隐藏密钥' : '显示密钥'}</Tooltip.Content>
           </Tooltip>
@@ -980,7 +977,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         onPress={() => void handleAutoGetDbKey()}
         isPending={isFetchingDbKey}
       >
-        {isFetchingDbKey ? <Spinner size="sm" color="current" /> : <Wand2 size={16} />}
+        {isFetchingDbKey ? <Spinner size="sm" color="current" /> : <Sparkles width={16} height={16} />}
         {isFetchingDbKey ? '获取中' : '自动获取密钥'}
       </Button>
 
@@ -996,7 +993,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
             })}
             <div className="flex flex-wrap items-center gap-2.5">
               <Button type="button" variant="secondary" onPress={() => void handleSelectWechatPath()}>
-                <FolderOpen size={16} /> 浏览选择
+                <FolderOpen width={16} height={16} /> 浏览选择
               </Button>
               <Button type="button" variant="primary" onPress={handleConfirmWechatPath}>
                 确认并继续
@@ -1032,7 +1029,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         isDisabled={isFetchingImageKey}
         isPending={isFetchingImageKey}
       >
-        {isFetchingImageKey ? <Spinner size="sm" color="current" /> : <Wand2 size={16} />}
+        {isFetchingImageKey ? <Spinner size="sm" color="current" /> : <Sparkles width={16} height={16} />}
         {isFetchingImageKey ? '获取中' : '自动获取图片密钥'}
       </Button>
       {imageKeyStatus && renderStatusAlert(imageKeyStatus, 'default')}
@@ -1047,7 +1044,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         <Card.Header className="flex-row items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-3">
             <div className="grid size-12 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
-              {isMac ? <Lock size={28} /> : <Fingerprint size={28} />}
+              {isMac ? <Lock width={28} height={28} /> : <Fingerprint width={28} height={28} />}
             </div>
             <div className="min-w-0">
               <Card.Title>{biometricLabel} 认证</Card.Title>
@@ -1058,7 +1055,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
           </div>
           {isAuthEnabled && (
             <Chip size="sm" variant="soft" color="success">
-              <CheckCircle2 size={12} />
+              <CircleCheck width={12} height={12} />
               <Chip.Label>已启用</Chip.Label>
             </Chip>
           )}
@@ -1087,7 +1084,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
               }}
               isPending={isEnablingAuth}
             >
-              {isEnablingAuth ? <Spinner size="sm" color="current" /> : <ShieldCheck size={16} />}
+              {isEnablingAuth ? <Spinner size="sm" color="current" /> : <ShieldCheck width={16} height={16} />}
               {isEnablingAuth ? '正在配置' : '启用应用锁'}
             </Button>
           ) : (
@@ -1131,7 +1128,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         </Card.Content>
       </Card>
       <Button type="button" variant="primary" fullWidth onPress={() => void handleConfirm()} isPending={isDecrypting}>
-        {isDecrypting ? <Spinner size="sm" color="current" /> : <ShieldCheck size={16} />}
+        {isDecrypting ? <Spinner size="sm" color="current" /> : <ShieldCheck width={16} height={16} />}
         {isDecrypting ? '连接中' : '连接数据库'}
       </Button>
       {decryptStatus && countdown === 0 && renderStatusAlert(decryptStatus, 'accent')}
@@ -1144,7 +1141,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
       return (
         <div className="flex min-h-82.5 flex-col items-center justify-center gap-3.5 text-center">
           <div className="grid size-18 place-items-center rounded-lg bg-accent-soft text-accent">
-            <Wand2 size={34} />
+            <Sparkles width={34} height={34} />
           </div>
           <Typography.Heading level={3}>点击下一步开始配置</Typography.Heading>
           <Typography.Paragraph size="sm" color="muted">整个过程大约需要 3-5 分钟。</Typography.Paragraph>
@@ -1165,7 +1162,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         <div className="welcome-shell z-1 flex h-[min(700px,calc(100vh-40px))] w-[min(1080px,calc(100vw-48px))] flex-col gap-3">
           <Card className="m-auto w-[min(420px,100%)] items-center p-6 pt-9 text-center">
             <div className="grid size-20 place-items-center rounded-lg bg-accent-soft text-accent">
-              <CheckCircle2 size={48} />
+              <CircleCheck width={48} height={48} />
             </div>
             <Card.Header className="items-center text-center">
               <Card.Title>已连接数据库</Card.Title>
@@ -1206,7 +1203,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
                 </div>
               </div>
               <Button type="button" variant="secondary" size="sm" onPress={handleOpenGuide} className="shrink-0">
-                <BookOpen size={16} />
+                <BookOpen width={16} height={16} />
                 使用教程
               </Button>
             </div>
@@ -1237,7 +1234,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
                           : 'border-border bg-surface-secondary text-muted'
                     }`}
                   >
-                    {done ? <CheckCircle2 size={14} /> : index + 1}
+                    {done ? <CircleCheck width={14} height={14} /> : index + 1}
                   </div>
                   <Tooltip.Content>{step.title}</Tooltip.Content>
                 </Tooltip>
@@ -1259,7 +1256,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
             </Card.Content>
             <Card.Footer>
               <Chip size="sm" variant="soft" color="success">
-                <ShieldCheck size={12} />
+                <ShieldCheck width={12} height={12} />
                 <Chip.Label>仅本地处理</Chip.Label>
               </Chip>
             </Card.Footer>
@@ -1292,11 +1289,11 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
             )}
             <Card.Footer className="flex shrink-0 justify-between gap-3">
               <Button type="button" variant="tertiary" onPress={handleBack} isDisabled={stepIndex === 0 || isDecrypting}>
-                <ArrowLeft size={16} /> 上一步
+                <ArrowLeft width={16} height={16} /> 上一步
               </Button>
               {stepIndex < steps.length - 1 && (
                 <Button type="button" variant="primary" onPress={handleNext} isDisabled={!canGoNext()}>
-                  下一步 <ArrowRight size={16} />
+                  下一步 <ArrowRight width={16} height={16} />
                 </Button>
               )}
             </Card.Footer>

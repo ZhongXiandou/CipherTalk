@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/aie-button";
 import { cn } from "@/lib/utils";
 import Ansi from "ansi-to-react";
-import { CheckIcon, CopyIcon, TerminalIcon, Trash2Icon } from "lucide-react";
+import { Check, Copy, Terminal as TerminalGlyph, TrashBin } from "@gravity-ui/icons";
 import type { ComponentProps, HTMLAttributes } from "react";
 import {
   createContext,
@@ -57,7 +57,7 @@ export const TerminalTitle = ({
     className={cn("flex items-center gap-2 text-sm text-zinc-400", className)}
     {...props}
   >
-    <TerminalIcon className="size-4" />
+    <TerminalGlyph className="size-4" />
     {children ?? "Terminal"}
   </div>
 );
@@ -138,7 +138,7 @@ export const TerminalCopyButton = ({
     []
   );
 
-  const Icon = isCopied ? CheckIcon : CopyIcon;
+  const Icon = isCopied ? Check : Copy;
 
   return (
     <Button
@@ -151,7 +151,7 @@ export const TerminalCopyButton = ({
       variant="ghost"
       {...props}
     >
-      {children ?? <Icon size={14} />}
+      {children ?? <Icon width={14} height={14} />}
     </Button>
   );
 };
@@ -180,7 +180,7 @@ export const TerminalClearButton = ({
       variant="ghost"
       {...props}
     >
-      {children ?? <Trash2Icon size={14} />}
+      {children ?? <TrashBin width={14} height={14} />}
     </Button>
   );
 };

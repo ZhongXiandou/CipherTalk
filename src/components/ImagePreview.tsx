@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react'
-import { X } from 'lucide-react'
+import { Xmark } from '@gravity-ui/icons'
 import { LivePhotoIcon } from './LivePhotoIcon'
 import { createPortal } from 'react-dom'
 import './ImagePreview.scss'
@@ -234,7 +234,7 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({ src, isVideo, liveVi
       )}
 
       <button className="image-preview-close" onClick={onClose}>
-        <X size={20} />
+        <Xmark width={20} height={20} />
       </button>
     </div>,
     document.body

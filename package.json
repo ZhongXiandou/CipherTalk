@@ -116,7 +116,6 @@
     "electron-builder": "^25.1.8",
     "electron-store": "^10.0.0",
     "es-toolkit": "^1.46.1",
-    "lucide-react": "^0.562.0",
     "marked": "^17.0.1",
     "motion": "^12.40.0",
     "react": "^19.2.3",

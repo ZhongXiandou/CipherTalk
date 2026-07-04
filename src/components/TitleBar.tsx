@@ -1,5 +1,5 @@
 import { ReactNode } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { ArrowsRotateRight } from '@gravity-ui/icons'
 import { usePlatformInfo } from '../hooks/usePlatformInfo'
 import { useTitleBarStore } from '../stores/titleBarStore'
 import { useUpdateStatusStore } from '../stores/updateStatusStore'
@@ -26,9 +26,10 @@ function TitleBar({ className, rightContent, title, variant = 'app', showTitle =
 
   const updateStatusNode = isUpdating ? (
     <div className="update-status">
-      <RefreshCw
+      <ArrowsRotateRight
         className="update-indicator"
-        size={16}
+        width={16}
+        height={16}
         strokeWidth={2.5}
       />
       <span className="update-text">正在同步数据...</span>

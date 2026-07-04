@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/aie-button";
 import { cn } from "@/lib/utils";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { Check, Copy } from "@gravity-ui/icons";
 import {
   type ComponentProps,
   createContext,
@@ -191,7 +191,7 @@ export const CodeBlockCopyButton = ({
     }
   };
 
-  const Icon = isCopied ? CheckIcon : CopyIcon;
+  const Icon = isCopied ? Check : Copy;
 
   return (
     <Button
@@ -201,7 +201,7 @@ export const CodeBlockCopyButton = ({
       variant="ghost"
       {...props}
     >
-      {children ?? <Icon size={14} />}
+      {children ?? <Icon width={14} height={14} />}
     </Button>
   );
 };

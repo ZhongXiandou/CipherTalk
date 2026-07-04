@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { Button, TextArea } from '@heroui/react'
-import { Copy, Download, FileCode2, Save, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowDownToLine, Copy, FileCode, FloppyDisk, Sparkles, TrashBin } from '@gravity-ui/icons'
 import type { ChatSession, Message } from '../types/models'
 import {
   POSTER_THEMES,
@@ -344,7 +344,7 @@ export default function PosterStyleWindow() {
     }
   }
 
-  const handleSaveCss = () => {
+  const handleFloppyDiskCss = () => {
     if (!selectedCustom || !cssDirty) return
     if (!scopePosterCss(editorCss)) {
       setStatusText('样式为空或属性都被过滤，请检查代码')
@@ -518,7 +518,7 @@ ${sampleLines || '无'}`
     }
   }
 
-  const handleSaveImage = async () => {
+  const handleFloppyDiskImage = async () => {
     if (saving || copying) return
     const node = cardRef.current
     if (!node) return
@@ -608,7 +608,7 @@ ${sampleLines || '无'}`
                     variant="ghost"
                     onPress={() => deleteCustomTheme(theme.id)}
                   >
-                    <Trash2 size={13} />
+                    <TrashBin width={13} height={13} />
                   </Button>
                 </div>
               ))}
@@ -635,7 +635,7 @@ ${sampleLines || '无'}`
               variant="primary"
               onPress={() => void handleGenerateAgentStyle()}
             >
-              <Sparkles size={14} />
+              <Sparkles width={14} height={14} />
               生成样式
             </Button>
           </section>
@@ -644,7 +644,7 @@ ${sampleLines || '无'}`
         <main className="poster-editor__main">
           <div className="poster-editor__pane-header">
             <div className="poster-editor__pane-title">
-              <FileCode2 size={15} />
+              <FileCode width={15} height={15} />
               <span>{selectedCustom ? `${selectedCustom.name}.css` : '预设样式'}</span>
               {cssDirty && <i aria-hidden="true" />}
             </div>
@@ -652,9 +652,9 @@ ${sampleLines || '无'}`
               isDisabled={!selectedCustom || !cssDirty}
               size="sm"
               variant="secondary"
-              onPress={handleSaveCss}
+              onPress={handleFloppyDiskCss}
             >
-              <Save size={13} />
+              <FloppyDisk width={13} height={13} />
               保存 CSS
             </Button>
           </div>
@@ -693,7 +693,7 @@ ${sampleLines || '无'}`
               </div>
             ) : (
               <div className="poster-editor__empty">
-                <Sparkles size={24} />
+                <Sparkles width={24} height={24} />
                 <span>生成自定义样式后可编辑 CSS</span>
               </div>
             )}
@@ -714,7 +714,7 @@ ${sampleLines || '无'}`
                 variant="secondary"
                 onPress={() => void handleCopyImage()}
               >
-                <Copy size={14} />
+                <Copy width={14} height={14} />
                 复制
               </Button>
               <Button
@@ -722,9 +722,9 @@ ${sampleLines || '无'}`
                 isPending={saving}
                 size="sm"
                 variant="primary"
-                onPress={() => void handleSaveImage()}
+                onPress={() => void handleFloppyDiskImage()}
               >
-                <Download size={14} />
+                <ArrowDownToLine width={14} height={14} />
                 保存图片
               </Button>
             </div>

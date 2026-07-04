@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Shield, Key, CheckCircle, AlertCircle, Clock, Loader2, Copy, Check } from 'lucide-react'
+import { Check, CircleCheck, CircleDashed, CircleExclamation, Clock, Copy, Key, Shield } from '@gravity-ui/icons'
 import type { ActivationStatus } from '../types/electron'
 import './ActivationPage.scss'
 
@@ -92,7 +92,7 @@ export default function ActivationPage({ onActivated, showBackButton, onBack }: 
     return (
       <div className="activation-page">
         <div className="activation-loading">
-          <Loader2 className="spin" size={48} />
+          <CircleDashed className="spin" width={48} height={48} />
           <p>正在检查激活状态...</p>
         </div>
       </div>
@@ -109,7 +109,7 @@ export default function ActivationPage({ onActivated, showBackButton, onBack }: 
         )}
 
         <div className="activation-header">
-          <Shield size={64} className="shield-icon" />
+          <Shield width={64} height={64} className="shield-icon" />
           <h1>软件激活</h1>
           <p>请输入激活码以解锁全部功能</p>
         </div>
@@ -118,9 +118,9 @@ export default function ActivationPage({ onActivated, showBackButton, onBack }: 
         <div className={`status-card ${status?.isActivated ? 'activated' : 'inactive'}`}>
           <div className="status-icon">
             {status?.isActivated ? (
-              <CheckCircle size={32} />
+              <CircleCheck width={32} height={32} />
             ) : (
-              <AlertCircle size={32} />
+              <CircleExclamation width={32} height={32} />
             )}
           </div>
           <div className="status-info">
@@ -130,7 +130,7 @@ export default function ActivationPage({ onActivated, showBackButton, onBack }: 
                 <p className="status-type">{getTypeDisplayName(status.type)}</p>
                 {status.daysRemaining !== null && status.type !== 'permanent' && (
                   <p className="status-expires">
-                    <Clock size={14} />
+                    <Clock width={14} height={14} />
                     {status.daysRemaining > 0 
                       ? `剩余 ${status.daysRemaining} 天` 
                       : '已过期'}
@@ -148,7 +148,7 @@ export default function ActivationPage({ onActivated, showBackButton, onBack }: 
         {(!status?.isActivated || (status.daysRemaining !== null && status.daysRemaining <= 0)) && (
           <div className="activation-form">
             <div className="input-group">
-              <Key size={20} />
+              <Key width={20} height={20} />
               <input
                 type="text"
                 placeholder="请输入激活码 (例如: XXXX-XXXX-XXXX-XXXX)"
@@ -161,7 +161,7 @@ export default function ActivationPage({ onActivated, showBackButton, onBack }: 
 
             {message && (
               <div className={`message ${message.type}`}>
-                {message.type === 'success' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
+                {message.type === 'success' ? <CircleCheck width={16} height={16} /> : <CircleExclamation width={16} height={16} />}
                 {message.text}
               </div>
             )}
@@ -173,12 +173,12 @@ export default function ActivationPage({ onActivated, showBackButton, onBack }: 
             >
               {activating ? (
                 <>
-                  <Loader2 className="spin" size={18} />
+                  <CircleDashed className="spin" width={18} height={18} />
                   激活中...
                 </>
               ) : (
                 <>
-                  <Shield size={18} />
+                  <Shield width={18} height={18} />
                   立即激活
                 </>
               )}
@@ -196,7 +196,7 @@ export default function ActivationPage({ onActivated, showBackButton, onBack }: 
               onClick={copyDeviceId}
               title="复制设备ID"
             >
-              {deviceIdCopied ? <Check size={14} /> : <Copy size={14} />}
+              {deviceIdCopied ? <Check width={14} height={14} /> : <Copy width={14} height={14} />}
             </button>
           </div>
         </div>

@@ -22,19 +22,19 @@ import {
 } from "@heroui/react";
 import type { FileUIPart, UIMessage } from "ai";
 import {
-  CheckIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  CodeIcon,
-  CopyIcon,
-  DownloadIcon,
-  ExternalLinkIcon,
-  EyeIcon,
-  FileIcon,
-  Loader2Icon,
-  Table2Icon,
-  XIcon,
-} from "lucide-react";
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Code,
+  Copy,
+  ArrowDownToLine,
+  ArrowUpRightFromSquare,
+  Eye,
+  File,
+  CircleDashed,
+  LayoutHeaderCellsLarge,
+  Xmark,
+} from "@gravity-ui/icons";
 import type { ComponentProps, HTMLAttributes, ReactElement, ReactNode } from "react";
 import { Children, Fragment, cloneElement, createContext, isValidElement, memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type AnimateOptions } from "streamdown";
@@ -383,7 +383,7 @@ export const MessageBranchPrevious = ({
       variant="ghost"
       {...props}
     >
-      {children ?? <ChevronLeftIcon size={14} />}
+      {children ?? <ChevronLeft width={14} height={14} />}
     </Button>
   );
 };
@@ -407,7 +407,7 @@ export const MessageBranchNext = ({
       variant="ghost"
       {...props}
     >
-      {children ?? <ChevronRightIcon size={14} />}
+      {children ?? <ChevronRight width={14} height={14} />}
     </Button>
   );
 };
@@ -673,7 +673,7 @@ type MessageCodeProps = ComponentProps<"code"> & {
 function StreamingChartPlaceholder({ language }: { language?: string }) {
   return (
     <div aria-label={`正在生成${language || "图表"}`} className="relative my-2 w-full max-w-full overflow-hidden" role="img">
-      <Loader2Icon className="absolute top-5 right-5 z-10 size-4 animate-spin text-muted-foreground" />
+      <CircleDashed className="absolute top-5 right-5 z-10 size-4 animate-spin text-muted-foreground" />
       <div className="flex aspect-video min-h-72 flex-col gap-4">
         <div className="h-5 w-40 animate-pulse rounded bg-muted" />
         <div className="grid flex-1 grid-cols-6 items-end gap-3">
@@ -745,12 +745,12 @@ const MessageCode = ({ children, className, node: _node, ...props }: MessageCode
           actions={[
             {
               ariaLabel: isCopied ? "图表配置已复制" : "复制图表配置",
-              icon: isCopied ? <CheckIcon /> : <CopyIcon />,
+              icon: isCopied ? <Check /> : <Copy />,
               onPress: () => void handleCopy(),
             },
             {
               ariaLabel: "下载图表",
-              icon: <DownloadIcon />,
+              icon: <ArrowDownToLine />,
               onPress: handleDownloadChart,
             },
           ]}
@@ -773,7 +773,7 @@ const MessageCode = ({ children, className, node: _node, ...props }: MessageCode
               size="sm"
               variant="ghost"
             >
-              {showPreview ? <CodeIcon /> : <EyeIcon />}
+              {showPreview ? <Code /> : <Eye />}
             </HeroButton>
           )}
           <HeroButton
@@ -784,7 +784,7 @@ const MessageCode = ({ children, className, node: _node, ...props }: MessageCode
             size="sm"
             variant="ghost"
           >
-            {isCopied ? <CheckIcon /> : <CopyIcon />}
+            {isCopied ? <Check /> : <Copy />}
           </HeroButton>
       </div>
       {showPreview && canPreviewHtml ? (
@@ -846,7 +846,7 @@ const MessageLink = ({ children, className, href, node: _node, ...props }: Messa
       target={external ? "_blank" : props.target}
     >
       <span className="min-w-0 break-all">{content}</span>
-      {external && <ExternalLinkIcon className="mb-0.5 size-3 shrink-0" />}
+      {external && <ArrowUpRightFromSquare className="mb-0.5 size-3 shrink-0" />}
     </a>
   );
 };
@@ -1023,13 +1023,13 @@ const MessageTable = ({ children, className, node: _node, ..._props }: MessageTa
           actions={[
             {
               ariaLabel: isCopied ? "表格已复制" : "复制表格",
-              icon: isCopied ? <CheckIcon /> : <CopyIcon />,
+              icon: isCopied ? <Check /> : <Copy />,
               isDisabled: !hasTableData,
               onPress: () => void handleCopy(),
             },
             {
               ariaLabel: "下载表格图片",
-              icon: isExporting ? <Loader2Icon className="animate-spin" /> : <DownloadIcon />,
+              icon: isExporting ? <CircleDashed className="animate-spin" /> : <ArrowDownToLine />,
               isDisabled: !canUseHeroTable || isExporting,
               onPress: () => void handleDownload(),
             },
@@ -1089,7 +1089,7 @@ const MessageTable = ({ children, className, node: _node, ..._props }: MessageTa
       </div>
       {isStreaming && (
         <div className="mt-2 flex items-center gap-2 rounded-(--agent-radius,12px) border border-border bg-muted/30 px-3 py-2 text-muted-foreground text-xs">
-          <Table2Icon className="size-3.5" />
+          <LayoutHeaderCellsLarge className="size-3.5" />
           <span>正在整理表格…</span>
         </div>
       )}
@@ -1113,7 +1113,7 @@ function StreamingTablePlaceholder() {
   return (
     <div className="my-4 overflow-hidden rounded-(--agent-radius,12px) border border-border bg-background">
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2 text-muted-foreground text-xs">
-        <Table2Icon className="size-3.5" />
+        <LayoutHeaderCellsLarge className="size-3.5" />
         <span>正在整理表格…</span>
       </div>
       <div className="space-y-2 p-3">
@@ -1331,7 +1331,7 @@ export function MessageAttachment({
               type="button"
               variant="ghost"
             >
-              <XIcon />
+              <Xmark />
               <span className="sr-only">Remove</span>
             </Button>
           )}
@@ -1343,7 +1343,7 @@ export function MessageAttachment({
               <TooltipTrigger asChild>
                 <div className="flex min-w-0 flex-1 items-center gap-3">
                   <div className="flex size-10 shrink-0 items-center justify-center rounded-(--agent-radius,12px) bg-muted text-muted-foreground">
-                    <FileIcon className="size-5" />
+                    <File className="size-5" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-medium text-foreground text-sm">
@@ -1371,7 +1371,7 @@ export function MessageAttachment({
               type="button"
               variant="ghost"
             >
-              <XIcon />
+              <Xmark />
               <span className="sr-only">Remove</span>
             </Button>
           )}

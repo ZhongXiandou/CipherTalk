@@ -3,7 +3,7 @@
 import { ScrollShadow } from "@heroui/react";
 import { Button } from "@/components/ui/aie-button";
 import { cn } from "@/lib/utils";
-import { ArrowDownIcon } from "lucide-react";
+import { ArrowDown } from "@gravity-ui/icons";
 import type { ComponentProps } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
@@ -176,7 +176,7 @@ export const ConversationScrollButton = ({
         variant="outline"
         {...props}
       >
-        <ArrowDownIcon className="size-4" />
+        <ArrowDown className="size-4" />
       </Button>
     )
   );

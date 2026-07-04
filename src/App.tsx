@@ -41,7 +41,7 @@ import * as configService from './services/config'
 import { initTldList } from './utils/linkify'
 import LockScreen from './pages/LockScreen'
 import { useAuthStore } from './stores/authStore'
-import { Brain, Loader2, Shield } from 'lucide-react'
+import { Bulb, CircleDashed, Shield } from '@gravity-ui/icons'
 import { applyWindowChromeToDocument, syncWindowControlsOverlayToDocument } from './utils/windowChrome'
 import type { MemoryMigrationStatusInfo } from './types/electron'
 import './App.css'
@@ -620,7 +620,7 @@ function App() {
         <div className="agreement-fullscreen">
           <div className="agreement-window">
             <div className="agreement-window-header">
-              <Shield size={28} />
+              <Shield width={28} height={28} />
               <h2>用户协议与隐私政策 <span style={{ fontSize: '14px', fontWeight: 'normal', opacity: 0.6 }}>v{configService.CURRENT_AGREEMENT_VERSION}.0</span></h2>
             </div>
             <div className="agreement-window-body">
@@ -758,7 +758,7 @@ function App() {
             <Modal.Dialog className="sm:max-w-170">
               <Modal.Header>
                 <Modal.Icon className="bg-accent-soft text-accent-soft-foreground">
-                  <Brain className="size-5" />
+                  <Bulb className="size-5" />
                 </Modal.Icon>
                 <div className="flex min-w-0 flex-col gap-2">
                   <Chip color="accent" size="sm" variant="soft">记忆系统迁移</Chip>
@@ -795,7 +795,7 @@ function App() {
         <div className="force-update-overlay">
           <div className="force-update-card">
             <div className="force-update-badge">
-              <Shield size={18} />
+              <Shield width={18} height={18} />
               <span>强制更新</span>
             </div>
             <h2>{updateInfo.title || '必须更新后才能继续使用'}</h2>
@@ -821,7 +821,7 @@ function App() {
             {progressPercent !== null && (
               <div className="force-update-progress">
                 <div className="force-update-progress-label">
-                  <Loader2 size={16} className="spin" />
+                  <CircleDashed width={16} height={16} className="spin" />
                   <span>正在下载更新... {progressPercent.toFixed(0)}%</span>
                 </div>
                 <div className="force-update-progress-bar">
@@ -876,12 +876,12 @@ function App() {
       {progressPercent !== null && (
         <div className="download-progress-capsule">
           <div className="capsule-compact">
-            <Loader2 className="spin" size={14} />
+            <CircleDashed className="spin" width={14} height={14} />
             <span>更新中 {progressPercent.toFixed(0)}%</span>
           </div>
           <div className="capsule-detail">
             <div className="capsule-detail-head">
-              <Loader2 className="spin" size={14} />
+              <CircleDashed className="spin" width={14} height={14} />
               <span className="capsule-detail-title">
                 正在下载更新{updateInfo?.version ? ` v${updateInfo.version}` : ''}
               </span>

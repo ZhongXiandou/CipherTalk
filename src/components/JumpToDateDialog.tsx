@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button, Calendar, Modal } from '@heroui/react'
 import { getLocalTimeZone, parseDate, today, type DateValue } from '@internationalized/date'
-import { Calendar as CalendarIcon } from 'lucide-react'
+import { Calendar as CalendarIcon } from '@gravity-ui/icons'
 import { formatDateValue, parseDateValue } from './AppDatePicker'
 
 interface JumpToDateDialogProps {
@@ -49,7 +49,7 @@ function JumpToDateDialog({ isOpen, onClose, onSelect, currentDate }: JumpToDate
           <Modal.CloseTrigger />
           <Modal.Header>
             <Modal.Icon>
-              <CalendarIcon size={18} />
+              <CalendarIcon width={18} height={18} />
             </Modal.Icon>
             <Modal.Heading>选择日期</Modal.Heading>
           </Modal.Header>
