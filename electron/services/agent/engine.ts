@@ -13,7 +13,6 @@ import { applyAnthropicCacheControl, buildPromptCacheKey, buildProviderOptions }
 import { buildCodeOnlyTools, buildPlanModeTools, buildTools } from './tools'
 import { afterTurnMemory, buildMemoryContext, preloadRelevantMemories } from './tools/memory'
 import { aiCompactStep, createCompactionState } from './aiCompaction'
-import { runFinalReview, summarizeToolOutput, type ToolOutputSummary } from './finalReview'
 import { loopGuardCondition, withToolTimeouts } from './guards'
 import { reportAgentProgress, withAgentProgress } from './progress'
 import { getCachedStartupMemory, warmStartupMemory } from './runtimeCache'
@@ -96,7 +95,6 @@ function lastUserText(messages: ModelMessage[]): string {
 function trackToolChunk(
   chunk: UIMessageChunk,
   toolNames: Map<string, string>,
-  summaries: ToolOutputSummary[],
   pendingToolCalls?: Map<string, { toolName: string; input?: unknown }>,
 ): void {
   if ('toolCallId' in chunk && 'toolName' in chunk && typeof chunk.toolCallId === 'string' && typeof chunk.toolName === 'string') {
@@ -116,21 +114,6 @@ function trackToolChunk(
   }
   if (chunk.type !== 'tool-output-available') return
   pendingToolCalls?.delete(chunk.toolCallId)
-  const toolName = toolNames.get(chunk.toolCallId) || 'unknown_tool'
-  summaries.push(summarizeToolOutput(toolName, chunk.output))
-}
-
-function hasToolEvidence(summaries: ToolOutputSummary[]): boolean {
-  return summaries.some((summary) => (
-    summary.evidence.length > 0 ||
-    Object.values(summary.counts).some((count) => count > 0)
-  ))
-}
-
-function shouldRunFinalReview(userText: string, assistantText: string, summaries: ToolOutputSummary[]): boolean {
-  if (!hasToolEvidence(summaries)) return false
-  const text = `${userText}\n${assistantText}`
-  return /聊天|消息|记录|朋友圈|群|联系人|谁|哪个|哪里|什么时候|时间|提到|说过|统计|排行|最近|今天|昨天|\d{4}[-/年]\d{1,2}/.test(text)
 }
 
 function withCacheHitRate(usage: unknown): unknown {
@@ -142,41 +125,6 @@ function withCacheHitRate(usage: unknown): unknown {
     ? cacheReadTokens / inputTokens
     : undefined
   return cacheHitRate === undefined ? usage : { ...(usage as Record<string, unknown>), cacheHitRate }
-}
-
-function appendFinalReviewCorrection(
-  review: { evidenceScore: number; issues: string[]; correction?: string },
-  onChunk: (chunk: UIMessageChunk) => void,
-): string {
-  const correction = String(review.correction || '').trim()
-  if (!correction) return ''
-  const toolCallId = `final-review-${Date.now()}`
-  const textId = `${toolCallId}-text`
-  const appendText = `\n\n> 核查修正：${correction}`
-
-  onChunk({ type: 'start-step' })
-  onChunk({
-    type: 'tool-input-available',
-    toolCallId,
-    toolName: 'final_review',
-    input: { evidenceScore: review.evidenceScore },
-  })
-  onChunk({
-    type: 'tool-output-available',
-    toolCallId,
-    output: {
-      status: 'needs_correction',
-      evidenceScore: review.evidenceScore,
-      issues: review.issues,
-      correction,
-    },
-  })
-  onChunk({ type: 'finish-step' })
-
-  onChunk({ type: 'text-start', id: textId })
-  onChunk({ type: 'text-delta', id: textId, delta: appendText })
-  onChunk({ type: 'text-end', id: textId })
-  return appendText
 }
 
 /**
@@ -291,7 +239,6 @@ export async function runAgent(
     let perfFirstEventSeen = false
     let perfFirstOutputSeen = false
     const toolNames = new Map<string, string>()
-    const toolSummaries: ToolOutputSummary[] = []
     const pendingToolCalls = new Map<string, { toolName: string; input?: unknown }>()
     for await (const chunk of result.toUIMessageStream({
       // 默认 onError 只回 "An error occurred."，把真实报错（含 status code）透传给聊天区，别再靠猜
@@ -317,29 +264,12 @@ export async function runAgent(
         perf('模型首个增量输出（真正开始回复）', chunk.type)
       }
       if (chunk.type === 'finish') { finishChunk = chunk; continue }
-      trackToolChunk(chunk, toolNames, toolSummaries, pendingToolCalls)
+      trackToolChunk(chunk, toolNames, pendingToolCalls)
       onChunk(chunk)
     }
     let assistantText = ''
     try { assistantText = await result.text } catch { /* abort/异常：跳过自动记忆 */ }
     perf('主回答流结束')
-    if (assistantText && !signal?.aborted && shouldRunFinalReview(userText, assistantText, toolSummaries)) {
-      const review = await runFinalReview({
-        providerConfig: input.providerConfig,
-        userText,
-        assistantText,
-        toolSummaries,
-        signal,
-      })
-      if (review.status === 'needs_correction') {
-        assistantText += appendFinalReviewCorrection(review, onChunk)
-      }
-      perf('最终审核（额外一次 LLM 调用）')
-    }
-    if (assistantText && !signal?.aborted) {
-      await injectAutoMemories(assistantText, input, onChunk, signal)
-      perf('自动记忆抽取')
-    }
     if (pendingToolCalls.size > 0 && !signal?.aborted) {
       for (const [toolCallId, pending] of pendingToolCalls.entries()) {
         onChunk({
@@ -352,6 +282,11 @@ export async function runAgent(
     }
     if (finishChunk) onChunk(finishChunk)
     reportAgentProgress({ stage: 'run_finished', title: '回答生成完成' })
+    // 自动记忆抽取是额外一次 LLM 调用；主回答已经出完，不再让"回复中"干等这一步。
+    // 后台异步跑，写库效果不受影响，只是它合成的 auto_memory 工具 part 不会再挂在这条已经结束的消息上。
+    if (assistantText && !signal?.aborted) {
+      void injectAutoMemories(assistantText, input, onChunk, signal).then(() => perf('自动记忆抽取（后台）'))
+    }
   })
 }
 

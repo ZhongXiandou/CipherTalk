@@ -214,6 +214,7 @@ export class AgentProcessService {
 
       this.worker = worker
       let readyFired = false
+      let stderrTail = ''
       const rejectInitOnce = (err: Error) => {
         if (!readyFired) { readyFired = true; reject(err) }
       }
@@ -238,6 +239,7 @@ export class AgentProcessService {
       worker.stderr?.on('data', (chunk: Buffer) => {
         const text = filterUtilityStderr(chunk.toString().trim())
         if (text) {
+          stderrTail = `${stderrTail}\n${text}`.slice(-4000)
           console.error(`[aiAgentUtility:${worker.pid ?? 'unknown'}] ${text}`)
           this.logger?.warn('AIAgentProcess', 'AI Agent utility stderr', {
             pid: worker.pid ?? null,
@@ -332,7 +334,8 @@ export class AgentProcessService {
         if (this.worker === worker) this.worker = null
         this.initPromise = null
         this.rejectAllPending(`agent utility process exited (pid=${pid ?? 'unknown'}, code=${code})`)
-        rejectInitOnce(new Error(`AI agent utility process 启动后立即退出，code=${code}`))
+        const stderrDetail = stderrTail.trim() ? `，stderr=${stderrTail.trim()}` : ''
+        rejectInitOnce(new Error(`AI agent utility process 启动后立即退出，code=${code}${stderrDetail}`))
         if (!this.shuttingDown) {
           console.warn(`[agentProcessService] utility process 退出 pid=${pid ?? 'unknown'} code=${code}，${RESTART_DELAY_MS}ms 后自动重启`)
           this.logger?.warn('AIAgentProcess', 'AI Agent utility process 退出，准备自动重启', {

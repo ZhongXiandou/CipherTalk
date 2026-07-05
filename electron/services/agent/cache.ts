@@ -79,6 +79,7 @@ function isReasoningEffortSet(effort?: AgentReasoningEffort): effort is Exclude<
 
 function toAnthropicEffort(effort: Exclude<AgentReasoningEffort, 'auto'>): 'low' | 'medium' | 'high' {
   if (effort === 'minimal') return 'low'
+  if (effort === 'xhigh') return 'high' // Anthropic 无 xhigh 档，封顶到 high
   return effort
 }
 
@@ -88,7 +89,8 @@ function toGoogleThinkingConfig(
 ): Record<string, unknown> | undefined {
   const normalizedModel = model.toLowerCase()
   if (normalizedModel.includes('gemini-3')) {
-    return { thinkingLevel: effort, includeThoughts: true }
+    // Gemini 3 的 thinkingLevel 只认 low/high，xhigh 封顶到 high
+    return { thinkingLevel: effort === 'xhigh' ? 'high' : effort, includeThoughts: true }
   }
   if (!normalizedModel.includes('gemini-2.5')) {
     return undefined
@@ -99,6 +101,7 @@ function toGoogleThinkingConfig(
     low: 2048,
     medium: 4096,
     high: 8192,
+    xhigh: 16384,
   }
   return { thinkingBudget: thinkingBudgetByEffort[effort], includeThoughts: true }
 }
@@ -111,6 +114,8 @@ export function buildProviderOptions(input: AgentRunInput, promptCacheKey: strin
     const option: Record<string, unknown> = {}
     if (isReasoningEffortSet(effort)) option.reasoningEffort = effort
     if (input.providerConfig.providerKind === 'openai-responses') {
+      // 让 OpenAI 返回思考摘要（推理模型才有内容，非推理模型会被忽略）；下游 engine 已透传 reasoning 块
+      option.reasoningSummary = 'auto'
       option.store = isOfficialOpenAIResponsesEndpoint(input)
       if (option.store) option.promptCacheKey = promptCacheKey
     }

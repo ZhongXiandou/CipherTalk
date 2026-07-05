@@ -3,10 +3,9 @@
  * 从 AgentPage.tsx 拆出，供主组件和 AgentSubAgentProgress 等复用。
  */
 import { Tooltip } from '@heroui/react'
-import { ChartColumn, Code, LayoutHeaderCellsLarge, Link, QuoteOpen } from '@gravity-ui/icons'
+import { QuoteOpen } from '@gravity-ui/icons'
 import { isToolUIPart, type UIMessage } from 'ai'
 import { Sources, SourcesContent, SourcesTrigger } from '@/components/ai-elements/sources'
-import { type MessageRenderActivity } from '@/components/ai-elements/message'
 import { Shimmer } from '@/components/ai-elements/shimmer'
 
 // ====== 计划模式控制标记 ======
@@ -64,7 +63,6 @@ export const TOOL_LABELS: Record<string, string> = {
   apply_memory_fix: '修复记忆',
   persona_control: '数字分身',
   auto_memory: '自动记忆',
-  final_review: '最终审核',
 }
 
 export type PersonaControlOutput = {
@@ -100,47 +98,6 @@ export function renderChainLabel(label: string, active: boolean) {
       {label}
     </Shimmer>
   )
-}
-
-export function renderOutputActivitySteps(activity: MessageRenderActivity, isStreaming: boolean) {
-  const steps: Array<{ key: string; icon: typeof ChartColumn; label: string; doneLabel: string; active: boolean }> = []
-  if (activity.hasChart || activity.pendingChart) {
-    steps.push({
-      key: 'chart',
-      icon: ChartColumn,
-      label: '正在生成图表',
-      doneLabel: '已生成图表',
-      active: isStreaming,
-    })
-  }
-  if (activity.hasTable || activity.pendingTable) {
-    steps.push({
-      key: 'table',
-      icon: LayoutHeaderCellsLarge,
-      label: '正在整理表格',
-      doneLabel: '已整理表格',
-      active: isStreaming,
-    })
-  }
-  if (activity.hasCode || activity.pendingCode) {
-    steps.push({
-      key: 'code',
-      icon: Code,
-      label: '正在生成代码块',
-      doneLabel: '已生成代码块',
-      active: isStreaming,
-    })
-  }
-  if (activity.hasLink || activity.pendingLink) {
-    steps.push({
-      key: 'link',
-      icon: Link,
-      label: '正在处理链接',
-      doneLabel: activity.linkCount > 0 ? `已处理链接 ${activity.linkCount} 条` : '已处理链接',
-      active: isStreaming && (activity.pendingLink || activity.hasLink),
-    })
-  }
-  return steps
 }
 
 export function formatElapsed(ms: number) {

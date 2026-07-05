@@ -131,6 +131,52 @@ export function CompactionMarker({ data }: { data: CompactionPartData }) {
   )
 }
 
+// 工具调用的原始参数/返回：默认收起，用户想看点开就有。数据大时截断，避免刷屏。
+const TOOL_IO_CHAR_CAP = 4000
+
+function formatToolValue(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'string') return value.trim()
+  try { return JSON.stringify(value, null, 2) } catch { return String(value) }
+}
+
+function ToolIOSection({ label, text }: { label: string; text: string }) {
+  if (!text) return null
+  const clipped = text.length > TOOL_IO_CHAR_CAP ? `${text.slice(0, TOOL_IO_CHAR_CAP)}\n…（已截断，共 ${text.length} 字）` : text
+  return (
+    <div className="mt-1.5">
+      <div className="mb-0.5 text-[11px] text-muted-foreground">{label}</div>
+      <pre className="max-h-64 overflow-auto whitespace-pre-wrap wrap-break-word rounded-(--agent-radius,12px) bg-muted/40 px-2 py-1.5 text-[11px] text-foreground leading-5">{clipped}</pre>
+    </div>
+  )
+}
+
+export function ToolIODetails({ input, output }: { input?: unknown; output?: unknown }) {
+  const [open, setOpen] = useState(false)
+  const inputText = formatToolValue(input)
+  const outputText = formatToolValue(output)
+  if (!inputText && !outputText) return null
+  return (
+    <div className="mt-1">
+      <button
+        aria-expanded={open}
+        className="flex items-center gap-1 text-muted-foreground text-[11px] hover:text-foreground"
+        onClick={() => setOpen((value) => !value)}
+        type="button"
+      >
+        <ChevronDown className={`size-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+        {open ? '收起调用详情' : '查看调用详情'}
+      </button>
+      {open && (
+        <>
+          <ToolIOSection label="参数" text={inputText} />
+          <ToolIOSection label="结果" text={outputText} />
+        </>
+      )}
+    </div>
+  )
+}
+
 // 进行中默认展开（让用户看到 AI 正在干啥），结束后自动收起；用户手动点过则尊重用户的选择。
 export function MessageChainOfThought({ active, children }: { active: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(active)

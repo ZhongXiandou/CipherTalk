@@ -986,7 +986,9 @@ const MessageTable = ({ children, className, node: _node, ..._props }: MessageTa
   const headerRow = head ? getTableRows(getElementChildren(head))[0] : undefined;
   const headerCells = headerRow ? getTableCells(headerRow, "th") : [];
   const bodyRows = body ? getTableRows(getElementChildren(body)) : getTableRows(children);
-  const canUseHeroTable = !isStreaming && headerCells.length > 0 && bodyRows.length > 0;
+  // 表格 markdown 一旦解析出「表头 + 至少一行」就直接渲染，不再干等整轮结束（最终审核/记忆抽取会把
+  // isStreaming 拖住好几秒，表格却早就成型了）。仍在拼装（只有表头没有数据行）时才退回骨架占位。
+  const canUseHeroTable = headerCells.length > 0 && bodyRows.length > 0;
 
   const handleCopy = async () => {
     if (!hasTableData || typeof window === "undefined" || !navigator?.clipboard?.writeText) return;
@@ -1087,12 +1089,6 @@ const MessageTable = ({ children, className, node: _node, ..._props }: MessageTa
           <StreamingTablePlaceholder />
         ) : null}
       </div>
-      {isStreaming && (
-        <div className="mt-2 flex items-center gap-2 rounded-(--agent-radius,12px) border border-border bg-muted/30 px-3 py-2 text-muted-foreground text-xs">
-          <LayoutHeaderCellsLarge className="size-3.5" />
-          <span>正在整理表格…</span>
-        </div>
-      )}
     </div>
   );
 };
@@ -1224,10 +1220,12 @@ export function MessageStreamingIndicator({ className, ...props }: HTMLAttribute
 
 // 流式新增文字逐字淡入（中文没有空格分词，按字符切分）。
 // 插件自动跳过 code/pre/svg/math，且已渲染过的字符不会重复动画。
+// 后端 smoothStream 已经按 ~10ms/词的节奏匀速吐字，这里的淡入只是锦上添花的轻微视觉效果，
+// duration/stagger 必须远小于后端节奏，否则会跟后端的节奏叠加，显得字比实际到达慢很多。
 const STREAMING_TEXT_ANIMATION: AnimateOptions = {
   sep: "char",
-  duration: 150,
-  stagger: 10,
+  duration: 40,
+  stagger: 2,
 };
 
 export const MessageResponse = memo(

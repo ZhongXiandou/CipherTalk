@@ -162,6 +162,42 @@ function verifySharpVipsPacked(context) {
     );
 }
 
+// 构建期硬闸：release workflow 使用 npm ci --ignore-scripts，必须显式补齐 ffmpeg-static 的平台二进制。
+// 否则包里只有 ffmpeg-static 的 JS 包装文件，导出/语音/转码会在用户机器上退到系统 PATH。
+function verifyFfmpegStaticPacked(context) {
+    const platform = context.electronPlatformName;
+    if (platform !== 'win32' && platform !== 'darwin') return;
+
+    const binaryName = platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+    const sourceBinary = path.join(__dirname, '..', 'node_modules', 'ffmpeg-static', binaryName);
+    if (!fs.existsSync(sourceBinary) || fs.statSync(sourceBinary).size === 0) {
+        throw new Error(
+            `[afterPack] ffmpeg-static 缺少 ${binaryName}：源码 node_modules/ffmpeg-static 下没有平台二进制。` +
+            `release workflow 使用 npm ci --ignore-scripts，需在构建前运行 node node_modules/ffmpeg-static/install.js。`
+        );
+    }
+
+    const productName = context.packager?.appInfo?.productFilename || 'CipherTalk';
+    const resourceRoots = uniqueExistingDirs([
+        path.join(context.appOutDir, 'resources'),
+        path.join(context.appOutDir, 'Contents', 'Resources'),
+        path.join(context.appOutDir, `${productName}.app`, 'Contents', 'Resources')
+    ]);
+
+    for (const resourceRoot of resourceRoots) {
+        const packed = path.join(resourceRoot, 'app.asar.unpacked', 'node_modules', 'ffmpeg-static', binaryName);
+        if (fs.existsSync(packed) && fs.statSync(packed).size > 0) {
+            console.log(`[afterPack] ffmpeg-static 已打包: ${packed}`);
+            return;
+        }
+    }
+
+    throw new Error(
+        `[afterPack] ffmpeg-static 未打进发布包：期望 app.asar.unpacked/node_modules/ffmpeg-static/${binaryName}。` +
+        `请检查 build.files / asarUnpack 是否误裁剪 ffmpeg-static。`
+    );
+}
+
 exports.default = async function (context) {
     // context.appOutDir 是打包后的临时解压目录
     const localesDir = path.join(context.appOutDir, 'locales');
@@ -191,6 +227,8 @@ exports.default = async function (context) {
     verifyImageNativePacked(context);
 
     verifySharpVipsPacked(context);
+
+    verifyFfmpegStaticPacked(context);
 
     if (context.electronPlatformName === 'darwin') {
         const productName = context.packager?.appInfo?.productFilename || 'CipherTalk';

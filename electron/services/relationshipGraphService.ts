@@ -16,6 +16,7 @@ import type {
   RelationshipGraphNode,
   RelationshipGraphOptions,
   RelationshipGraphPathResult,
+  RelationshipGraphPartialResult,
   RelationshipGraphRelationType,
   RelationshipGraphResult,
 } from '../../src/types/models'
@@ -44,6 +45,10 @@ type EdgeAccumulator = {
   evidenceSessionIds: Set<string>
 }
 
+type FinalizeGraphOptions = {
+  communityMode?: 'louvain' | 'components'
+}
+
 const CACHE_DB_NAME = 'relationship_graph.db'
 const CACHE_KEY = 'default'
 const SCHEMA_VERSION = '1'
@@ -52,6 +57,8 @@ const GROUP_MESSAGE_PAGE_SIZE = 500
 const MAX_GROUP_MESSAGES = 3000
 const MAX_GROUP_PAIR_CANDIDATES = 56
 const GROUP_INTERACTION_WINDOW_SECONDS = 10 * 60
+const PARTIAL_GROUP_BATCH_SIZE = 5
+const PARTIAL_MIN_INTERVAL_MS = 800
 
 function normalizeSeconds(value?: number): number | undefined {
   const n = Number(value || 0)
@@ -120,6 +127,17 @@ class RelationshipGraphService extends EventEmitter {
     this.emit('progress', progress)
   }
 
+  private emitPartial(partial: RelationshipGraphPartialResult): void {
+    this.emit('partial', partial)
+  }
+
+  private emitBuildError(error: unknown): void {
+    this.emitProgress({
+      stage: 'error',
+      message: error instanceof Error ? error.message : String(error),
+    })
+  }
+
   private getCacheDir(): string {
     const configured = String(this.configService.get('cachePath') || '').trim()
     const dir = configured || join(getUserDataPath(), 'cache')
@@ -167,10 +185,52 @@ class RelationshipGraphService extends EventEmitter {
       .run(CACHE_KEY, graph.builtAt, JSON.stringify({ nodes: graph.nodes, links: graph.links }))
   }
 
+  private toPartialResult(graph: CachedGraph, progress: RelationshipGraphBuildProgress, preview: boolean): RelationshipGraphPartialResult {
+    const nodes = graph.nodes.map(node => ({ ...node }))
+    const links = graph.links.map(link => ({
+      ...link,
+      evidenceSessionIds: [...(link.evidenceSessionIds || [])],
+    }))
+    const communities = this.buildCommunities(nodes)
+
+    return {
+      success: true,
+      preview,
+      stage: progress.stage,
+      message: progress.message,
+      current: progress.current,
+      total: progress.total,
+      nodes,
+      links,
+      communities,
+      rankings: {
+        central: [...nodes].sort((a, b) => b.weightedDegree - a.weightedDegree).slice(0, 24),
+        isolated: nodes.filter(node => node.degree === 0).sort((a, b) => (b.lastActiveTime || 0) - (a.lastActiveTime || 0)).slice(0, 24),
+        active: [...nodes].sort((a, b) => (b.lastActiveTime || 0) - (a.lastActiveTime || 0)).slice(0, 24),
+      },
+      similar: {},
+      stats: {
+        nodeCount: nodes.length,
+        linkCount: links.length,
+        directChatCount: links.filter(link => link.type === 'direct_chat').length,
+        sameGroupCount: links.filter(link => link.type === 'same_group').length,
+        groupInteractionCount: links.filter(link => link.type === 'group_interaction').length,
+        isolatedCount: nodes.filter(node => node.degree === 0).length,
+        communityCount: communities.length,
+        builtAt: graph.builtAt,
+        stale: preview || this.stale,
+      },
+    }
+  }
+
   async getGraph(options: RelationshipGraphOptions = {}): Promise<RelationshipGraphResult> {
     try {
       let graph = this.loadCachedGraph()
-      if (!graph || this.stale) {
+      if (graph && this.stale) {
+        void this.rebuildBaseGraph(false).catch((e) => this.emitBuildError(e))
+        return this.toResult(graph, options)
+      }
+      if (!graph) {
         graph = await this.rebuildBaseGraph()
       }
       return this.toResult(graph, options)
@@ -310,6 +370,16 @@ class RelationshipGraphService extends EventEmitter {
       if (amount.evidenceSessionId) edge.evidenceSessionIds.add(amount.evidenceSessionId)
     }
 
+    let lastPartialAt = 0
+    const emitPreview = (progress: RelationshipGraphBuildProgress, force = false) => {
+      if (edges.size === 0) return
+      const now = Date.now()
+      if (!force && now - lastPartialAt < PARTIAL_MIN_INTERVAL_MS) return
+      const previewGraph = this.finalizeGraph(nodes, edges, { communityMode: 'components' })
+      this.emitPartial(this.toPartialResult(previewGraph, progress, true))
+      lastPartialAt = now
+    }
+
     addNode(myInfo.userInfo.wxid, {
       label: myInfo.userInfo.nickName || myInfo.userInfo.alias || '我',
       avatarUrl: myInfo.userInfo.avatarUrl,
@@ -358,15 +428,24 @@ class RelationshipGraphService extends EventEmitter {
       })
 
       if (sessionIndex % 100 === 0) {
-        this.emitProgress({ stage: 'sessions', message: `正在计算私聊关系 ${sessionIndex}/${sessions.length}`, current: sessionIndex, total: sessions.length })
+        const progress: RelationshipGraphBuildProgress = { stage: 'sessions', message: `正在计算私聊关系 ${sessionIndex}/${sessions.length}`, current: sessionIndex, total: sessions.length }
+        this.emitProgress(progress)
+        emitPreview(progress)
       }
     }
+    emitPreview({ stage: 'sessions', message: '私聊关系预览已生成，正在补充群聊关系', current: sessionIndex, total: sessions.length }, true)
 
     this.emitProgress({ stage: 'groups', message: '正在计算群聊共同关系', current: 0, total: groupSessions.length })
     for (let i = 0; i < groupSessions.length; i += 1) {
       const group = groupSessions[i]
       await this.addGroupEdges(group, contactMap, addNode, addEdge)
-      this.emitProgress({ stage: 'groups', message: `正在计算群聊共同关系 ${i + 1}/${groupSessions.length}`, current: i + 1, total: groupSessions.length })
+      const progress: RelationshipGraphBuildProgress = { stage: 'groups', message: `正在计算群聊共同关系 ${i + 1}/${groupSessions.length}`, current: i + 1, total: groupSessions.length }
+      this.emitProgress(progress)
+      if ((i + 1) % PARTIAL_GROUP_BATCH_SIZE === 0 || i === groupSessions.length - 1) {
+        emitPreview(progress, i === groupSessions.length - 1)
+      } else {
+        emitPreview(progress)
+      }
     }
 
     this.emitProgress({ stage: 'analyzing', message: '正在分析社群和中心性' })
@@ -374,7 +453,9 @@ class RelationshipGraphService extends EventEmitter {
     this.emitProgress({ stage: 'caching', message: '正在写入关系网络缓存' })
     this.saveCachedGraph(graph)
     this.stale = false
-    this.emitProgress({ stage: 'done', message: '关系网络构建完成', current: graph.nodes.length, total: graph.nodes.length })
+    const doneProgress: RelationshipGraphBuildProgress = { stage: 'done', message: '关系网络构建完成', current: graph.nodes.length, total: graph.nodes.length }
+    this.emitPartial(this.toPartialResult(graph, doneProgress, false))
+    this.emitProgress(doneProgress)
     return graph
   }
 
@@ -484,7 +565,7 @@ class RelationshipGraphService extends EventEmitter {
     }
   }
 
-  private finalizeGraph(nodes: Map<string, NodeDraft>, edges: Map<string, EdgeAccumulator>): CachedGraph {
+  private finalizeGraph(nodes: Map<string, NodeDraft>, edges: Map<string, EdgeAccumulator>, options: FinalizeGraphOptions = {}): CachedGraph {
     const links: RelationshipGraphLink[] = Array.from(edges.values()).map(edge => ({
       source: edge.source,
       target: edge.target,
@@ -503,7 +584,11 @@ class RelationshipGraphService extends EventEmitter {
     })) as RelationshipGraphNode[]
 
     this.assignNodeMetrics(nodeList, links)
-    this.assignCommunities(nodeList, links)
+    if (options.communityMode === 'components') {
+      this.assignComponentCommunities(nodeList, links)
+    } else {
+      this.assignCommunities(nodeList, links)
+    }
 
     return {
       builtAt: Date.now(),
@@ -553,6 +638,7 @@ class RelationshipGraphService extends EventEmitter {
 
   private assignComponentCommunities(nodes: RelationshipGraphNode[], links: RelationshipGraphLink[]): void {
     const adjacency = new Map<string, string[]>()
+    const nodeMap = new Map(nodes.map(node => [node.id, node]))
     for (const node of nodes) adjacency.set(node.id, [])
     for (const link of links) {
       const source = String(link.source)
@@ -569,7 +655,7 @@ class RelationshipGraphService extends EventEmitter {
       visited.add(node.id)
       while (stack.length) {
         const current = stack.pop()!
-        const currentNode = nodes.find(item => item.id === current)
+        const currentNode = nodeMap.get(current)
         if (currentNode) currentNode.communityId = id
         for (const next of adjacency.get(current) || []) {
           if (visited.has(next)) continue

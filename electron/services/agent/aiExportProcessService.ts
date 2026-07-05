@@ -155,6 +155,7 @@ export class AiExportProcessService {
 
       this.worker = worker
       let readyFired = false
+      let stderrTail = ''
       const rejectInitOnce = (err: Error) => {
         if (!readyFired) {
           readyFired = true
@@ -174,7 +175,10 @@ export class AiExportProcessService {
       })
       worker.stderr?.on('data', (chunk: Buffer) => {
         const text = chunk.toString().trim()
-        if (text) this.logger?.warn('AIExportProcess', 'AI Export utility stderr', { pid: worker.pid ?? null, text })
+        if (text) {
+          stderrTail = `${stderrTail}\n${text}`.slice(-4000)
+          this.logger?.warn('AIExportProcess', 'AI Export utility stderr', { pid: worker.pid ?? null, text })
+        }
       })
 
       worker.on('message', (msg: any) => {
@@ -244,7 +248,8 @@ export class AiExportProcessService {
         if (!this.shuttingDown) {
           this.rejectAllPending(`AI export utility process exited (pid=${pid ?? 'unknown'}, code=${code})`)
         }
-        rejectInitOnce(new Error(`AI export utility process 启动后立即退出，code=${code}`))
+        const stderrDetail = stderrTail.trim() ? `，stderr=${stderrTail.trim()}` : ''
+        rejectInitOnce(new Error(`AI export utility process 启动后立即退出，code=${code}${stderrDetail}`))
       })
     })
 
@@ -354,4 +359,3 @@ export class AiExportProcessService {
 }
 
 export const aiExportProcessService = new AiExportProcessService()
-

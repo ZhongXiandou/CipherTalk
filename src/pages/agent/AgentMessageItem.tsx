@@ -20,7 +20,6 @@ import {
   ChainOfThoughtStep,
 } from '@/components/ai-elements/chain-of-thought'
 import {
-  analyzeMessageRenderActivity,
   Message,
   MessageAttachment,
   MessageAttachments,
@@ -43,7 +42,6 @@ import {
   planRequiresDelegateAnalysis,
   pushBadge,
   renderChainLabel,
-  renderOutputActivitySteps,
   stripPlanControlMarkers,
   toolPartProgressKey,
   type AgentChainPart,
@@ -52,7 +50,7 @@ import {
 import { readSubAgentProgressFromMessage, type AgentMessageMetadata } from './agentConversationHelpers'
 import { messageTextOf, MessageUsageStats } from './AgentUsageStats'
 import { SubAgentProgressPanel } from './AgentSubAgentProgress'
-import { CompactionMarker, MessageChainOfThought, PlanCard, UserMessageActions, type CompactionPartData } from './AgentMessageBlocks'
+import { CompactionMarker, MessageChainOfThought, PlanCard, ToolIODetails, UserMessageActions, type CompactionPartData } from './AgentMessageBlocks'
 
 export type AgentImagePreviewPayload = {
   src: string
@@ -120,10 +118,6 @@ function AgentMessageItemImpl({
   )
   const assistantDisplayText = isPlanMessage ? stripPlanControlMarkers(assistantText) : assistantText
   const planNeedsDelegateAnalysis = isPlanMessage && planRequiresDelegateAnalysis(assistantText)
-  const outputActivity = message.role === 'assistant'
-    ? analyzeMessageRenderActivity(assistantDisplayText, assistantTextStreaming)
-    : null
-  const outputActivitySteps = outputActivity ? renderOutputActivitySteps(outputActivity, assistantTextStreaming) : []
   const userDisplay = message.role === 'user' ? getUserMessageDisplay(message.parts) : null
   const persistedSubAgentEvents = message.role === 'assistant' ? readSubAgentProgressFromMessage(message) : []
   const subAgentEventsForMessage = message.role === 'assistant'
@@ -250,6 +244,12 @@ function AgentMessageItemImpl({
             {toolName === 'delegate_analysis' && subAgentEventsForMessage.length > 0 && (
               <SubAgentProgressPanel events={subAgentEventsForMessage} tasks={delegateTasks} />
             )}
+            {toolName !== 'delegate_analysis' && (
+              <ToolIODetails
+                input={part.input}
+                output={part.state === 'output-available' ? part.output : undefined}
+              />
+            )}
           </ChainOfThoughtStep>
         )
       })}
@@ -319,21 +319,6 @@ function AgentMessageItemImpl({
             }
             return null
           })}
-          {outputActivitySteps.length > 0 && (
-            <MessageChainOfThought active={chainActive}>
-              {outputActivitySteps.map((step) => {
-                const Icon = step.icon
-                return (
-                  <ChainOfThoughtStep
-                    icon={Icon}
-                    key={`output-${step.key}`}
-                    label={renderChainLabel(step.active ? step.label : step.doneLabel, step.active)}
-                    status={step.active ? 'active' : 'complete'}
-                  />
-                )
-              })}
-            </MessageChainOfThought>
-          )}
           {assistantTextStreaming && <MessageStreamingIndicator />}
           {message.role === 'assistant' && (
             <MessageSources items={extractSources(message.parts)} nameOf={sessionNameOf} />

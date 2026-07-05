@@ -6,7 +6,7 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai'
 
 export type AgentScope = { kind: 'global' } | { kind: 'session'; sessionId: string; displayName?: string }
-export type AgentReasoningEffort = 'auto' | 'minimal' | 'low' | 'medium' | 'high'
+export type AgentReasoningEffort = 'auto' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 export type AgentToolProfile = 'chat' | 'code' | 'hybrid'
 export type CodeWorkspaceApprovalPolicy = 'on-request' | 'risk-based' | 'full-access'
 export type CodeWorkspaceRef = {

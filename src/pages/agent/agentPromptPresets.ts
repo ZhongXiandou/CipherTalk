@@ -188,11 +188,12 @@ export const PROMPT_PRESET_GROUPS = [
 ]
 
 export const REASONING_EFFORT_OPTIONS: Array<{ value: AgentReasoningEffort; label: string }> = [
-  { value: 'auto', label: '思考：自动' },
-  { value: 'minimal', label: '思考：最少' },
-  { value: 'low', label: '思考：低' },
-  { value: 'medium', label: '思考：中' },
-  { value: 'high', label: '思考：高' },
+  { value: 'auto', label: '自动' },
+  { value: 'minimal', label: '最少' },
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+  { value: 'xhigh', label: '超高' },
 ]
 
 export const CODE_WORKSPACE_APPROVAL_POLICY_OPTIONS: Array<{

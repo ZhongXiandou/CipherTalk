@@ -23,7 +23,7 @@ export interface AgentProviderConfig {
   contextWindow?: number
 }
 
-export type AgentReasoningEffort = 'auto' | 'minimal' | 'low' | 'medium' | 'high'
+export type AgentReasoningEffort = 'auto' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 
 export interface AgentProviderConfigOverride {
   provider?: string

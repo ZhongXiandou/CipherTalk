@@ -8,6 +8,10 @@ export function registerRelationshipGraphHandlers(ctx: MainProcessContext): void
     ctx.broadcastToWindows('relationshipGraph:progress', progress)
   })
 
+  relationshipGraphService.on('partial', (partial) => {
+    ctx.broadcastToWindows('relationshipGraph:partial', partial)
+  })
+
   ipcMain.handle('relationshipGraph:getGraph', async (_, options?: RelationshipGraphOptions) => {
     return relationshipGraphService.getGraph(options || {})
   })

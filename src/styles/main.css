@@ -239,74 +239,53 @@ img {
   -webkit-backdrop-filter: url(#agent-glass-36) blur(1px) brightness(1.06) saturate(1.5);
 }
 
-.pet-glass-filter-defs {
-  position: absolute;
-  width: 0;
-  height: 0;
-  pointer-events: none;
-}
-
 .pet-notice {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.018) 48%, rgba(0, 0, 0, 0.10)),
-    rgba(18, 18, 22, 0.54);
-  border: 0;
-  box-shadow:
-    0 12px 30px rgba(0, 0, 0, 0.26),
-    0 22px 54px rgba(0, 0, 0, 0.16),
-    inset 0 -10px 24px rgba(0, 0, 0, 0.18),
-    inset 0 -1px 4px 1px rgba(255, 255, 255, 0.42);
-  backdrop-filter: url(#pet-window-liquid-refraction) blur(5px) brightness(1.04) saturate(1.06);
-  -webkit-backdrop-filter: url(#pet-window-liquid-refraction) blur(5px) brightness(1.04) saturate(1.06);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.26);
-  transition:
-    background 0.22s ease,
-    box-shadow 0.22s ease,
-    transform 0.18s ease;
+  color: #111827;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  text-shadow: none;
+  transition: border-color 0.18s ease;
 }
 
 .pet-notice::before,
 .pet-notice::after {
-  position: absolute;
-  inset: 0;
-  content: '';
-  pointer-events: none;
-  border-radius: inherit;
-  z-index: 0;
+  display: none;
 }
 
-.pet-notice::before {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.10), transparent 38%, rgba(0, 0, 0, 0.08) 100%);
-  opacity: 0.26;
+.pet-notice :is(.text-white, .text-white\/95, .text-white\/90, .text-white\/85, .text-white\/80) {
+  color: #111827;
 }
 
-.pet-notice::after {
-  background:
-    radial-gradient(ellipse 78% 110% at 50% -44%, rgba(255, 255, 255, 0.18), transparent 50%),
-    radial-gradient(ellipse 88% 94% at 50% 120%, rgba(0, 0, 0, 0.22), transparent 54%);
-  filter: blur(0.5px);
-  opacity: 0.34;
+.pet-notice :is(.text-white\/70, .text-white\/60) {
+  color: #64748b;
 }
 
-.pet-notice > * {
-  position: relative;
-  z-index: 1;
+.pet-notice button {
+  color: #64748b;
+}
+
+.pet-notice button:hover {
+  color: #111827;
+}
+
+.pet-notice input {
+  color: #111827;
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.14);
+}
+
+.pet-notice input::placeholder {
+  color: rgba(100, 116, 139, 0.78);
 }
 
 .pet-notice:hover {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.095), rgba(255, 255, 255, 0.025) 48%, rgba(0, 0, 0, 0.11)),
-    rgba(18, 18, 22, 0.58);
-  box-shadow:
-    0 14px 34px rgba(0, 0, 0, 0.29),
-    0 24px 58px rgba(0, 0, 0, 0.18),
-    inset 0 -10px 24px rgba(0, 0, 0, 0.19),
-    inset 0 -1px 4px 1px rgba(255, 255, 255, 0.48);
-  transform: translateY(-1px);
+  border-color: rgba(15, 23, 42, 0.22);
 }
 
 /* 按钮基础样式 */

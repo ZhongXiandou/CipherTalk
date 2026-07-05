@@ -766,6 +766,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const listener = (_: any, progress: any) => callback(progress)
       ipcRenderer.on('relationshipGraph:progress', listener)
       return () => ipcRenderer.removeListener('relationshipGraph:progress', listener)
+    },
+    onPartial: (callback: (partial: any) => void) => {
+      const listener = (_: any, partial: any) => callback(partial)
+      ipcRenderer.on('relationshipGraph:partial', listener)
+      return () => ipcRenderer.removeListener('relationshipGraph:partial', listener)
     }
   },
 

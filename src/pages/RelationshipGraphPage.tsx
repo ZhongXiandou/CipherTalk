@@ -5,10 +5,12 @@ import { Avatar, Button, Chip, Drawer, Label, Popover, ScrollShadow, SearchField
 import { ArrowsRotateLeft, ChartBar, Link, Magnifier, NodesRight, Person, Sliders } from '@gravity-ui/icons'
 import type {
   RelationshipGraphBuildProgress,
+  RelationshipGraphCommunity,
   RelationshipGraphLink,
   RelationshipGraphNode,
   RelationshipGraphOptions,
   RelationshipGraphPathResult,
+  RelationshipGraphPartialResult,
   RelationshipGraphRelationType,
   RelationshipGraphResult,
 } from '../types/models'
@@ -57,14 +59,11 @@ const particleHaloGeometry = new THREE.SphereGeometry(1, 16, 10)
 const TOOLBAR_GLASS_SHAPE: GlassShapeOptions = {
   halfX: 0.5,
   halfY: 0.5,
-  radius: 0.12,
-  edge: 0.04,
-  feather: 0.36,
-  strength: 1.8,
-  surface: 3.2,
-  surfaceScale: 2.55,
-  uniformSurface: true,
-  edgeStrength: 0,
+  radius: 0.2,
+  edge: 0.08,
+  feather: 0.62,
+  strength: 1.18,
+  edgeStrength: 0.9,
 }
 
 const toSliderNumber = (value: number | number[]): number => Array.isArray(value) ? value[0] ?? 0 : value
@@ -278,6 +277,167 @@ function dateToSeconds(value: string, endOfDay = false): number | undefined {
   return Number.isFinite(time) ? time : undefined
 }
 
+function normalizeGraphSeconds(value?: number): number | undefined {
+  const n = Number(value || 0)
+  if (!Number.isFinite(n) || n <= 0) return undefined
+  return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n)
+}
+
+function assignClientNodeMetrics(nodes: RelationshipGraphNode[], links: RelationshipGraphLink[]): void {
+  const nodeMap = new Map(nodes.map(node => [node.id, node]))
+  for (const node of nodes) {
+    node.degree = 0
+    node.weightedDegree = 0
+  }
+  for (const link of links) {
+    const source = nodeMap.get(String(link.source))
+    const target = nodeMap.get(String(link.target))
+    if (!source || !target) continue
+    source.degree += 1
+    target.degree += 1
+    source.weightedDegree = Number((source.weightedDegree + Number(link.weight || 0)).toFixed(3))
+    target.weightedDegree = Number((target.weightedDegree + Number(link.weight || 0)).toFixed(3))
+    const last = normalizeGraphSeconds(link.lastActiveTime)
+    if (last) {
+      source.lastActiveTime = Math.max(Number(source.lastActiveTime || 0), last)
+      target.lastActiveTime = Math.max(Number(target.lastActiveTime || 0), last)
+    }
+  }
+}
+
+function buildClientCommunities(nodes: RelationshipGraphNode[]): RelationshipGraphCommunity[] {
+  const map = new Map<string, RelationshipGraphCommunity>()
+  for (const node of nodes) {
+    const id = node.communityId || 'c0'
+    const item = map.get(id) || { id, label: `社群 ${id.replace(/^c/, '')}`, size: 0, weight: 0 }
+    item.size += 1
+    item.weight = Number((item.weight + Number(node.weightedDegree || 0)).toFixed(3))
+    map.set(id, item)
+  }
+  return Array.from(map.values()).sort((a, b) => b.size - a.size)
+}
+
+function buildClientSimilar(nodes: RelationshipGraphNode[], links: RelationshipGraphLink[]): Record<string, RelationshipGraphNode[]> {
+  const nodeMap = new Map(nodes.map(node => [node.id, node]))
+  const neighbors = new Map<string, Set<string>>()
+  for (const node of nodes) neighbors.set(node.id, new Set())
+  for (const link of links) {
+    const source = String(link.source)
+    const target = String(link.target)
+    neighbors.get(source)?.add(target)
+    neighbors.get(target)?.add(source)
+  }
+
+  const result: Record<string, RelationshipGraphNode[]> = {}
+  const anchors = [...nodes].sort((a, b) => b.weightedDegree - a.weightedDegree).slice(0, 80)
+  for (const anchor of anchors) {
+    const anchorNeighbors = neighbors.get(anchor.id) || new Set()
+    if (anchorNeighbors.size === 0) continue
+    const scored = nodes
+      .filter(node => node.id !== anchor.id)
+      .map(node => {
+        const otherNeighbors = neighbors.get(node.id) || new Set()
+        let intersection = 0
+        for (const id of anchorNeighbors) if (otherNeighbors.has(id)) intersection += 1
+        const union = new Set([...anchorNeighbors, ...otherNeighbors]).size || 1
+        return { node, score: intersection / union }
+      })
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score || b.node.weightedDegree - a.node.weightedDegree)
+      .slice(0, 6)
+      .map(item => nodeMap.get(item.node.id)!)
+    if (scored.length) result[anchor.id] = scored
+  }
+  return result
+}
+
+function filterRelationshipGraphResult(input: RelationshipGraphResult, options: RelationshipGraphOptions): RelationshipGraphResult {
+  if (!input.success || !input.nodes || !input.links) return input
+
+  const isPreview = Boolean((input as RelationshipGraphPartialResult).preview)
+  const relationTypes = new Set(options.relationTypes || ['direct_chat', 'same_group', 'group_interaction'])
+  const startTime = normalizeGraphSeconds(options.startTime)
+  const endTime = normalizeGraphSeconds(options.endTime)
+  const minWeight = Math.max(0, Number(options.minWeight || 0))
+  const query = String(options.query || '').trim().toLowerCase()
+
+  let links: RelationshipGraphLink[] = input.links
+    .map(link => ({
+      ...link,
+      source: endpointId(link.source as string | GraphNodeObject),
+      target: endpointId(link.target as string | GraphNodeObject),
+      evidenceSessionIds: [...(link.evidenceSessionIds || [])],
+    }))
+    .filter(link => {
+      if (!relationTypes.has(link.type)) return false
+      if (Number(link.weight || 0) < minWeight) return false
+      const last = normalizeGraphSeconds(link.lastActiveTime)
+      if (startTime && (!last || last < startTime)) return false
+      if (endTime && (!last || last > endTime)) return false
+      return true
+    })
+
+  const connectedIds = new Set<string>()
+  for (const link of links) {
+    connectedIds.add(String(link.source))
+    connectedIds.add(String(link.target))
+  }
+
+  let nodes = input.nodes
+    .map(node => ({ ...node }))
+    .filter(node => options.includeIsolated !== false || connectedIds.has(node.id))
+
+  if (options.communityId) {
+    const allowed = new Set(nodes.filter(node => node.communityId === options.communityId).map(node => node.id))
+    nodes = nodes.filter(node => allowed.has(node.id))
+    links = links.filter(link => allowed.has(String(link.source)) && allowed.has(String(link.target)))
+  }
+
+  if (query) {
+    const matching = new Set(nodes
+      .filter(node => node.label.toLowerCase().includes(query) || node.id.toLowerCase().includes(query))
+      .map(node => node.id))
+    const expanded = new Set(matching)
+    for (const link of links) {
+      const source = String(link.source)
+      const target = String(link.target)
+      if (matching.has(source)) expanded.add(target)
+      if (matching.has(target)) expanded.add(source)
+    }
+    nodes = nodes.filter(node => expanded.has(node.id))
+    links = links.filter(link => expanded.has(String(link.source)) && expanded.has(String(link.target)))
+  }
+
+  const nodeIds = new Set(nodes.map(node => node.id))
+  links = links.filter(link => nodeIds.has(String(link.source)) && nodeIds.has(String(link.target)))
+  assignClientNodeMetrics(nodes, links)
+  const communities = buildClientCommunities(nodes)
+
+  return {
+    ...input,
+    nodes,
+    links,
+    communities,
+    rankings: {
+      central: [...nodes].sort((a, b) => b.weightedDegree - a.weightedDegree).slice(0, 24),
+      isolated: nodes.filter(node => node.degree === 0).sort((a, b) => (b.lastActiveTime || 0) - (a.lastActiveTime || 0)).slice(0, 24),
+      active: [...nodes].sort((a, b) => (b.lastActiveTime || 0) - (a.lastActiveTime || 0)).slice(0, 24),
+    },
+    similar: isPreview ? {} : buildClientSimilar(nodes, links),
+    stats: {
+      nodeCount: nodes.length,
+      linkCount: links.length,
+      directChatCount: links.filter(link => link.type === 'direct_chat').length,
+      sameGroupCount: links.filter(link => link.type === 'same_group').length,
+      groupInteractionCount: links.filter(link => link.type === 'group_interaction').length,
+      isolatedCount: nodes.filter(node => node.degree === 0).length,
+      communityCount: communities.length,
+      builtAt: input.stats?.builtAt || Date.now(),
+      stale: input.stats?.stale ?? false,
+    },
+  }
+}
+
 function makeNodeSprite(node: RelationshipGraphNode): THREE.Sprite {
   const cacheKey = `${node.id}:${node.avatarUrl || ''}:${node.label}`
   const cached = spriteCache.get(cacheKey)
@@ -358,10 +518,12 @@ function RelationshipGraphPage() {
   const graphContainerRef = useRef<HTMLElement | null>(null)
   const flowParticlesRef = useRef<FlowParticleStore | null>(null)
   const toolbarRef = useRef<HTMLDivElement | null>(null)
+  const partialResultRef = useRef<RelationshipGraphPartialResult | null>(null)
   const [toolbarGlassId] = useState(() => `relationship-toolbar-glass-${Math.random().toString(36).slice(2, 9)}`)
   const [toolbarGlassMap, setToolbarGlassMap] = useState<GlassFilterMap | null>(null)
   const [result, setResult] = useState<RelationshipGraphResult | null>(null)
   const [loading, setLoading] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
   const [progress, setProgress] = useState<RelationshipGraphBuildProgress | null>(null)
   const [graphSize, setGraphSize] = useState({ width: 1, height: 1 })
   const [error, setError] = useState('')
@@ -387,26 +549,58 @@ function RelationshipGraphPage() {
     startTime: dateToSeconds(startDate),
     endTime: dateToSeconds(endDate, true),
   }), [endDate, includeIsolated, minWeight, query, relationTypes, startDate])
+  const optionsRef = useRef(options)
+
+  useEffect(() => {
+    optionsRef.current = options
+    if (partialResultRef.current) {
+      setResult(filterRelationshipGraphResult(partialResultRef.current, options))
+    }
+  }, [options])
 
   const loadGraph = useCallback(async (force = false) => {
     setLoading(true)
+    setProgress(null)
     setError('')
     setPathResult(null)
     try {
       const next = force
         ? await window.electronAPI.relationshipGraph.rebuild(options)
         : await window.electronAPI.relationshipGraph.getGraph(options)
+      if (!next.stats?.stale) {
+        partialResultRef.current = null
+      }
+      setPreviewing(Boolean(next.stats?.stale))
       setResult(next)
       if (!next.success) setError(next.error || '关系网络加载失败')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      setPreviewing(false)
     } finally {
       setLoading(false)
     }
   }, [options])
 
   useEffect(() => {
-    const off = window.electronAPI.relationshipGraph.onProgress(setProgress)
+    const off = window.electronAPI.relationshipGraph.onProgress((next) => {
+      setProgress(next)
+      if (next.stage === 'done' || next.stage === 'error') setPreviewing(false)
+    })
+    return off
+  }, [])
+
+  useEffect(() => {
+    const off = window.electronAPI.relationshipGraph.onPartial((partial) => {
+      partialResultRef.current = partial
+      setPreviewing(partial.preview)
+      if (partial.success) {
+        setError('')
+        setResult(filterRelationshipGraphResult(partial, optionsRef.current))
+      } else {
+        setError(partial.error || '关系网络加载失败')
+      }
+      if (!partial.preview) setLoading(false)
+    })
     return off
   }, [])
 
@@ -485,6 +679,13 @@ function RelationshipGraphPage() {
       links,
     }
   }, [includeIsolated, pathResult?.success, query, result?.links, result?.nodes])
+  const graphBusy = loading || previewing
+  const graphBusyMessage = progress?.message || (previewing ? '正在后台更新关系网络' : '正在加载关系网络')
+  const renderNote = previewing && visibleGraph.nodes.length > 0
+    ? '预览中，群聊关系仍在补充'
+    : result?.links && result.links.length > visibleGraph.links.length
+      ? `已渲染最强 ${formatCount(visibleGraph.links.length)} / ${formatCount(result.links.length)} 条关系`
+      : ''
 
   useEffect(() => {
     if (visibleGraph.nodes.length === 0) return
@@ -635,8 +836,8 @@ function RelationshipGraphPage() {
 
   const toolbarGlassStyle = toolbarGlassMap
     ? {
-        backdropFilter: `url(#${toolbarGlassId}) blur(.35px) saturate(190%) brightness(1.07)`,
-        WebkitBackdropFilter: `url(#${toolbarGlassId}) blur(.35px) saturate(190%) brightness(1.07)`,
+        backdropFilter: `url(#${toolbarGlassId}) blur(3px) brightness(1.08) saturate(1.08)`,
+        WebkitBackdropFilter: `url(#${toolbarGlassId}) blur(3px) brightness(1.08) saturate(1.08)`,
       }
     : undefined
 
@@ -747,7 +948,7 @@ function RelationshipGraphPage() {
               分析
             </Button>
             <Button variant="secondary" size="sm" onPress={() => graphRef.current?.zoomToFit?.(700, 80)}>适配视图</Button>
-            <Button variant="primary" size="sm" onPress={() => void loadGraph(true)} isDisabled={loading}>
+            <Button variant="primary" size="sm" onPress={() => void loadGraph(true)} isDisabled={graphBusy}>
               <ArrowsRotateLeft width={16} height={16} />
               重建
             </Button>
@@ -762,7 +963,7 @@ function RelationshipGraphPage() {
             <h2>关系网络不可用</h2>
             <p>{error}</p>
           </div>
-        ) : visibleGraph.nodes.length === 0 && !loading ? (
+        ) : visibleGraph.nodes.length === 0 && !graphBusy ? (
           <div className="relationship-empty">
             <Magnifier width={42} height={42} />
             <h2>没有匹配的关系</h2>
@@ -799,15 +1000,15 @@ function RelationshipGraphPage() {
           />
         )}
 
-        {loading && (
+        {graphBusy && (
           <div className="relationship-loading">
             <Spinner size="sm" />
-            <span>{progress?.message || '正在加载关系网络'}</span>
+            <span>{graphBusyMessage}</span>
           </div>
         )}
-        {result?.links && result.links.length > visibleGraph.links.length && (
+        {renderNote && (
           <div className="relationship-render-note">
-            已渲染最强 {formatCount(visibleGraph.links.length)} / {formatCount(result.links.length)} 条关系
+            {renderNote}
           </div>
         )}
       </main>

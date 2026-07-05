@@ -255,6 +255,7 @@ export class ExportProcessService {
 
       this.worker = worker
       let readyFired = false
+      let stderrTail = ''
       const rejectInitOnce = (err: Error) => {
         if (!readyFired) {
           readyFired = true
@@ -272,7 +273,10 @@ export class ExportProcessService {
       })
       worker.stderr?.on('data', (chunk: Buffer) => {
         const text = chunk.toString().trim()
-        if (text) console.warn(`[ExportProcess] stderr (pid=${worker.pid ?? 'unknown'}):`, text)
+        if (text) {
+          stderrTail = `${stderrTail}\n${text}`.slice(-4000)
+          console.warn(`[ExportProcess] stderr (pid=${worker.pid ?? 'unknown'}):`, text)
+        }
       })
 
       worker.on('message', (msg: any) => {
@@ -334,7 +338,8 @@ export class ExportProcessService {
         if (!this.shuttingDown) {
           this.rejectAllPending(`export utility process exited (pid=${pid ?? 'unknown'}, code=${code})`)
         }
-        rejectInitOnce(new Error(`export utility process 启动后立即退出，code=${code}`))
+        const stderrDetail = stderrTail.trim() ? `，stderr=${stderrTail.trim()}` : ''
+        rejectInitOnce(new Error(`export utility process 启动后立即退出，code=${code}${stderrDetail}`))
       })
     })
 

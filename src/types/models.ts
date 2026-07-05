@@ -169,6 +169,8 @@ export interface RelationshipGraphStats {
   stale: boolean
 }
 
+export type RelationshipGraphBuildStage = 'loading' | 'sessions' | 'groups' | 'analyzing' | 'caching' | 'done' | 'error'
+
 export interface RelationshipGraphResult {
   success: boolean
   nodes?: RelationshipGraphNode[]
@@ -184,6 +186,14 @@ export interface RelationshipGraphResult {
   error?: string
 }
 
+export interface RelationshipGraphPartialResult extends RelationshipGraphResult {
+  preview: boolean
+  stage: RelationshipGraphBuildStage
+  message: string
+  current?: number
+  total?: number
+}
+
 export interface RelationshipGraphPathResult {
   success: boolean
   nodeIds?: string[]
@@ -192,7 +202,7 @@ export interface RelationshipGraphPathResult {
 }
 
 export interface RelationshipGraphBuildProgress {
-  stage: 'loading' | 'sessions' | 'groups' | 'analyzing' | 'caching' | 'done' | 'error'
+  stage: RelationshipGraphBuildStage
   message: string
   current?: number
   total?: number

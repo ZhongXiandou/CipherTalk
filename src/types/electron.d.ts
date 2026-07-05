@@ -6,6 +6,7 @@ import type {
   RelationshipGraphBuildProgress,
   RelationshipGraphOptions,
   RelationshipGraphPathResult,
+  RelationshipGraphPartialResult,
   RelationshipGraphResult,
 } from './models'
 import type { AccountProfile, AccountProfileInput, AccountProfilePatch } from './account'
@@ -1077,6 +1078,7 @@ export interface ElectronAPI {
     rebuild: (options?: RelationshipGraphOptions) => Promise<RelationshipGraphResult>
     getPath: (sourceId: string, targetId: string, options?: RelationshipGraphOptions) => Promise<RelationshipGraphPathResult>
     onProgress: (callback: (progress: RelationshipGraphBuildProgress) => void) => () => void
+    onPartial: (callback: (partial: RelationshipGraphPartialResult) => void) => () => void
   }
   // 朋友圈相关
   sns: {
