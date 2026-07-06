@@ -1,9 +1,15 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { createLiquidGlassMap, type GlassFilterMap } from '../../utils/liquidGlass'
+import { createLiquidGlassBubbleMap, type GlassFilterMap } from '../../utils/liquidGlass'
 
 const FILTER_ID = 'home-moment-glass'
-// 更大的折射范围：缩小实心中心 + 加大 feather，覆盖面更广
-const BUBBLE_GLASS = { halfX: 0.22, halfY: 0.14, radius: 0.7, edge: 0.2, feather: 1.2, strength: 1.6 }
+const BUBBLE_GLASS = {
+  radii: { topLeft: 18, topRight: 18, bottomRight: 18, bottomLeft: 4 },
+  edgeSize: 14,
+  edgeStrength: 7,
+  surface: 0.45,
+  surfaceScale: 2,
+  strength: 6,
+}
 
 /** 回忆一刻文字气泡的液态玻璃外壳：按自身尺寸生成位移贴图，用 backdrop-filter 折射。
  *  气泡文字长度会变（换一条/多行），故用 ResizeObserver 跟随尺寸重建贴图。 */
@@ -16,7 +22,10 @@ export function LiquidGlassBubble({ children }: { children: ReactNode }) {
     if (!el) return
     const update = () => {
       const rect = el.getBoundingClientRect()
-      const next = createLiquidGlassMap(Math.round(rect.width), Math.round(rect.height), BUBBLE_GLASS)
+      const width = Math.round(rect.width)
+      const height = Math.round(rect.height)
+      if (width < 2 || height < 2) return
+      const next = createLiquidGlassBubbleMap(width, height, BUBBLE_GLASS)
       if (next) setMap(next)
     }
     update()
@@ -25,7 +34,7 @@ export function LiquidGlassBubble({ children }: { children: ReactNode }) {
     return () => ro.disconnect()
   }, [])
 
-  const backdrop = map ? `url(#${FILTER_ID}) saturate(180%) brightness(1.05)` : undefined
+  const backdrop = map ? `url(#${FILTER_ID}) blur(1.2px)` : undefined
 
   return (
     <blockquote
