@@ -71,6 +71,132 @@ function randomRunId(): string {
   return `run-${Date.now()}-${Math.floor(Math.random() * 1e9)}`
 }
 
+
+type AgentStreamSmokeRun = {
+  runId: string
+  startedAt: number
+  updatedAt: number
+  scope: AgentScope
+  planMode: boolean
+  toolProfile: AgentToolProfile
+  chunkCount: number
+  progressCount: number
+  chunkTypes: Record<string, number>
+  progressStages: Record<string, number>
+  firstChunkMs?: number
+  firstOutputMs?: number
+  finishChunkMs?: number
+  doneMs?: number
+  finishReason?: string
+  hasUsage: boolean
+  usage?: unknown
+  metadataKeys: string[]
+  errorText?: string
+}
+
+function nowMs(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now()
+}
+
+function isSmokeEnabled(): boolean {
+  const dev = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV)
+  if (dev) return true
+  try {
+    return globalThis.localStorage?.getItem('ctAgentStreamSmoke') === '1'
+  } catch {
+    return false
+  }
+}
+
+function publishSmoke(run: AgentStreamSmokeRun): void {
+  if (!isSmokeEnabled() || typeof window === 'undefined') return
+  const win = window as unknown as {
+    __ctAgentStreamSmoke?: {
+      last: AgentStreamSmokeRun
+      runs: AgentStreamSmokeRun[]
+      clear: () => void
+    }
+    dispatchEvent?: (event: Event) => boolean
+  }
+  const currentRuns = win.__ctAgentStreamSmoke?.runs || []
+  const runs = [...currentRuns.filter((item) => item.runId !== run.runId), run].slice(-20)
+  win.__ctAgentStreamSmoke = {
+    last: run,
+    runs,
+    clear: () => { delete win.__ctAgentStreamSmoke },
+  }
+  try {
+    win.dispatchEvent?.(new CustomEvent('ct-agent-stream-smoke', { detail: run }))
+  } catch {
+    /* CustomEvent may be unavailable in tests. */
+  }
+}
+
+function startSmokeRun(input: {
+  runId: string
+  scope: AgentScope
+  planMode: boolean
+  toolProfile: AgentToolProfile
+}): AgentStreamSmokeRun | null {
+  if (!isSmokeEnabled()) return null
+  const startedAt = nowMs()
+  const run: AgentStreamSmokeRun = {
+    ...input,
+    startedAt,
+    updatedAt: Date.now(),
+    chunkCount: 0,
+    progressCount: 0,
+    chunkTypes: {},
+    progressStages: {},
+    hasUsage: false,
+    metadataKeys: [],
+  }
+  publishSmoke(run)
+  return run
+}
+
+function updateSmoke(run: AgentStreamSmokeRun | null, updater: (run: AgentStreamSmokeRun) => void): void {
+  if (!run) return
+  updater(run)
+  run.updatedAt = Date.now()
+  publishSmoke(run)
+}
+
+function readObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : null
+}
+
+function observeSmokeChunk(run: AgentStreamSmokeRun | null, chunk: unknown): void {
+  updateSmoke(run, (item) => {
+    item.chunkCount += 1
+    const elapsed = nowMs() - item.startedAt
+    if (item.firstChunkMs === undefined) item.firstChunkMs = elapsed
+    const object = readObject(chunk)
+    const type = String(object?.type || 'unknown')
+    item.chunkTypes[type] = (item.chunkTypes[type] || 0) + 1
+    if (item.firstOutputMs === undefined && ['text-delta', 'reasoning-delta', 'tool-input-start'].includes(type)) {
+      item.firstOutputMs = elapsed
+    }
+    if (type === 'finish') {
+      item.finishChunkMs = elapsed
+      const metadata = readObject(object?.messageMetadata)
+      item.metadataKeys = metadata ? Object.keys(metadata) : []
+      item.finishReason = String(object?.finishReason || metadata?.finishReason || '') || undefined
+      item.usage = metadata?.usage
+      item.hasUsage = Boolean(metadata?.usage)
+    }
+    if (type === 'error') item.errorText = String(object?.errorText || object?.error || '') || 'stream error'
+  })
+}
+
+function observeSmokeProgress(run: AgentStreamSmokeRun | null, progress: unknown): void {
+  updateSmoke(run, (item) => {
+    item.progressCount += 1
+    const object = readObject(progress)
+    const stage = String(object?.stage || 'unknown')
+    item.progressStages[stage] = (item.progressStages[stage] || 0) + 1
+  })
+}
 export class IpcChatTransport<UI_MESSAGE extends UIMessage = UIMessage> implements ChatTransport<UI_MESSAGE> {
   constructor(
     private readonly getScope?: () => AgentScope,
@@ -96,28 +222,37 @@ export class IpcChatTransport<UI_MESSAGE extends UIMessage = UIMessage> implemen
     const toolProfile = this.getToolProfile?.() ?? 'chat'
     const codeWorkspace = this.getCodeWorkspace?.() ?? null
     const progressHandler = this.onProgress
+    const smokeRun = startSmokeRun({ runId, scope, planMode, toolProfile })
 
-    options.abortSignal?.addEventListener('abort', () => { void bridge.abort(runId) })
+    options.abortSignal?.addEventListener('abort', () => {
+      updateSmoke(smokeRun, (item) => { item.errorText = 'aborted' })
+      void bridge.abort(runId)
+    })
 
     return new ReadableStream<UIMessageChunk>({
       start(controller) {
         const off = bridge.onChunk(runId, (chunk) => {
           if (chunk === '[DONE]') {
+            updateSmoke(smokeRun, (item) => { item.doneMs = nowMs() - item.startedAt })
             controller.close()
             off()
             return
           }
+          observeSmokeChunk(smokeRun, chunk)
           controller.enqueue(chunk as UIMessageChunk)
         })
         const offProgress = bridge.onProgress(runId, (progress) => {
           if (progress && typeof progress === 'object') {
+            observeSmokeProgress(smokeRun, progress)
             progressHandler?.(progress as AgentProgressEvent)
           }
         })
         // 触发主进程运行；run resolve 即代表本次结束（chunk 已通过 onChunk 推完，[DONE] 关流）
         void bridge.run(runId, messages, scope, modelConfig, conversationId, planMode, toolProfile, codeWorkspace).catch((error: unknown) => {
           try {
-            controller.enqueue({ type: 'error', errorText: error instanceof Error ? error.message : String(error) } as UIMessageChunk)
+            const errorChunk = { type: 'error', errorText: error instanceof Error ? error.message : String(error) } as UIMessageChunk
+            observeSmokeChunk(smokeRun, errorChunk)
+            controller.enqueue(errorChunk)
             controller.close()
           } catch { /* 已关闭 */ }
           off()

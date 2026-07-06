@@ -186,8 +186,10 @@ export function createLiquidGlassBubbleMap(width: number, height: number, opts: 
         Math.cos((uvX * surfaceScale + uvY * 0.34) * Math.PI * 2)
         + Math.sin((uvY * surfaceScale * 0.62 + uvX * 1.18) * Math.PI * 2) * 0.34
       ) * surface
-      dx = (normalX / normalLength) * edgeWeight * edgeStrength + surfaceX
-      dy = (normalY / normalLength) * edgeWeight * edgeStrength + surfaceY
+      // 沿内法线位移（边缘采样点拉向中心）：与 createLiquidGlassMap（玻璃球）同向的凸透镜折射。
+      // 之前沿外法线取样，折射方向是反的（凹面观感）。
+      dx = -(normalX / normalLength) * edgeWeight * edgeStrength + surfaceX
+      dy = -(normalY / normalLength) * edgeWeight * edgeStrength + surfaceY
     }
 
     maxScale = Math.max(maxScale, Math.abs(dx), Math.abs(dy))

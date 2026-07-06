@@ -2,12 +2,13 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createLiquidGlassBubbleMap, type GlassFilterMap } from '../../utils/liquidGlass'
 
 const FILTER_ID = 'home-moment-glass'
+// 形状跟随气泡本身（18/18/18/4 圆角矩形 SDF），折射观感对齐玻璃球：
+// 无内部波纹、折射带铺满全表面（edgeSize 盖过半高）、同等强度 strength 6
 const BUBBLE_GLASS = {
   radii: { topLeft: 18, topRight: 18, bottomRight: 18, bottomLeft: 4 },
-  edgeSize: 14,
+  edgeSize: 28,
   edgeStrength: 7,
-  surface: 0.45,
-  surfaceScale: 2,
+  surface: 0,
   strength: 6,
 }
 

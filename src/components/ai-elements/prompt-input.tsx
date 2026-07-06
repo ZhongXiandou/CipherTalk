@@ -29,7 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { createLiquidGlassMap, type GlassFilterMap } from "@/utils/liquidGlass";
+import { createLiquidGlassBubbleMap, type GlassBubbleRadii, type GlassFilterMap } from "@/utils/liquidGlass";
 import { Button as HeroButton, ButtonGroup, Dropdown, Label, Toolbar } from "@heroui/react";
 import type { ChatStatus, FileUIPart } from "ai";
 import {
@@ -440,6 +440,23 @@ export type PromptInputMessage = {
 // 液态玻璃位移贴图参数：与 LiquidGlassBubble 同源的边缘折射带方案
 const PROMPT_GLASS = { halfX: 0.22, halfY: 0.14, radius: 0.7, edge: 0.2, feather: 1.2, strength: 1.6 };
 
+function readRadiusPx(value: string, fallback: number): number {
+  const first = String(value || '').split(/\s+/)[0];
+  const parsed = Number.parseFloat(first);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function readGlassRadii(el: HTMLElement, width: number, height: number): GlassBubbleRadii {
+  const style = getComputedStyle(el);
+  const fallback = Math.min(40, Math.max(0, Math.min(width, height) / 2));
+  return {
+    topLeft: readRadiusPx(style.borderTopLeftRadius, fallback),
+    topRight: readRadiusPx(style.borderTopRightRadius, fallback),
+    bottomRight: readRadiusPx(style.borderBottomRightRadius, fallback),
+    bottomLeft: readRadiusPx(style.borderBottomLeftRadius, fallback),
+  };
+}
+
 export type PromptInputProps = Omit<
   HTMLAttributes<HTMLFormElement>,
   "onSubmit" | "onError"
@@ -494,11 +511,13 @@ export const PromptInput = ({
     if (!el) return;
     const update = () => {
       const rect = el.getBoundingClientRect();
-      const next = createLiquidGlassMap(
-        Math.round(rect.width),
-        Math.round(rect.height),
-        PROMPT_GLASS
-      );
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      if (width < 2 || height < 2) return;
+      const next = createLiquidGlassBubbleMap(width, height, {
+        ...PROMPT_GLASS,
+        radii: readGlassRadii(el, width, height),
+      });
       if (next) setGlassMap(next);
     };
     update();
@@ -873,7 +892,7 @@ export const PromptInput = ({
         )}
         <InputGroup
           className={cn(
-            "overflow-visible rounded-[40px] [corner-shape:superellipse(1.7)]",
+            "overflow-hidden rounded-[40px] [corner-shape:superellipse(1.7)]",
             "has-[[data-slot=input-group-control]:focus-visible]:border-border!",
             "has-[[data-slot=input-group-control]:focus-visible]:ring-0!"
           )}
