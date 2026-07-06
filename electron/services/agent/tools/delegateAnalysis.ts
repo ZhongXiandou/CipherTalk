@@ -6,10 +6,11 @@
  * 支持一次传入最多 4 个互相独立的子任务并发执行；子 Agent 用 buildBaseTools（不含本工具，避免递归委托），带步数上限 + 死循环检测。
  * 出处：从子 Agent 各工具结果里聚合 evidence 回传，让主 Agent 也能给可点 Sources（带出处硬要求）。
  */
-import { ToolLoopAgent, stepCountIs, tool, type ToolSet } from 'ai'
+import { ToolLoopAgent, isStepCount, tool, type ToolSet } from 'ai'
 import { z } from 'zod'
 import { createLanguageModel } from '../provider'
 import { buildSystemPrompt } from '../prompts'
+import { buildReasoningOption } from '../cache'
 import { loopGuardCondition } from '../guards'
 import { compactMessages } from '../compaction'
 import { reportAgentProgress, withSubAgentScope } from '../progress'
@@ -202,11 +203,16 @@ export function createDelegateAnalysis(opts: {
             instructions: buildSystemPrompt(opts.scope) + DELEGATE_SUFFIX,
             tools,
             temperature: DEFAULT_SUB_AGENT_TEMPERATURE,
-            stopWhen: [stepCountIs(SUB_AGENT_MAX_STEPS), loopGuardCondition()],
-            prepareStep: ({ messages, steps }) => ({
-              messages: compactMessages(messages),
-              experimental_context: buildToolRuntimeContext(steps),
-            }),
+            reasoning: buildReasoningOption(opts.providerConfig),
+            stopWhen: [isStepCount(SUB_AGENT_MAX_STEPS), loopGuardCondition()],
+            prepareStep: ({ messages, steps }) => {
+              const runtimeContext = buildToolRuntimeContext(steps)
+              return {
+                messages: compactMessages(messages),
+                runtimeContext,
+                toolsContext: { query_sql: runtimeContext } as any,
+              }
+            },
           })
           const result = await subAgent.generate({ prompt: taskItem.task, abortSignal })
           const conclusion = result.text.trim()

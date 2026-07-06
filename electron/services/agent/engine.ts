@@ -2,14 +2,14 @@
  * 编排引擎 —— 用 AI SDK 的 ToolLoopAgent 跑 ReAct 循环，流式产出 UIMessageChunk。
  * 运行在 AI utilityProcess 子进程内（见文档 §3.1/§5.2）。
  */
-import { generateText, tool, ToolLoopAgent, stepCountIs, type ModelMessage, type UIMessageChunk } from 'ai'
+import { generateText, tool, ToolLoopAgent, isStepCount, toUIMessageStream, type ModelMessage, type UIMessageChunk } from 'ai'
 import { z } from 'zod'
 import type { SystemModelMessage } from '@ai-sdk/provider-utils'
 import { createLanguageModel } from './provider'
 import { buildAgentPromptParts, CODE_WORKSPACE_PROMPT, IMAGE_GEN_PROMPT, PLAN_MODE_PROMPT, WEB_SEARCH_PROMPT } from './prompts'
 import { isWebSearchAvailable } from '../ai/webSearchService'
 import { isImageGenAvailable } from '../ai/imageGenService'
-import { applyAnthropicCacheControl, buildPromptCacheKey, buildProviderOptions } from './cache'
+import { applyAnthropicCacheControl, buildPromptCacheKey, buildProviderOptions, buildReasoningOption } from './cache'
 import { buildCodeOnlyTools, buildPlanModeTools, buildTools } from './tools'
 import { afterTurnMemory, buildMemoryContext, preloadRelevantMemories } from './tools/memory'
 import { aiCompactStep, createCompactionState } from './aiCompaction'
@@ -197,20 +197,25 @@ export async function runAgent(
       instructions: prepared.instructions,
       tools: prepared.tools,
       temperature: DEFAULT_AGENT_TEMPERATURE,
+      reasoning: buildReasoningOption(input.providerConfig),
       // 步数上限 + 死循环检测（连续 N 步相同工具调用即停），见 guards.ts
-      stopWhen: [stepCountIs(MAX_STEPS), loopGuardCondition()],
+      stopWhen: [isStepCount(MAX_STEPS), loopGuardCondition()],
       providerOptions: buildProviderOptions(input, prepared.promptCacheKey),
       // 每步先做 >90% AI 压缩（折叠早期历史为摘要并发持久标记），再叠加确定性裁剪 + query_sql 门控状态
-      prepareStep: async ({ messages, steps }) => ({
-        messages: await aiCompactStep({
-          messages,
-          state: compactionState,
-          providerConfig: input.providerConfig,
-          emit: onChunk,
-          signal,
-        }),
-        experimental_context: buildToolRuntimeContext(steps),
-      }),
+      prepareStep: async ({ messages, steps }) => {
+        const runtimeContext = buildToolRuntimeContext(steps)
+        return {
+          messages: await aiCompactStep({
+            messages,
+            state: compactionState,
+            providerConfig: input.providerConfig,
+            emit: onChunk,
+            signal,
+          }),
+          runtimeContext,
+          toolsContext: { query_sql: runtimeContext } as any,
+        }
+      },
     })
 
     const result = await agent.stream({
@@ -224,7 +229,9 @@ export async function runAgent(
     let perfFirstOutputSeen = false
     const toolNames = new Map<string, string>()
     const pendingToolCalls = new Map<string, { toolName: string; input?: unknown }>()
-    for await (const chunk of result.toUIMessageStream({
+    for await (const chunk of toUIMessageStream({
+      stream: result.stream,
+      tools: prepared.tools,
       // 默认 onError 只回 "An error occurred."，把真实报错（含 status code）透传给聊天区，别再靠猜
       onError: formatAgentError,
       messageMetadata: ({ part }) => {
@@ -283,7 +290,7 @@ export async function generateConversationTitle(
 
   const result = await generateText({
     model: createLanguageModel(input.providerConfig),
-    system: '你是对话标题生成器。只输出一个中文短标题，不要解释，不要引号，不要标点装饰。',
+    instructions: '你是对话标题生成器。只输出一个中文短标题，不要解释，不要引号，不要标点装饰。',
     prompt: `根据用户第一句话生成 4 到 12 个汉字的聊天标题：\n${firstMessage}`,
     abortSignal: signal,
   })
@@ -405,7 +412,7 @@ export async function generateReplySuggestions(
   const burstHint = avgBurst >= BURST_HINT_THRESHOLD && input.style !== 'formal'
     ? `"我"平时习惯把一句话拆成短句连发（平均一轮 ${Math.round(avgBurst * 10) / 10} 条${input.myStats?.avgChars ? `、每条约 ${input.myStats.avgChars} 字` : ''}）：每条建议照这个习惯拆成 2~3 条短句，短句之间用"／"分隔；内容本来就短的保持一条即可。`
     : ''
-  const system = `You are a WeChat reply-suggestion assistant. Direction is critical: "me" = the app user who will send the reply; ${contactName} = the other person who will receive the reply. Generate exactly ${count} reply suggestions that I can directly send to ${contactName}. ${latestIncomingHint}Every output string must be the exact words I would send to ${contactName}; never answer from ${contactName}'s perspective, never write what ${contactName} should say to me, and never output analysis or summaries. Requirements: colloquial Chinese; respond tightly to the latest incoming message from ${contactName}; make the ${count} suggestions distinct in angle or tone; no explanations, no numbering, no speaker prefix. Style: ${REPLY_STYLE_HINTS[input.style] ?? REPLY_STYLE_HINTS.natural}. ${burstHint}${deep ? 'You may use search_history to inspect my history with the other person and recover background for the target incoming message; search two or three times at most.' : ''}Final output must be only a JSON string array with exactly ${count} strings, e.g. ["reply one","reply two"]. Do not put multiple suggestions inside one string and do not output anything else.`
+  const instructions = `You are a WeChat reply-suggestion assistant. Direction is critical: "me" = the app user who will send the reply; ${contactName} = the other person who will receive the reply. Generate exactly ${count} reply suggestions that I can directly send to ${contactName}. ${latestIncomingHint}Every output string must be the exact words I would send to ${contactName}; never answer from ${contactName}'s perspective, never write what ${contactName} should say to me, and never output analysis or summaries. Requirements: colloquial Chinese; respond tightly to the latest incoming message from ${contactName}; make the ${count} suggestions distinct in angle or tone; no explanations, no numbering, no speaker prefix. Style: ${REPLY_STYLE_HINTS[input.style] ?? REPLY_STYLE_HINTS.natural}. ${burstHint}${deep ? 'You may use search_history to inspect my history with the other person and recover background for the target incoming message; search two or three times at most.' : ''}Final output must be only a JSON string array with exactly ${count} strings, e.g. ["reply one","reply two"]. Do not put multiple suggestions inside one string and do not output anything else.`
   const friendBlock = deep && input.friendPersonaContext
     ? `\n\n对方「${contactName}」的画像（拟回复时考虑 TA 吃哪套、避开雷区）：\n${input.friendPersonaContext}`
     : ''
@@ -435,11 +442,12 @@ export async function generateReplySuggestions(
   }]
 
   const resultText = deep
-    ? await generateDeepReplySuggestionText({ input, system, messages, prompt, contactName, sessionId, signal })
+    ? await generateDeepReplySuggestionText({ input, instructions, messages, prompt, contactName, sessionId, signal })
     : (await generateText({
         model: createLanguageModel(input.providerConfig),
-        system,
+        instructions,
         messages,
+        reasoning: buildReasoningOption(input.providerConfig),
         // Keep the likeme style a little more lively, matching persona chat.
         ...(input.style === 'likeme' ? { temperature: 0.8 } : {}),
         abortSignal: signal,
@@ -454,7 +462,7 @@ export async function generateReplySuggestions(
 
 type DeepReplySuggestionArgs = {
   input: ReplySuggestInput
-  system: string
+  instructions: string
   messages: ModelMessage[]
   prompt: string
   contactName: string
@@ -462,7 +470,7 @@ type DeepReplySuggestionArgs = {
   signal?: AbortSignal
 }
 
-async function generateDeepReplySuggestionText({ input, system, messages, prompt, contactName, sessionId, signal }: DeepReplySuggestionArgs): Promise<string> {
+async function generateDeepReplySuggestionText({ input, instructions: replyInstructions, messages, prompt, contactName, sessionId, signal }: DeepReplySuggestionArgs): Promise<string> {
   const scope = { kind: 'global' as const }
   const webSearchOn = isWebSearchAvailable()
   const imageGenOn = isImageGenAvailable()
@@ -504,7 +512,7 @@ async function generateDeepReplySuggestionText({ input, system, messages, prompt
     ...prepared.instructions,
     {
       role: 'system',
-      content: `${system}
+      content: `${replyInstructions}
 Deep reply-suggestion mode is connected to the full Agent toolset. You may search across conversations, read chat context, inspect contacts/groups/timeline, use memory, MCP, web search, and media search to recover background. Current target sessionId=${sessionId}; contact=${contactName}. Keep the direction fixed after all tool use: final suggestions are messages from \"me\" (the app user) to ${contactName}; never answer as ${contactName}, never write what ${contactName} should say to me, and never output analysis. If the latest message references another person, conversation, or historical event, proactively use global retrieval tools so multiple tile sessions can share context. For this task, only retrieve and analyze: do not actually send messages/media/files, modify files/tasks, or write long-term memory. The final answer must still be only a JSON string array.`,
     },
   ]
@@ -513,11 +521,16 @@ Deep reply-suggestion mode is connected to the full Agent toolset. You may searc
     instructions,
     tools: prepared.tools,
     temperature: input.style === 'likeme' ? 0.8 : DEFAULT_AGENT_TEMPERATURE,
-    stopWhen: [stepCountIs(REPLY_DEEP_MAX_STEPS), loopGuardCondition()],
+    reasoning: buildReasoningOption(input.providerConfig),
+    stopWhen: [isStepCount(REPLY_DEEP_MAX_STEPS), loopGuardCondition()],
     providerOptions: buildProviderOptions(agentInput, prepared.promptCacheKey),
-    prepareStep: async ({ steps }) => ({
-      experimental_context: buildToolRuntimeContext(steps),
-    }),
+    prepareStep: async ({ steps }) => {
+      const runtimeContext = buildToolRuntimeContext(steps)
+      return {
+        runtimeContext,
+        toolsContext: { query_sql: runtimeContext } as any,
+      }
+    },
   })
   const result = await agent.generate({ messages, abortSignal: signal })
   return result.text

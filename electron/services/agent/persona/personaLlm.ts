@@ -45,7 +45,7 @@ function extractJson(text: string): unknown {
 
 /** generateText + 宽松解析 + zod 校验；解析失败重试一次，再失败抛带原始输出片段的错误。 */
 export async function generateValidated<T>(
-  opts: { model: ReturnType<typeof createLanguageModel>; system: string; prompt: string; temperature: number; signal?: AbortSignal },
+  opts: { model: ReturnType<typeof createLanguageModel>; instructions: string; prompt: string; temperature: number; signal?: AbortSignal },
   schema: z.ZodType<T>,
   label: string,
 ): Promise<T> {
@@ -53,7 +53,7 @@ export async function generateValidated<T>(
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const result = await generateText({
       model: opts.model,
-      system: opts.system,
+      instructions: opts.instructions,
       prompt: attempt === 0
         ? opts.prompt
         : `${opts.prompt}\n\n注意：上一次输出无法解析为 JSON，请严格只输出一个合法 JSON 对象，不要任何解释、前后缀或代码围栏。`,
@@ -124,7 +124,7 @@ export async function extractPersona(input: PersonaExtractInput, signal?: AbortS
     generateValidated(
       {
         model,
-        system:
+        instructions:
           '你是一名语言风格侧写师。根据聊天记录总结目标人物的说话风格与性格，' +
           '只依据记录本身，不要臆造；描述要具体可执行（能直接指导模仿其说话），避免空泛形容词。' +
           `\n只输出一个 JSON 对象，不要任何解释或代码围栏，格式如下：\n${cardJsonShape(otherName)}`,
@@ -138,7 +138,7 @@ export async function extractPersona(input: PersonaExtractInput, signal?: AbortS
     generateValidated(
       {
         model,
-        system:
+        instructions:
           '你是对话样本挖掘器。从聊天记录中挑选最能体现目标人物说话风格的真实问答对：' +
           `「${otherName}」说了什么、「${subjectName}」怎么回的。必须原样摘抄原文（可去掉无关上下文），不许改写、不许编造。` +
           '优先挑风格鲜明（口头禅、玩笑、典型语气）且不含隐私敏感内容（金额、地址、证件号）的样本。' +

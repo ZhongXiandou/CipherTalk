@@ -77,6 +77,10 @@ function isReasoningEffortSet(effort?: AgentReasoningEffort): effort is Exclude<
   return Boolean(effort && effort !== 'auto')
 }
 
+export function buildReasoningOption(config: { reasoningEffort?: AgentReasoningEffort }): Exclude<AgentReasoningEffort, 'auto'> | undefined {
+  return isReasoningEffortSet(config.reasoningEffort) ? config.reasoningEffort : undefined
+}
+
 function toAnthropicEffort(effort: Exclude<AgentReasoningEffort, 'auto'>): 'low' | 'medium' | 'high' {
   if (effort === 'minimal') return 'low'
   if (effort === 'xhigh') return 'high' // Anthropic 无 xhigh 档，封顶到 high

@@ -9,7 +9,7 @@ import fs from 'fs'
 import path from 'path'
 import { generateImage } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
-import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createGoogle } from '@ai-sdk/google'
 import { ConfigService } from '../config'
 import { createProxyFetch, getResolvedProxyUrl } from './proxyFetch'
 
@@ -117,7 +117,7 @@ function normalizeSize(size?: string): `${number}x${number}` | undefined {
 async function generateViaAiSdk(prompt: string, cfg: ImageGenConfig, size?: string, signal?: AbortSignal): Promise<ImageGenResult> {
   const fetch = createProxyFetch(getResolvedProxyUrl())
   const model = cfg.protocol === 'google'
-    ? createGoogleGenerativeAI({ apiKey: cfg.apiKey, baseURL: cfg.baseURL || undefined, name: 'image-gen', fetch }).imageModel(cfg.model)
+    ? createGoogle({ apiKey: cfg.apiKey, baseURL: cfg.baseURL || undefined, name: 'image-gen', fetch }).imageModel(cfg.model)
     : createOpenAI({ apiKey: cfg.apiKey, baseURL: cfg.baseURL || undefined, name: 'image-gen', fetch }).imageModel(cfg.model)
 
   const { image } = await generateImage({

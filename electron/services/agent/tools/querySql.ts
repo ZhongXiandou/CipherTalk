@@ -53,7 +53,8 @@ export const querySql = tool({
   }),
   execute: async ({ kind, sql, dbPath, params, limit, reason, attemptedTools, whyStructuredToolsInsufficient }, options) => {
     try {
-      const context = readToolRuntimeContext(options.experimental_context)
+      const contextOptions = options as { context?: unknown; experimental_context?: unknown }
+      const context = readToolRuntimeContext(contextOptions.context ?? contextOptions.experimental_context)
       if (!context.querySqlUnlocked) {
         return { error: 'query_sql 是最后手段：请先调用 search_messages / semantic_search / chat_stats / get_timeline / get_context 等结构化工具，确认不足后再使用 SQL 兜底。' }
       }

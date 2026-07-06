@@ -3,7 +3,7 @@
  * 可在 AI 子进程内调用。逻辑对齐 ai/providers/base.ts 的 getModelProvider()。
  */
 import { createAnthropic } from '@ai-sdk/anthropic'
-import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createGoogle } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import type { LanguageModel } from 'ai'
@@ -59,7 +59,7 @@ export function createLanguageModel(config: AgentProviderConfig): LanguageModel 
     return createAnthropic({ apiKey, baseURL, name, headers, fetch: withAnthropicSanitizer(fetch) })(model as any)
   }
   if (providerKind === 'google') {
-    return createGoogleGenerativeAI({ apiKey, baseURL, name, headers, fetch })(model as any)
+    return createGoogle({ apiKey, baseURL, name, headers, fetch })(model as any)
   }
   if (providerKind === 'openai-responses') {
     return createOpenAI({ apiKey, baseURL, name, headers, fetch }).responses(model as any)

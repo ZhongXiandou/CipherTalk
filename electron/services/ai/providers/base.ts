@@ -1,6 +1,6 @@
 import { generateText, jsonSchema, streamText, tool, type LanguageModel, type ModelMessage, type ToolSet } from 'ai'
 import { createAnthropic } from '@ai-sdk/anthropic'
-import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createGoogle } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { createProxyFetch, getResolvedProxyUrl } from '../proxyFetch'
@@ -391,7 +391,7 @@ export abstract class BaseAIProvider implements AIProvider {
       })(model as any)
     }
     if (this.providerKind === 'google') {
-      return createGoogleGenerativeAI({
+      return createGoogle({
         apiKey: this.apiKey,
         baseURL: this.baseURL || undefined,
         name: this.name,
@@ -645,7 +645,7 @@ export abstract class BaseAIProvider implements AIProvider {
         const toolInputById = new Map<string, string>()
         const toolNameById = new Map<string, string>()
 
-        for await (const part of result.fullStream) {
+        for await (const part of result.stream) {
           if (part.type === 'text-delta') {
             emitted = true
             content += part.text
@@ -745,7 +745,7 @@ export abstract class BaseAIProvider implements AIProvider {
         let reasoningText = ''
         let finishReason: string | null = null
 
-        for await (const part of result.fullStream) {
+        for await (const part of result.stream) {
           if (part.type === 'text-delta') {
             emitted = true
             contentText += part.text

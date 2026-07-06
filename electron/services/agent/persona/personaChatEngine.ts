@@ -6,6 +6,7 @@
  */
 import { generateText, type FinishReason, type ModelMessage, type UIMessageChunk } from 'ai'
 import { createLanguageModel } from '../provider'
+import { buildReasoningOption } from '../cache'
 import { reportAgentProgress, withAgentProgress } from '../progress'
 import { searchChat } from '../tools/shared'
 import type { AgentProgressReporter } from '../types'
@@ -425,9 +426,10 @@ export async function runPersonaChat(
     reportAgentProgress({ stage: 'run_started', title: '正在组织语言' })
     const result = await generateText({
       model: createLanguageModel(input.providerConfig),
-      system: buildPersonaSystemPrompt(input.persona, memories, similarPairs, voiceEnabled, voiceForwardRequested, outputMode),
+      instructions: buildPersonaSystemPrompt(input.persona, memories, similarPairs, voiceEnabled, voiceForwardRequested, outputMode),
       messages: maskStickerHistory(input.messages, input.persona.stickers || []),
       temperature: PERSONA_TEMPERATURE,
+      reasoning: buildReasoningOption(input.providerConfig),
       abortSignal: signal,
     })
 
@@ -436,7 +438,7 @@ export async function runPersonaChat(
       input.persona.stickers || [],
     )
     const completed = await emitCompleteTextAsUiChunks(replyText, result.finishReason, {
-      usage: result.totalUsage,
+      usage: result.usage,
       finishReason: result.finishReason,
       modelProvider: input.providerConfig.name,
       modelId: input.providerConfig.model,

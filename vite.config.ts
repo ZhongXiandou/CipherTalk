@@ -10,11 +10,22 @@ import { builtinModules } from 'module'
 const pkg = require('./package.json')
 const devServerHost = process.env.VITE_HOST || '127.0.0.1'
 const devServerPort = Number(process.env.VITE_PORT || process.env.PORT || 5321)
-const external = [
+const nodeBuiltinModules = new Set([
   ...builtinModules,
   ...builtinModules.map(m => `node:${m}`),
-  ...Object.keys(pkg.dependencies || {}),
-]
+])
+const shouldBundleElectronDependency = (id: string) => (
+  id === 'ai' ||
+  id.startsWith('ai/') ||
+  id.startsWith('@ai-sdk/')
+)
+const dependencyExternal = Object.keys(pkg.dependencies || {})
+  .filter((name) => !shouldBundleElectronDependency(name))
+const external = (id: string) => {
+  if (nodeBuiltinModules.has(id)) return true
+  if (shouldBundleElectronDependency(id)) return false
+  return dependencyExternal.some((name) => id === name || id.startsWith(`${name}/`))
+}
 
 function canListen(port: number, host: string): Promise<boolean> {
   return new Promise((resolve) => {

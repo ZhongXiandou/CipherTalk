@@ -128,7 +128,7 @@ async function summarizeHistory(
 
   const result = await generateText({
     model: createLanguageModel(providerConfig),
-    system: [
+    instructions: [
       '你在压缩一段长对话的早期历史，供后续轮次作为背景继续使用。目标是「不丢关键信息」地缩短它。',
       '必须保留：用户的身份/偏好/长期目标、已确认的事实与数据结论（连同来源/时间/数字）、达成的决定与承诺、未解决的问题与待办、出现过的关键人物/会话/实体。',
       '可以丢弃：寒暄、重复、过程性试错、冗长的工具原始输出。',
