@@ -147,6 +147,8 @@ export interface AgentRunInput {
   toolProfile?: AgentToolProfile
   /** 用户选择的代码工作区；真正的文件/命令操作仍由主进程 CodeWorkspaceService 代理并审批。 */
   codeWorkspace?: CodeWorkspaceRef | null
+  /** DeepSeek 这类前缀 KV cache provider：本轮动态上下文已作为隐藏 system 历史消息插入。 */
+  turnContextMode?: 'tail' | 'history'
 }
 
 export interface AgentUploadedMediaItem {

@@ -198,6 +198,35 @@ function verifyFfmpegStaticPacked(context) {
     );
 }
 
+function pruneWhisperResources(context) {
+    if (context.electronPlatformName !== 'win32') return;
+
+    const productName = context.packager?.appInfo?.productFilename || 'CipherTalk';
+    const resourceRoots = uniqueExistingDirs([
+        path.join(context.appOutDir, 'resources'),
+        path.join(context.appOutDir, 'Contents', 'Resources'),
+        path.join(context.appOutDir, `${productName}.app`, 'Contents', 'Resources')
+    ]);
+
+    let deletedCount = 0;
+    for (const resourceRoot of resourceRoots) {
+        const candidates = [
+            path.join(resourceRoot, 'app.asar.unpacked', 'resources', 'whisper'),
+            path.join(resourceRoot, 'resources', 'whisper')
+        ];
+        for (const targetPath of candidates) {
+            if (!fs.existsSync(targetPath)) continue;
+            fs.rmSync(targetPath, { recursive: true, force: true });
+            deletedCount += 1;
+            console.log(`[afterPack] 已移除 Windows 包内 whisper 运行库: ${targetPath}`);
+        }
+    }
+
+    if (deletedCount === 0) {
+        console.log('[afterPack] Windows 包内未发现 whisper 运行库。');
+    }
+}
+
 exports.default = async function (context) {
     // context.appOutDir 是打包后的临时解压目录
     const localesDir = path.join(context.appOutDir, 'locales');
@@ -223,6 +252,8 @@ exports.default = async function (context) {
     }
 
     pruneImageNativeAddons(context);
+
+    pruneWhisperResources(context);
 
     verifyImageNativePacked(context);
 

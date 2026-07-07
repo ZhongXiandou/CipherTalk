@@ -45,20 +45,21 @@ export function buildAgentInstructions(
     includeWechatOutbound: input.outputMode === 'wechat',
     includeWechatReplyMedia: input.allowWechatReplyMedia === true,
   })
+  const historyManagedTurnContext = input.turnContextMode === 'history'
   const dynamicSystem = [
-    promptParts.dynamicSystem,
-    input.planMode ? PLAN_MODE_PROMPT : '',
-    input.codeWorkspace ? CODE_WORKSPACE_PROMPT : '',
-    webSearchOn ? WEB_SEARCH_PROMPT : '',
-    imageGenOn ? IMAGE_GEN_PROMPT : '',
-    memoryContext,
+    historyManagedTurnContext ? '' : promptParts.dynamicSystem,
+    historyManagedTurnContext ? '' : (input.planMode ? PLAN_MODE_PROMPT : ''),
+    historyManagedTurnContext ? '' : (input.codeWorkspace ? CODE_WORKSPACE_PROMPT : ''),
+    historyManagedTurnContext ? '' : (webSearchOn ? WEB_SEARCH_PROMPT : ''),
+    historyManagedTurnContext ? '' : (imageGenOn ? IMAGE_GEN_PROMPT : ''),
+    historyManagedTurnContext ? '' : memoryContext,
   ].filter(Boolean).join('\n')
   // 每轮必变的内容（当前时间、按问题挑的技能、本轮相关记忆）放消息尾部：
   // 前缀（稳定 system + 历史）跨轮字节不变，服务商 prompt cache 才能命中
   // （DeepSeek 等带 tools 时前缀中段一变即全量 miss，已实测）。
   // Google 转换器不允许对话中段的 system；Anthropic 靠 breakpoint 缓存、断点后的
   // 动态 system 不影响命中，且第三方 Claude 代理未必支持 mid-conversation system beta。
-  const turnContext = [promptParts.turnSystem, relevantMemoryContext].filter(Boolean).join('\n')
+  const turnContext = historyManagedTurnContext ? '' : [promptParts.turnSystem, relevantMemoryContext].filter(Boolean).join('\n')
   const kind = input.providerConfig.providerKind
   const tailTurnMessage = kind === 'openai-responses' || kind === 'openai-compatible'
   const instructions: SystemModelMessage[] = [
@@ -278,14 +279,15 @@ export async function runAgent(
       perfLast = now
     }
     const userText = lastUserText(input.messages)
-    const cachedMemoryContext = getCachedStartupMemory(input.scope)
+    const historyManagedTurnContext = input.turnContextMode === 'history'
+    const cachedMemoryContext = historyManagedTurnContext ? '' : getCachedStartupMemory(input.scope)
     const memoryContext = cachedMemoryContext ?? ''
-    if (cachedMemoryContext === null) {
+    if (!historyManagedTurnContext && cachedMemoryContext === null) {
       warmStartupMemory(input.scope, () => buildMemoryContext(input.scope))
     }
-    perf('记忆上下文', cachedMemoryContext === null ? '未命中缓存，后台补建' : '缓存命中')
-    const relevantMemoryContext = await preloadRelevantMemories(userText, input.scope)
-    perf('相关记忆预取', `${relevantMemoryContext.length} 字符`)
+    perf('记忆上下文', historyManagedTurnContext ? '已由历史 system 注入' : (cachedMemoryContext === null ? '未命中缓存，后台补建' : '缓存命中'))
+    const relevantMemoryContext = historyManagedTurnContext ? '' : await preloadRelevantMemories(userText, input.scope)
+    perf('相关记忆预取', historyManagedTurnContext ? '已由历史 system 注入' : `${relevantMemoryContext.length} 字符`)
     const toolsDisabled = input.toolMode === 'disabled'
     const webSearchOn = !toolsDisabled && isWebSearchAvailable()
     const imageGenOn = !toolsDisabled && isImageGenAvailable()
@@ -356,7 +358,7 @@ export async function runAgent(
             emit: onChunk,
             signal,
           }),
-          runtimeContext,
+          runtimeContext: runtimeContext as any,
           toolsContext: { query_sql: runtimeContext } as any,
         }
       },
@@ -706,7 +708,7 @@ Deep reply-suggestion mode is connected to the full Agent toolset. You may searc
     prepareStep: async ({ steps }) => {
       const runtimeContext = buildToolRuntimeContext(steps)
       return {
-        runtimeContext,
+        runtimeContext: runtimeContext as any,
         toolsContext: { query_sql: runtimeContext } as any,
       }
     },

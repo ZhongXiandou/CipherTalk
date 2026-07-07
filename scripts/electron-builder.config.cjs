@@ -103,21 +103,53 @@ function getFiles(buildTarget) {
   const baseFiles = Array.isArray(base.files) ? [...base.files] : []
   const commonFiles = [
     'package.json',
-    '!node_modules/.vite/**/*'
+    '!node_modules/.vite/**/*',
+    // electron-builder 会在默认 app 文件集合上叠加 filter；这些工作区目录必须显式排除，
+    // 否则临时目录、源码、原生编译目录会混进 app.asar，把安装包撑大。
+    '!.agents/**/*',
+    '!.claude/**/*',
+    '!.tmp/**/*',
+    '!.tmp-*/**/*',
+    '!.vscode/**/*',
+    '!CipherTalk-CLI/**/*',
+    '!Docs/**/*',
+    '!evaluation/**/*',
+    '!examples/**/*',
+    '!electron/**/*',
+    '!message/**/*',
+    '!native/**/*',
+    '!native-dlls/**/*',
+    '!output/**/*',
+    '!plugin-sdk/**/*',
+    '!plugin-workspace/**/*',
+    '!public/**/*',
+    '!release/**/*',
+    '!resources/**/*',
+    '!src/**/*',
+    '!tools/**/*',
+    '!wcdb_api/**/*',
+    '!*.tsbuildinfo',
+    '!build_log.txt',
+    '!syntax_check.bat'
   ]
 
   if (buildTarget === 'win') {
-    return appendUnique(
+    const patterns = appendUnique(
       withoutItems(baseFiles, ['node_modules/koffi/build/**/*']),
       [
         ...commonFiles,
+        '!node_modules/**/{darwin,mac}/**/*',
+        '!node_modules/**/*.dylib',
+        '!node_modules/sherpa-onnx-node/bin/!(win-x64)/**/*',
+        '!node_modules/ffmpeg-static/bin/!(win32-x64)/**/*',
         'node_modules/koffi/build/koffi/win32_x64/**/*'
       ]
     )
+    return [{ from: '.', filter: patterns }]
   }
 
   if (buildTarget === 'mac') {
-    return appendUnique(
+    const patterns = appendUnique(
       withoutItems(baseFiles, [
         'node_modules/koffi/build/**/*',
         '!node_modules/sherpa-onnx-node/bin/!(win-x64)/**/*',
@@ -134,9 +166,10 @@ function getFiles(buildTarget) {
         'node_modules/koffi/build/koffi/darwin_*/**/*'
       ]
     )
+    return [{ from: '.', filter: patterns }]
   }
 
-  return appendUnique(baseFiles, commonFiles)
+  return [{ from: '.', filter: appendUnique(baseFiles, commonFiles) }]
 }
 
 function getAsarUnpack(buildTarget) {
@@ -144,7 +177,7 @@ function getAsarUnpack(buildTarget) {
 
   if (buildTarget === 'win') {
     return appendUnique(
-      withoutItems(baseAsarUnpack, ['node_modules/koffi/**/*']),
+      withoutItems(baseAsarUnpack, ['node_modules/koffi/**/*', 'resources/**/*']),
       ['node_modules/koffi/build/koffi/win32_x64/**/*']
     )
   }
@@ -172,6 +205,8 @@ function getDmg(buildTarget) {
 
 module.exports = {
   ...base,
+  win: target === 'win' ? { ...(base.win || {}), files: [] } : base.win,
+  mac: target === 'mac' ? { ...(base.mac || {}), files: [] } : base.mac,
   files: getFiles(target),
   asarUnpack: getAsarUnpack(target),
   dmg: getDmg(target),

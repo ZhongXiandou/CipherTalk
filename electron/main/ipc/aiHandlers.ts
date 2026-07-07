@@ -1,9 +1,10 @@
 import { ipcMain } from 'electron'
+import { createHash } from 'crypto'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import type { UIMessage } from 'ai'
 import type { MainProcessContext } from '../context'
-import type { AgentProviderConfig, AgentProviderConfigOverride, AgentScope, AgentToolProfile, AgentUploadedMediaContext } from '../../services/agent/types'
+import type { AgentProviderConfig, AgentProviderConfigOverride, AgentScope, AgentSkillContextItem, AgentToolProfile, AgentUploadedMediaContext } from '../../services/agent/types'
 import type { CodeWorkspaceRef } from '../../services/agent/codeWorkspaceTypes'
 import type { PersonaCard, PersonaNotes, PersonaRecord, PersonaTtsVoiceBinding } from '../../services/agent/persona/personaTypes'
 import { formatAgentError } from '../../services/agent/errorFormat'
@@ -15,6 +16,7 @@ const AGENT_RUN_PROXY_CACHE_TTL_MS = 5 * 60 * 1000
 const AGENT_PREP_PROGRESS_TITLE = '大模型准备中'
 const TOOL_APPROVAL_SIGNATURE_TTL_MS = 2 * 60 * 60 * 1000
 const TOOL_APPROVAL_SIGNATURE_CACHE_MAX = 500
+const INTERNAL_TURN_CONTEXT_KIND = 'agent-turn-context'
 
 type ToolApprovalSignatureCacheItem = {
   toolCallId: string
@@ -72,6 +74,198 @@ function stableUiMessageKey(message: UIMessage, fallbackIndex: number): string {
   } catch {
     return `idx:${fallbackIndex}:${String(anyMessage?.role || '')}`
   }
+}
+
+function shortHash(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 16)
+}
+
+function uiMessageId(message: UIMessage | undefined): string {
+  const id = (message as any)?.id
+  return typeof id === 'string' ? id : ''
+}
+
+function internalTurnContextMeta(message: UIMessage | undefined): { targetUserMessageId?: string } | null {
+  const meta = (message as any)?.metadata?.ciphertalk?.internal
+  if (!meta || typeof meta !== 'object') return null
+  if ((meta as any).kind !== INTERNAL_TURN_CONTEXT_KIND) return null
+  return {
+    targetUserMessageId: typeof (meta as any).targetUserMessageId === 'string'
+      ? (meta as any).targetUserMessageId
+      : undefined,
+  }
+}
+
+function isInternalTurnContextMessage(message: UIMessage | undefined): boolean {
+  return Boolean(internalTurnContextMeta(message))
+}
+
+function stripInternalTurnContextMessages(messages: UIMessage[] = []): UIMessage[] {
+  return messages.filter((message) => !isInternalTurnContextMessage(message))
+}
+
+function stripInternalTurnContextFromConversation<T extends { messages?: UIMessage[] }>(conversation: T): T {
+  if (!Array.isArray(conversation.messages)) return conversation
+  return { ...conversation, messages: stripInternalTurnContextMessages(conversation.messages) }
+}
+
+function stripHistoricalToolPartsForModel(messages: UIMessage[] = []): UIMessage[] {
+  const lastUserIndex = findLastUserMessageIndex(messages)
+  if (lastUserIndex < 0 || lastUserIndex !== messages.length - 1) return messages
+  let changed = false
+  const next = messages.map((message, index) => {
+    if (index >= lastUserIndex || message.role !== 'assistant' || !Array.isArray((message as any).parts)) return message
+    const parts = ((message as any).parts as any[]).filter((part) => {
+      const keep = !(part && typeof part.type === 'string' && part.type.startsWith('tool-'))
+      if (!keep) changed = true
+      return keep
+    })
+    return parts.length === (message as any).parts.length ? message : { ...message, parts } as UIMessage
+  })
+  return changed ? next : messages
+}
+
+function countToolParts(messages: UIMessage[] = []): number {
+  let count = 0
+  for (const message of messages) {
+    const parts = Array.isArray((message as any)?.parts) ? (message as any).parts as any[] : []
+    for (const part of parts) {
+      if (part && typeof part.type === 'string' && part.type.startsWith('tool-')) count += 1
+    }
+  }
+  return count
+}
+
+function preserveInternalTurnContextMessages(dbMessages: UIMessage[] = [], incomingMessages: UIMessage[] = []): UIMessage[] {
+  const next = incomingMessages.filter((message) => !isInternalTurnContextMessage(message))
+  const existingIds = new Set(next.map((message) => uiMessageId(message)).filter(Boolean))
+  const internals = dbMessages.filter(isInternalTurnContextMessage)
+  for (const internal of internals) {
+    const id = uiMessageId(internal)
+    if (id && existingIds.has(id)) continue
+    const targetUserMessageId = internalTurnContextMeta(internal)?.targetUserMessageId
+    const targetIndex = targetUserMessageId
+      ? next.findIndex((message) => uiMessageId(message) === targetUserMessageId)
+      : -1
+    if (targetIndex >= 0) next.splice(targetIndex, 0, internal)
+  }
+  return next
+}
+
+function isDeepSeekProvider(config: AgentProviderConfig): boolean {
+  if (config.providerKind !== 'openai-compatible') return false
+  const text = [config.name, config.baseURL, config.model].filter(Boolean).join(' ').toLowerCase()
+  return text.includes('deepseek')
+}
+
+function findLastUserMessageIndex(messages: UIMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === 'user') return i
+  }
+  return -1
+}
+
+async function buildDeepSeekHistoryTurnContext(opts: {
+  scope: AgentScope
+  skills: AgentSkillContextItem[]
+  queryText: string
+  planMode: boolean
+  codeWorkspace: CodeWorkspaceRef | null
+  toolsDisabled?: boolean
+  includeWechatOutbound?: boolean
+  includeWechatReplyMedia?: boolean
+}): Promise<string> {
+  const [
+    prompts,
+    memory,
+    runtimeCache,
+    webSearch,
+    imageGen,
+  ] = await Promise.all([
+    import('../../services/agent/prompts'),
+    import('../../services/agent/tools/memory'),
+    import('../../services/agent/runtimeCache'),
+    import('../../services/ai/webSearchService'),
+    import('../../services/ai/imageGenService'),
+  ])
+  const promptParts = prompts.buildAgentPromptParts(opts.scope, opts.skills, {
+    includeWechatOutbound: opts.includeWechatOutbound === true,
+    includeWechatReplyMedia: opts.includeWechatReplyMedia === true,
+  })
+  const toolsDisabled = opts.toolsDisabled === true
+  const cachedMemoryContext = runtimeCache.getCachedStartupMemory(opts.scope)
+  const memoryContext = cachedMemoryContext ?? ''
+  if (cachedMemoryContext === null) {
+    runtimeCache.warmStartupMemory(opts.scope, () => memory.buildMemoryContext(opts.scope))
+  }
+  const relevantMemoryContext = await memory.preloadRelevantMemories(opts.queryText, opts.scope)
+  return [
+    '# 本轮内部上下文',
+    '以下内容只适用于紧随其后的用户消息；后续回合若出现新的同类 system 消息，以新的为准。',
+    promptParts.dynamicSystem,
+    opts.planMode ? prompts.PLAN_MODE_PROMPT : '',
+    opts.codeWorkspace ? prompts.CODE_WORKSPACE_PROMPT : '',
+    !toolsDisabled && webSearch.isWebSearchAvailable() ? prompts.WEB_SEARCH_PROMPT : '',
+    !toolsDisabled && imageGen.isImageGenAvailable() ? prompts.IMAGE_GEN_PROMPT : '',
+    memoryContext,
+    promptParts.turnSystem,
+    relevantMemoryContext,
+  ].filter(Boolean).join('\n')
+}
+
+async function upsertDeepSeekHistoryTurnContextMessage(opts: {
+  messages: UIMessage[]
+  providerConfig: AgentProviderConfig
+  scope: AgentScope
+  skills: AgentSkillContextItem[]
+  queryText: string
+  planMode: boolean
+  codeWorkspace: CodeWorkspaceRef | null
+}): Promise<{ messages: UIMessage[]; changed: boolean; mode: 'history' | 'tail' }> {
+  if (!isDeepSeekProvider(opts.providerConfig)) {
+    return { messages: opts.messages, changed: false, mode: 'tail' }
+  }
+  const lastUserIndex = findLastUserMessageIndex(opts.messages)
+  if (lastUserIndex < 0) return { messages: opts.messages, changed: false, mode: 'tail' }
+  const userMessage = opts.messages[lastUserIndex]
+  const userId = uiMessageId(userMessage) || `user-${shortHash(JSON.stringify((userMessage as any)?.parts ?? userMessage))}`
+  const previous = opts.messages[lastUserIndex - 1]
+  if (internalTurnContextMeta(previous)?.targetUserMessageId === userId) {
+    return { messages: opts.messages, changed: false, mode: 'history' }
+  }
+
+  const content = await buildDeepSeekHistoryTurnContext({
+    scope: opts.scope,
+    skills: opts.skills,
+    queryText: opts.queryText,
+    planMode: opts.planMode,
+    codeWorkspace: opts.codeWorkspace,
+  })
+  if (!content.trim()) return { messages: opts.messages, changed: false, mode: 'tail' }
+
+  const message: UIMessage = {
+    id: `ct-turn-context-${userId}-${shortHash(content)}`,
+    role: 'system',
+    metadata: {
+      ciphertalk: {
+        internal: {
+          kind: INTERNAL_TURN_CONTEXT_KIND,
+          targetUserMessageId: userId,
+          provider: 'deepseek',
+        },
+      },
+    },
+    parts: [{ type: 'text', text: content }],
+  } as UIMessage
+
+  const next = opts.messages.filter((item) => {
+    const meta = internalTurnContextMeta(item)
+    return !meta || meta.targetUserMessageId !== userId
+  })
+  const targetIndex = findLastUserMessageIndex(next)
+  if (targetIndex < 0) return { messages: opts.messages, changed: false, mode: 'tail' }
+  next.splice(targetIndex, 0, message)
+  return { messages: next, changed: true, mode: 'history' }
 }
 
 function uiMessageTextLength(message: UIMessage): number {
@@ -556,16 +750,36 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
       markPerf('解析 Agent Profile', `MCP ${profile.mcpTools.length} 个 / 技能 ${profile.skills.length} 个`)
       stage = 'convert_messages'
       sendPrepProgress()
-      rememberUiMessageToolApprovalSignatures(payload.messages)
-      const messagesWithApprovalSignatures = restoreUiMessageToolApprovalSignatures(payload.messages)
+      const { agentConversationStore } = await import('../../services/agent/conversationStore')
+      const storedConversation = payload.conversationId ? agentConversationStore.load(Number(payload.conversationId)) : null
+      const payloadMessages = Array.isArray(payload.messages) ? payload.messages : []
+      const historyMergedMessages = storedConversation?.messages
+        ? mergeUiMessagesById(storedConversation.messages, payloadMessages)
+        : payloadMessages
+      const historyTurnContext = await timedTask('DeepSeek 历史上下文', upsertDeepSeekHistoryTurnContextMessage({
+        messages: historyMergedMessages,
+        providerConfig,
+        scope: profile.scope,
+        skills: profile.skills,
+        queryText: initialLastUserText,
+        planMode: payload.planMode === true,
+        codeWorkspace: profile.codeWorkspace,
+      }))
+      if (historyTurnContext.changed && payload.conversationId) {
+        agentConversationStore.replaceMessages(Number(payload.conversationId), historyTurnContext.messages)
+      }
+      rememberUiMessageToolApprovalSignatures(historyTurnContext.messages)
+      const messagesWithApprovalSignatures = restoreUiMessageToolApprovalSignatures(historyTurnContext.messages)
       const uiMessages = shouldStripProviderMetadata(providerConfig)
         ? stripUiMessageProviderMetadata(messagesWithApprovalSignatures)
         : messagesWithApprovalSignatures
       const { prepareProviderFileUploads } = await import('../../services/agent/providerFileUpload')
-      const providerFileUpload = await timedTask('provider file upload', prepareProviderFileUploads(uiMessages, providerConfig, logger))
+      const modelUiMessages = stripHistoricalToolPartsForModel(uiMessages)
+      const strippedToolPartCount = countToolParts(uiMessages) - countToolParts(modelUiMessages)
+      const providerFileUpload = await timedTask('provider file upload', prepareProviderFileUploads(modelUiMessages, providerConfig, logger))
       const uploadedMediaContext = extractUploadedMediaContext(providerFileUpload.messages)
       const messages = sanitizeModelMessageToolPairs(await convertToModelMessages(providerFileUpload.messages))
-      markPerf('整理消息', `${messages.length} 条 / file upload ${providerFileUpload.stats.uploaded} 上传 ${providerFileUpload.stats.reused} 复用 ${providerFileUpload.stats.failed} 失败`)
+      markPerf('整理消息', `${messages.length} 条 / strip tools ${strippedToolPartCount} 个 / file upload ${providerFileUpload.stats.uploaded} 上传 ${providerFileUpload.stats.reused} 复用 ${providerFileUpload.stats.failed} 失败`)
       stage = 'inject_tools_and_skills'
       sendPrepProgress()
       const mcpTools = profile.mcpTools
@@ -582,6 +796,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
         elapsedMs: Date.now() - startedAt,
         provider: providerToLogData(providerConfig),
         modelMessageCount: messages.length,
+        turnContextMode: historyTurnContext.mode,
         readOnlyMcpToolCount: profile.logMeta.readOnlyMcpToolCount,
         mcpCandidateCount: profile.logMeta.readOnlyMcpToolCount,
         selectedMcpToolCount: mcpTools.length,
@@ -629,6 +844,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
           planMode: payload.planMode === true,
           toolProfile: profile.toolProfile,
           codeWorkspace: profile.codeWorkspace,
+          turnContextMode: historyTurnContext.mode,
           allowWechatReplyMedia: false,
         },
         (chunk) => {
@@ -703,7 +919,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
       const { agentConversationStore } = await import('../../services/agent/conversationStore')
       const conversation = agentConversationStore.load(Number(id))
       return conversation
-        ? { success: true, conversation }
+        ? { success: true, conversation: stripInternalTurnContextFromConversation(conversation) }
         : { success: false, error: 'AI 对话不存在' }
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) }
@@ -775,9 +991,10 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
       const hasVersion = Number.isFinite(baseUpdatedAt) && baseUpdatedAt > 0
       const isStale = hasVersion && Number(loadedBeforeSave.updatedAt || 0) > baseUpdatedAt
       const shouldMergeIfStale = payload.mergeIfStale !== false
-      const nextMessages = isStale && shouldMergeIfStale
+      const incomingMessages = isStale && shouldMergeIfStale
         ? mergeUiMessagesById(loadedBeforeSave.messages, payload.messages || [])
         : (payload.messages || [])
+      const nextMessages = preserveInternalTurnContextMessages(loadedBeforeSave.messages, incomingMessages)
       const originClientId = payload.originClientId ?? null
 
       if (payload.scope || payload.modelProvider !== undefined || payload.modelId !== undefined) {
@@ -1399,7 +1616,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
         ttsVoice: persona.ttsVoice,
         instructions: persona.card.ttsInstructions,
         signal: aborter.signal,
-        logger,
+        logger: logger ?? undefined,
       })
       const sendPersonaChunk = (chunk: unknown) => {
         send(chunk)
@@ -1490,7 +1707,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
       const result = await clonePersonaVoiceFromSession({
         sessionId: String(payload?.sessionId || '').trim(),
         displayName: String(payload?.displayName || '').trim(),
-        logger: ctx.getLogService(),
+        logger: ctx.getLogService() ?? undefined,
       })
       if (!result.success) return result
       return {
@@ -1511,7 +1728,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
         displayName: String(payload?.displayName || '').trim(),
         outputPath: String(payload?.outputPath || '').trim(),
         minSeconds: 10,
-        logger: ctx.getLogService(),
+        logger: ctx.getLogService() ?? undefined,
       })
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : String(e) }

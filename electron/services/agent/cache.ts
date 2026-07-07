@@ -54,6 +54,15 @@ function isOfficialOpenAIResponsesEndpoint(input: AgentRunInput): boolean {
     hostFromUrl(input.providerConfig.baseURL) === 'api.openai.com'
 }
 
+function isDeepSeekProvider(input: AgentRunInput): boolean {
+  if (input.providerConfig.providerKind !== 'openai-compatible') return false
+  const text = [input.providerConfig.name, input.providerConfig.baseURL, input.providerConfig.model]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+  return text.includes('deepseek')
+}
+
 function supportsOpenAI24hPromptCache(model: string): boolean {
   return /\b5\.1\b/.test(model.toLowerCase())
 }
@@ -207,6 +216,15 @@ export function buildProviderCacheStatus(input: AgentRunInput, promptCacheKey: s
     }
   }
   if (input.providerConfig.providerKind === 'openai-compatible') {
+    if (isDeepSeekProvider(input)) {
+      return {
+        ...base,
+        promptCacheEnabled: true,
+        promptCacheProvider: 'openai-compatible',
+        requestBodyPromptCacheField: 'prompt_cache_key',
+        reason: 'DeepSeek 上下文硬盘缓存默认开启；当前通过隐藏 system 历史消息保持多轮前缀可复现，并读取 prompt_cache_hit_tokens / prompt_cache_miss_tokens。',
+      }
+    }
     return {
       ...base,
       promptCacheEnabled: true,
