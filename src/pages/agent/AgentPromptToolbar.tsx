@@ -13,10 +13,13 @@ import {
   usePromptInputController,
   type PromptInputControllerProps,
 } from '@/components/ai-elements/prompt-input'
-import type { CodeWorkspaceApprovalPolicy } from '@/types/electron'
+import type { AgentToolApprovalPolicy, CodeWorkspaceApprovalPolicy } from '@/types/electron'
 import {
+  AGENT_TOOL_APPROVAL_POLICY_OPTIONS,
   CODE_WORKSPACE_APPROVAL_POLICY_OPTIONS,
   PROMPT_PRESET_GROUPS,
+  agentToolApprovalPolicyOption,
+  agentToolApprovalPolicyToneClass,
   codeWorkspaceApprovalPolicyOption,
   codeWorkspaceApprovalPolicyToneClass,
 } from './agentPromptPresets'
@@ -65,6 +68,58 @@ export function CodeWorkspaceApprovalPolicyDropdown({
           {CODE_WORKSPACE_APPROVAL_POLICY_OPTIONS.map((option) => {
             const Icon = option.icon
             const toneClass = codeWorkspaceApprovalPolicyToneClass(option.value)
+            return (
+              <Dropdown.Item id={option.value} key={option.value} textValue={option.label}>
+                <Dropdown.ItemIndicator />
+                <Icon className={`size-4 shrink-0 ${toneClass || 'text-muted'}`} />
+                <div className="min-w-0 flex-1">
+                  <Label className={`block truncate ${toneClass}`}>{option.label}</Label>
+                  <span className="block truncate text-muted-foreground text-xs">{option.description}</span>
+                </div>
+              </Dropdown.Item>
+            )
+          })}
+        </Dropdown.Menu>
+      </Dropdown.Popover>
+    </Dropdown>
+  )
+}
+
+export function AgentToolApprovalPolicyDropdown({
+  policy,
+  onChange,
+}: {
+  policy: AgentToolApprovalPolicy
+  onChange: (policy: AgentToolApprovalPolicy) => void
+}) {
+  const current = agentToolApprovalPolicyOption(policy)
+  const CurrentIcon = current.icon
+  const currentToneClass = agentToolApprovalPolicyToneClass(current.value)
+
+  return (
+    <Dropdown>
+      <HeroButton
+        aria-label="设置 Agent 工具审批策略"
+        className={`gap-1 ${currentToneClass}`}
+        size="sm"
+        variant="tertiary"
+      >
+        <CurrentIcon className="size-3.5 shrink-0" />
+        <span className="max-w-24 truncate">{current.label}</span>
+        <ChevronDown className="size-3 shrink-0" />
+      </HeroButton>
+      <Dropdown.Popover className="w-80 max-w-[calc(100vw-2rem)]" placement="top start">
+        <div className="border-border/70 border-b px-3 py-2.5">
+          <Label className="text-sm">如何批准高风险工具调用？</Label>
+        </div>
+        <Dropdown.Menu
+          selectedKeys={new Set([current.value])}
+          selectionMode="single"
+          onAction={(key) => onChange(String(key) as AgentToolApprovalPolicy)}
+        >
+          {AGENT_TOOL_APPROVAL_POLICY_OPTIONS.map((option) => {
+            const Icon = option.icon
+            const toneClass = agentToolApprovalPolicyToneClass(option.value)
             return (
               <Dropdown.Item id={option.value} key={option.value} textValue={option.label}>
                 <Dropdown.ItemIndicator />

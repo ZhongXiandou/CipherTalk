@@ -129,6 +129,8 @@ interface ConfigSchema {
   }
   agentCodeWorkspaceRoot: string
   agentCodeWorkspaceApprovalPolicy: 'on-request' | 'risk-based' | 'full-access'
+  // Agent 工具审批策略（发送微信媒体/文件、导出、任务、MCP 等，见 toolApproval.ts）；语义与上面的代码工作区策略一致
+  agentToolApprovalPolicy: 'on-request' | 'risk-based' | 'full-access'
   // 嵌入模型（语义/向量检索，独立于聊天模型）
   embeddingConfig: {
     enabled: boolean
@@ -308,6 +310,7 @@ const defaults: ConfigSchema = {
   aiProviderModelCache: {},
   agentCodeWorkspaceRoot: '',
   agentCodeWorkspaceApprovalPolicy: 'on-request',
+  agentToolApprovalPolicy: 'on-request',
   embeddingConfig: {
     enabled: false,
     provider: '',

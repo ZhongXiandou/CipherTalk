@@ -179,6 +179,7 @@ export type CodeWorkspaceApprovalKind = 'write' | 'delete' | 'command' | 'dev-se
 export type CodeWorkspaceApprovalRisk = 'low' | 'medium' | 'high'
 export type CodeWorkspaceApprovalDecision = 'approved' | 'rejected'
 export type CodeWorkspaceApprovalPolicy = 'on-request' | 'risk-based' | 'full-access'
+export type AgentToolApprovalPolicy = 'on-request' | 'risk-based' | 'full-access'
 
 export interface CodeWorkspaceRef {
   id: string

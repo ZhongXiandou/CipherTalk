@@ -41,10 +41,11 @@ import { CODE_WORKSPACE_FILE_REF_MIME, CodeWorkspacePanel, CodeWorkspacePanelPop
 import { AgentApprovalBar, type ToolApprovalBarItem } from './AgentApprovalBar'
 import * as configService from '@/services/config'
 import { useTtsSpeaker } from '@/lib/ttsPlayer'
-import type { AgentConversationUpdatedEvent, CodeWorkspaceApprovalPolicy, CodeWorkspaceApprovalRequest, CodeWorkspaceEvent, CodeWorkspaceState } from '@/types/electron'
+import type { AgentConversationUpdatedEvent, AgentToolApprovalPolicy, CodeWorkspaceApprovalPolicy, CodeWorkspaceApprovalRequest, CodeWorkspaceEvent, CodeWorkspaceState } from '@/types/electron'
 import { REASONING_EFFORT_OPTIONS, reasoningEffortLabel } from './agentPromptPresets'
 import {
   AgentPromptPrimaryAction,
+  AgentToolApprovalPolicyDropdown,
   CodeWorkspaceApprovalPolicyDropdown,
   PromptInputControllerBridge,
   PromptPresetButton,
@@ -181,6 +182,16 @@ export default function AgentPage() {
     setWebSearchOn(next)
     void window.electronAPI.webSearch?.setConfig({ enabled: next })
   }, [webSearchOn, webSearchHasKey])
+  const [agentToolApprovalPolicy, setAgentToolApprovalPolicy] = useState<AgentToolApprovalPolicy>('on-request')
+  useEffect(() => {
+    void window.electronAPI.config.get('agentToolApprovalPolicy').then((value) => {
+      if (value === 'risk-based' || value === 'full-access') setAgentToolApprovalPolicy(value)
+    })
+  }, [])
+  const handleAgentToolApprovalPolicyChange = useCallback((policy: AgentToolApprovalPolicy) => {
+    setAgentToolApprovalPolicy(policy)
+    void window.electronAPI.config.set('agentToolApprovalPolicy', policy)
+  }, [])
   const [codeWorkspaceState, setCodeWorkspaceState] = useState<CodeWorkspaceState | null>(null)
   const [codeWorkspaceApproval, setCodeWorkspaceApproval] = useState<CodeWorkspaceApprovalRequest | null>(null)
   const [codeWorkspaceApprovalExpanded, setCodeWorkspaceApprovalExpanded] = useState(false)
@@ -2057,6 +2068,11 @@ export default function AgentPage() {
                     onChange={handleCodeWorkspaceApprovalPolicyChange}
                   />
                 )}
+
+                <AgentToolApprovalPolicyDropdown
+                  policy={agentToolApprovalPolicy}
+                  onChange={handleAgentToolApprovalPolicyChange}
+                />
               </PromptInputTools>
 
               <div className="flex items-center gap-2">
