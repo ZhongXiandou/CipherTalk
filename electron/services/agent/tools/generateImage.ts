@@ -12,10 +12,17 @@ export const generateImage = tool({
   description:
     '根据文字描述生成一张图片（AI 作图）。用户要求画图/作图/生成图片/配图时使用。' +
     'prompt 用具体、生动的描述（主体、风格、构图、色调），中英文皆可。' +
+    '必须按画面构图自行选择 size：风景/宽场景用横图，人像/全身/手机壁纸用竖图，图标/头像/无明确方向用方图。' +
     '生成的图片会自动展示给用户，回答时简要说明画了什么即可，不要输出图片路径或链接。',
   inputSchema: z.object({
     prompt: z.string().min(1).describe('图片描述（提示词），尽量具体：主体、风格、构图、色调等'),
-    size: z.string().optional().describe('图片尺寸，格式 宽x高（如 1024x1024），默认用全局配置'),
+    size: z
+      .string()
+      .optional()
+      .describe(
+        '图片尺寸，格式 宽x高。按构图选择横/竖/方图，如横图 1792x1024、竖图 1024x1792、方图 1024x1024。' +
+          '用户未指定比例时必须自行挑选，不要省略。若服务商报错不支持该尺寸，换用报错信息里支持的尺寸重试，没给就省略 size 重试。',
+      ),
   }),
   execute: async ({ prompt, size }, { abortSignal }) => {
     const res = await generateImageToFile(prompt, { size, signal: abortSignal })

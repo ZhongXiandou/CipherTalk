@@ -783,7 +783,9 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
         codeWorkspace: profile.codeWorkspace,
       }))
       if (historyTurnContext.changed && payload.conversationId) {
-        agentConversationStore.replaceMessages(Number(payload.conversationId), historyTurnContext.messages)
+        // 内部上下文注入：只落库、不广播。否则 originClientId 为空会让前端在 busy 时挂起
+        // pending reload，流结束后从库重载，和最终落盘抢跑，偶发把刚生成的正文盖成空白。
+        agentConversationStore.replaceMessages(Number(payload.conversationId), historyTurnContext.messages, { emit: false })
       }
       rememberUiMessageToolApprovalSignatures(historyTurnContext.messages)
       const messagesWithApprovalSignatures = restoreUiMessageToolApprovalSignatures(historyTurnContext.messages)

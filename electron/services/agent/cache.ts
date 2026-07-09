@@ -135,11 +135,10 @@ export function buildProviderOptions(input: AgentRunInput, promptCacheKey: strin
       // 让 OpenAI 返回思考摘要（推理模型才有内容，非推理模型会被忽略）；下游 engine 已透传 reasoning 块
       option.reasoningSummary = 'auto'
       option.store = isOfficialOpenAIResponsesEndpoint(input)
-      if (option.store) {
-        option.promptCacheKey = promptCacheKey
-        if (supportsOpenAI24hPromptCache(input.providerConfig.model)) {
-          option.promptCacheRetention = '24h'
-        }
+      // prompt_cache_key 与 store 无关：官方直连必发；第三方中转透传到上游即可命中，不透传也无害
+      option.promptCacheKey = promptCacheKey
+      if (option.store && supportsOpenAI24hPromptCache(input.providerConfig.model)) {
+        option.promptCacheRetention = '24h'
       }
     } else {
       // @ai-sdk/openai-compatible 只校验 camelCase 标准项；厂商扩展字段要用请求体原名透传。
@@ -198,6 +197,15 @@ export function buildProviderCacheStatus(input: AgentRunInput, promptCacheKey: s
       promptCacheEnabled: true,
       promptCacheProvider: 'openai-responses',
       requestBodyPromptCacheField: 'promptCacheKey',
+    }
+  }
+  if (input.providerConfig.providerKind === 'openai-responses') {
+    return {
+      ...base,
+      promptCacheEnabled: true,
+      promptCacheProvider: 'openai-responses',
+      requestBodyPromptCacheField: 'promptCacheKey',
+      reason: '第三方 responses 端点：已注入 promptCacheKey，是否命中取决于中转是否透传到上游并回传 cached_tokens。',
     }
   }
   if (input.providerConfig.providerKind === 'anthropic') {

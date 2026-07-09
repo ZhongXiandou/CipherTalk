@@ -14,7 +14,7 @@ const DEFAULT_CFG: ImageGenConfig = {
   apiKey: '',
   baseURL: 'https://api.siliconflow.cn/v1',
   model: 'Kwai-Kolors/Kolors',
-  size: '1024x1024',
+  size: '',
   timeoutMs: 3_600_000,
 }
 
@@ -154,9 +154,11 @@ export default function ImageGenTab() {
         <TextField fullWidth onChange={(v) => patch({ size: v.trim() })} value={cfg.size}>
           <Label>图片尺寸</Label>
           <InputGroup fullWidth variant="secondary">
-            <InputGroup.Input placeholder="1024x1024" />
+            <InputGroup.Input placeholder="留空由 AI 自选" />
           </InputGroup>
-          <Description>格式 宽x高（如 1024x1024），留空用服务商默认。</Description>
+          <Description>
+            格式 宽x高（如 1024x1024）。留空时由 AI 按画面选横/竖/方图；填了则作为 AI 未指定尺寸时的默认值。
+          </Description>
         </TextField>
 
         <TextField

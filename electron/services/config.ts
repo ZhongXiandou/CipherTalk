@@ -419,7 +419,7 @@ const defaults: ConfigSchema = {
     apiKey: '',
     baseURL: 'https://api.siliconflow.cn/v1',
     model: 'Kwai-Kolors/Kolors',
-    size: '1024x1024',
+    size: '', // 空 = AI 按构图自选；填了则作 AI 未传 size 时的回退
     timeoutMs: IMAGE_GEN_DEFAULT_TIMEOUT_MS,
   },
   aiResolvedProxyUrl: '',

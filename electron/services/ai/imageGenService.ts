@@ -19,7 +19,7 @@ export interface ImageGenConfig {
   apiKey: string
   baseURL: string
   model: string
-  /** 图片尺寸，如 1024x1024；空 = 服务商默认。 */
+  /** 图片尺寸，如 1024x1024；空 = 由 AI 工具按构图自选（未传时再交服务商默认）。 */
   size: string
   /** 作图请求超时，毫秒。 */
   timeoutMs: number

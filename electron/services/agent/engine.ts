@@ -149,7 +149,7 @@ function firstTokenCount(...values: Array<number | undefined>): number | undefin
   return values.find((value) => value !== undefined)
 }
 
-function normalizeUsageForCacheStats(usage: unknown): unknown {
+function normalizeUsageForCacheStats(usage: unknown, cacheFieldReported = false): unknown {
   const source = recordOf(usage)
   if (!source) return usage
   const raw = source.raw
@@ -170,10 +170,15 @@ function normalizeUsageForCacheStats(usage: unknown): unknown {
     nestedNumber(raw, ['cachedContentTokenCount']),
     nestedNumber(raw, ['total_cached_tokens']),
   )
+  // AI SDK 把缺失的 cached_tokens 强转成 0：details.cacheReadTokens=0 分不清「真 0」和「服务商没返回」。
+  // raw 里出现过缓存字段才把 0 当真值；details 只在 >0（真命中）或任一 step 的 raw 报过数
+  // （cacheFieldReported，totalUsage 跨步求和后 raw 会被丢掉）时采信，否则视为未返回。
+  const detailsCacheReadTokens = finiteTokenCount(details.cacheReadTokens)
   const cacheReadTokens = firstTokenCount(
-    rawCacheReadTokens && rawCacheReadTokens > 0 ? rawCacheReadTokens : undefined,
-    finiteTokenCount(details.cacheReadTokens),
     rawCacheReadTokens,
+    detailsCacheReadTokens !== undefined && (detailsCacheReadTokens > 0 || cacheFieldReported)
+      ? detailsCacheReadTokens
+      : undefined,
   )
   const cacheWriteTokens = firstTokenCount(
     finiteTokenCount(details.cacheWriteTokens),
@@ -192,17 +197,26 @@ function normalizeUsageForCacheStats(usage: unknown): unknown {
     ? cacheReadTokens / inputTokens
     : undefined
 
+  // cacheReadTokens 判定为「未返回」时要从 details 里剔除 SDK 强转的 0，否则渲染端会拿它重算出 0%
+  const inputTokenDetails: Record<string, unknown> = {
+    ...details,
+    ...(noCacheTokens !== undefined ? { noCacheTokens } : {}),
+    ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+  }
+  if (cacheReadTokens !== undefined) inputTokenDetails.cacheReadTokens = cacheReadTokens
+  else delete inputTokenDetails.cacheReadTokens
+
   return {
     ...source,
     ...(inputTokens !== undefined ? { inputTokens } : {}),
-    inputTokenDetails: {
-      ...details,
-      ...(noCacheTokens !== undefined ? { noCacheTokens } : {}),
-      ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
-      ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
-    },
+    inputTokenDetails,
     ...(cacheHitRate !== undefined ? { cacheHitRate } : {}),
   }
+}
+
+/** 归一化后的 usage 是否带有可信的缓存读数（用于跨 step 记录「服务商报过缓存字段」）。 */
+function usageReportsCacheRead(normalizedUsage: unknown): boolean {
+  return nestedNumber(normalizedUsage, ['inputTokenDetails', 'cacheReadTokens']) !== undefined
 }
 
 function readToolOutputError(output: unknown): string | undefined {
@@ -312,6 +326,8 @@ export async function runAgent(
     perf('组装系统提示')
     // 跨步保持的压缩状态：超过模型窗口 90% 时把早期历史交 LLM 摘要折叠，见 aiCompaction.ts
     const compactionState = createCompactionState()
+    // 任一 step 的 raw usage 报过缓存字段 → totalUsage（raw 被求和丢掉）里的 cacheReadTokens=0 才可信
+    let providerReportedCacheRead = false
     const agent = new ToolLoopAgent({
       model: createLanguageModel(input.providerConfig, { promptCacheKey: prepared.promptCacheKey }),
       instructions: prepared.instructions,
@@ -331,13 +347,15 @@ export async function runAgent(
       timeout: { totalMs: AGENT_TOTAL_TIMEOUT_MS },
       telemetry: { functionId: 'agent-run' },
       onStepEnd: (step) => {
+        const stepUsage = normalizeUsageForCacheStats(step.usage)
+        if (usageReportsCacheRead(stepUsage)) providerReportedCacheRead = true
         trace.steps.push({
           stepNumber: step.stepNumber,
           callId: step.callId,
           provider: step.model.provider,
           modelId: step.model.modelId,
           finishReason: step.finishReason,
-          usage: normalizeUsageForCacheStats(step.usage),
+          usage: stepUsage,
           elapsedMs: step.performance?.stepTimeMs,
           responseMs: step.performance?.responseTimeMs,
           timeToFirstOutputMs: step.performance?.timeToFirstOutputMs,
@@ -395,7 +413,7 @@ export async function runAgent(
       messageMetadata: ({ part }) => {
         if (part.type !== 'finish') return undefined
         return {
-          usage: normalizeUsageForCacheStats(part.totalUsage),
+          usage: normalizeUsageForCacheStats(part.totalUsage, providerReportedCacheRead),
           finishReason: part.finishReason,
           rawFinishReason: part.rawFinishReason,
           modelProvider: input.providerConfig.name,
