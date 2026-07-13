@@ -303,7 +303,7 @@ function normalizeBaseURL(baseURL: string): string {
   return String(baseURL || '').trim().replace(/\/+$/, '')
 }
 
-function joinEndpoint(baseURL: string, path: string): string {
+export function joinEndpoint(baseURL: string, path: string): string {
   const normalized = normalizeBaseURL(baseURL)
   return `${normalized}${path.startsWith('/') ? path : `/${path}`}`
 }

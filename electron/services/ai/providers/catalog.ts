@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { BaseAIProvider, type ProviderKind } from './base'
+import { BaseAIProvider, joinEndpoint, type ProviderKind } from './base'
 import { getAppPath, getUserDataPath, isElectronPackaged } from '../../runtimePaths'
 
 export type AIProviderProtocol = ProviderKind
@@ -562,6 +562,38 @@ export class CatalogAIProvider extends BaseAIProvider {
     if (!secretId || !secretKey) return undefined
     return { Authorization: `Bearer ${secretId};${secretKey}` }
   }
+
+  private isOpenRouterEndpoint(): boolean {
+    try {
+      return new URL(this.baseURL).hostname.toLowerCase().endsWith('openrouter.ai')
+    } catch {
+      return false
+    }
+  }
+
+  async testConnection(): Promise<{ success: boolean; error?: string; needsProxy?: boolean }> {
+    const result = await super.testConnection()
+    // OpenRouter 的 /models 不鉴权，模型列表拉取成功不代表 key 有效；再打需要鉴权的 /key 端点真实校验
+    if (!result.success || !this.isOpenRouterEndpoint()) return result
+
+    try {
+      const response = await fetch(joinEndpoint(this.baseURL, '/key'), {
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+        signal: AbortSignal.timeout(10000)
+      })
+      if (response.ok) return result
+      const body = await response.text().catch(() => '')
+      return { success: false, error: `API Key 无效（${response.status}）${body ? `: ${truncateKeyCheckBody(body)}` : ''}` }
+    } catch {
+      // /models 已证明网络可达，/key 探测自身异常时不误报失败
+      return result
+    }
+  }
+}
+
+function truncateKeyCheckBody(body: string): string {
+  const trimmed = body.trim()
+  return trimmed.length > 200 ? `${trimmed.slice(0, 200)}…` : trimmed
 }
 
 export async function getModelsDevModels(providerId: string): Promise<string[]> {
