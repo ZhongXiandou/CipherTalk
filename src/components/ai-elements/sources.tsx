@@ -3,7 +3,7 @@
 import { Disclosure, Link } from "@heroui/react";
 import { cn } from "@/lib/utils";
 import { Book, ChevronDown } from "@gravity-ui/icons";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 export type SourcesProps = ComponentProps<typeof Disclosure>;
 
@@ -14,8 +14,9 @@ export const Sources = ({ className, ...props }: SourcesProps) => (
   />
 );
 
-export type SourcesTriggerProps = ComponentProps<typeof Disclosure.Trigger> & {
+export type SourcesTriggerProps = Omit<ComponentProps<typeof Disclosure.Trigger>, "children"> & {
   count: number;
+  children?: ReactNode;
 };
 
 export const SourcesTrigger = ({
@@ -29,14 +30,10 @@ export const SourcesTrigger = ({
       className={cn("flex items-center gap-2", className)}
       {...props}
     >
-      {children ?? (
-        <>
-          <p className="font-medium">Used {count} sources</p>
-          <Disclosure.Indicator>
-            <ChevronDown className="h-4 w-4" />
-          </Disclosure.Indicator>
-        </>
-      )}
+      {children ?? <p className="font-medium">Used {count} sources</p>}
+      <Disclosure.Indicator>
+        <ChevronDown className="h-4 w-4" />
+      </Disclosure.Indicator>
     </Disclosure.Trigger>
   </Disclosure.Heading>
 );

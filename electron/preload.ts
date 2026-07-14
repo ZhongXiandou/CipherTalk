@@ -387,13 +387,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     test: (cfg: unknown) => ipcRenderer.invoke('rerank:test', cfg) as Promise<{ success: boolean; error?: string }>,
   },
 
-  // 联网搜索（Tavily）—— AI Agent web_search 工具
-  webSearch: {
-    getConfig: () => ipcRenderer.invoke('webSearch:getConfig') as Promise<{ success: boolean; config?: unknown; error?: string }>,
-    setConfig: (patch: unknown) => ipcRenderer.invoke('webSearch:setConfig', patch) as Promise<{ success: boolean; config?: unknown; error?: string }>,
-    test: (cfg: unknown) => ipcRenderer.invoke('webSearch:test', cfg) as Promise<{ success: boolean; resultCount?: number; error?: string }>,
-  },
-
   // 文字转语音 —— 朗读 AI 回复/微信消息/角色语音回复
   tts: {
     getConfig: () => ipcRenderer.invoke('tts:getConfig') as Promise<{ success: boolean; config?: unknown; available?: boolean; error?: string }>,

@@ -2,19 +2,19 @@
  * 编排引擎 —— 用 AI SDK 的 ToolLoopAgent 跑 ReAct 循环，流式产出 UIMessageChunk。
  * 运行在 AI utilityProcess 子进程内（见文档 §3.1/§5.2）。
  */
-import { generateText, tool, ToolLoopAgent, isStepCount, toUIMessageStream, type ModelMessage, type UIMessageChunk } from 'ai'
+import { generateText, streamText, tool, ToolLoopAgent, isStepCount, toUIMessageStream, type FinishReason, type ModelMessage, type ToolSet, type UIMessageChunk } from 'ai'
 import { randomBytes } from 'crypto'
 import { z } from 'zod'
 import type { SystemModelMessage } from '@ai-sdk/provider-utils'
-import { createLanguageModel } from './provider'
+import { createLanguageModel, createNativeWebSearchTools, getNativeWebSearchProvider } from './provider'
 import { buildAgentPromptParts, CODE_WORKSPACE_PROMPT, IMAGE_GEN_PROMPT, PLAN_MODE_PROMPT, WEB_SEARCH_PROMPT } from './prompts'
-import { isWebSearchAvailable } from '../ai/webSearchService'
 import { isImageGenAvailable } from '../ai/imageGenService'
 import { applyAnthropicCacheControl, buildPromptCacheKey, buildProviderCacheStatus, buildProviderOptions, buildReasoningOption } from './cache'
 import { buildCodeOnlyTools, buildPlanModeTools, buildTools } from './tools'
 import { afterTurnMemory, buildMemoryContext, preloadRelevantMemories } from './tools/memory'
 import { aiCompactStep, createCompactionState } from './aiCompaction'
-import { loopGuardCondition, withToolTimeouts } from './guards'
+import { hasRepeatedToolCallLoop, loopGuardCondition, withToolTimeouts } from './guards'
+import { compactMessages } from './compaction'
 import { reportAgentProgress, withAgentProgress } from './progress'
 import { getCachedStartupMemory, warmStartupMemory } from './runtimeCache'
 import { buildToolRuntimeContext } from './toolPolicy'
@@ -29,18 +29,25 @@ const MAX_STEPS = 24
 const DEFAULT_AGENT_TEMPERATURE = 0.2
 const REPLY_DEEP_MAX_STEPS = 10
 const AGENT_TOTAL_TIMEOUT_MS = 3_600_000
+const FINAL_ANSWER_RECOVERY_TIMEOUT_MS = 300_000
 const TITLE_TIMEOUT_MS = 120_000
 const REPLY_SUGGEST_TIMEOUT_MS = 600_000
 const TOOL_APPROVAL_SECRET = process.env.CT_AGENT_TOOL_APPROVAL_SECRET || randomBytes(32).toString('base64url')
+
+const FINAL_ANSWER_INSTRUCTION = `
+工具调用阶段已经结束。现在必须直接给用户完整的最终答复：
+- 禁止继续调用工具，禁止只输出推理过程，也不要再说“接下来继续查”或“稍后整理”。
+- 基于已经得到的工具结果给出结论；信息不足时明确说明缺口，但仍要交付当前可得的答案。
+- 回答应当自包含、可读，并直接响应用户最初的问题。`
 
 export function buildAgentInstructions(
   input: AgentRunInput,
   memoryContext: string,
   relevantMemoryContext: string,
-  tools: ReturnType<typeof buildTools>,
+  tools: ToolSet,
   webSearchOn = false,
   imageGenOn = false,
-): { instructions: SystemModelMessage[]; tools: ReturnType<typeof buildTools>; promptCacheKey: string; turnMessage: SystemModelMessage | null } {
+): { instructions: SystemModelMessage[]; tools: ToolSet; promptCacheKey: string; turnMessage: SystemModelMessage | null } {
   const promptParts = buildAgentPromptParts(input.scope, input.skills, {
     includeWechatOutbound: input.outputMode === 'wechat',
     includeWechatReplyMedia: input.allowWechatReplyMedia === true,
@@ -78,6 +85,26 @@ export function buildAgentInstructions(
   }
 
   return { instructions, tools, promptCacheKey, turnMessage }
+}
+
+type AgentWebSearchSetup = {
+  active: boolean
+  backend: 'openai' | 'google' | 'anthropic' | 'none'
+  nativeTools: ToolSet
+}
+
+/** 仅挂载厂商执行的原生搜索；不支持原生搜索的协议不提供联网工具。 */
+function resolveWebSearchSetup(config: AgentProviderConfig, disabled = false): AgentWebSearchSetup {
+  if (disabled) return { active: false, backend: 'none', nativeTools: {} }
+  const nativeProvider = getNativeWebSearchProvider(config)
+  if (nativeProvider) {
+    return {
+      active: true,
+      backend: nativeProvider,
+      nativeTools: createNativeWebSearchTools(config),
+    }
+  }
+  return { active: false, backend: 'none', nativeTools: {} }
 }
 
 /** 取最后一条 user 消息的纯文本，供 L1 自动抽取。 */
@@ -214,6 +241,56 @@ function normalizeUsageForCacheStats(usage: unknown, cacheFieldReported = false)
   }
 }
 
+function addTokenCounts(first: unknown, second: unknown): number | undefined {
+  const a = finiteTokenCount(first)
+  const b = finiteTokenCount(second)
+  return a === undefined && b === undefined ? undefined : (a || 0) + (b || 0)
+}
+
+/** 合并主工具循环和无工具收尾调用的标准化 usage。 */
+function mergeNormalizedUsage(primary: unknown, recovery: unknown): unknown {
+  const first = recordOf(primary)
+  const second = recordOf(recovery)
+  if (!first) return recovery
+  if (!second) return primary
+
+  const firstInput = recordOf(first.inputTokenDetails) || {}
+  const secondInput = recordOf(second.inputTokenDetails) || {}
+  const firstOutput = recordOf(first.outputTokenDetails) || {}
+  const secondOutput = recordOf(second.outputTokenDetails) || {}
+  const inputTokens = addTokenCounts(first.inputTokens, second.inputTokens)
+  const cacheReadTokens = addTokenCounts(firstInput.cacheReadTokens, secondInput.cacheReadTokens)
+  const inputTokenDetails = {
+    ...firstInput,
+    ...secondInput,
+    noCacheTokens: addTokenCounts(firstInput.noCacheTokens, secondInput.noCacheTokens),
+    cacheReadTokens,
+    cacheWriteTokens: addTokenCounts(firstInput.cacheWriteTokens, secondInput.cacheWriteTokens),
+  }
+  const outputTokenDetails = {
+    ...firstOutput,
+    ...secondOutput,
+    textTokens: addTokenCounts(firstOutput.textTokens, secondOutput.textTokens),
+    reasoningTokens: addTokenCounts(firstOutput.reasoningTokens, secondOutput.reasoningTokens),
+  }
+  const merged: Record<string, unknown> = {
+    ...first,
+    ...second,
+    inputTokens,
+    inputTokenDetails,
+    outputTokens: addTokenCounts(first.outputTokens, second.outputTokens),
+    outputTokenDetails,
+    totalTokens: addTokenCounts(first.totalTokens, second.totalTokens),
+  }
+  delete merged.raw
+  if (inputTokens !== undefined && inputTokens > 0 && cacheReadTokens !== undefined) {
+    merged.cacheHitRate = cacheReadTokens / inputTokens
+  } else {
+    delete merged.cacheHitRate
+  }
+  return merged
+}
+
 /** 归一化后的 usage 是否带有可信的缓存读数（用于跨 step 记录「服务商报过缓存字段」）。 */
 function usageReportsCacheRead(normalizedUsage: unknown): boolean {
   return nestedNumber(normalizedUsage, ['inputTokenDetails', 'cacheReadTokens']) !== undefined
@@ -306,21 +383,29 @@ export async function runAgent(
     const relevantMemoryContext = historyManagedTurnContext ? '' : await preloadRelevantMemories(userText, input.scope)
     perf('相关记忆预取', historyManagedTurnContext ? '已由历史 system 注入' : `${relevantMemoryContext.length} 字符`)
     const toolsDisabled = input.toolMode === 'disabled'
-    const webSearchOn = !toolsDisabled && isWebSearchAvailable()
+    // 计划模式只制定计划，不允许联网；正常模式仅挂载厂商原生搜索。
+    const webSearch = resolveWebSearchSetup(input.providerConfig, toolsDisabled || input.planMode === true)
+    const webSearchOn = webSearch.active
     const imageGenOn = !toolsDisabled && isImageGenAvailable()
     const toolProfile = input.toolProfile ?? (input.codeWorkspace ? 'hybrid' : 'chat')
     const codeWorkspace = (toolProfile === 'code' || toolProfile === 'hybrid') ? (input.codeWorkspace ?? null) : null
-    const baseTools = toolsDisabled
+    const applicationTools: ToolSet = toolsDisabled
       ? {}
-      : withToolTimeouts(input.planMode
+      : input.planMode
         ? buildPlanModeTools(input.scope, codeWorkspace)
         : toolProfile === 'code'
-          ? buildCodeOnlyTools(codeWorkspace, webSearchOn, imageGenOn)
-          : buildTools(input.scope, input.providerConfig, input.mcpTools, webSearchOn, imageGenOn, codeWorkspace, {
+          ? buildCodeOnlyTools(codeWorkspace, imageGenOn)
+          : buildTools(input.scope, input.providerConfig, input.mcpTools, imageGenOn, codeWorkspace, {
             allowWechatReplyMedia: input.allowWechatReplyMedia === true,
             uploadedMediaContext: input.uploadedMediaContext,
-          }))
-    perf('构建工具集', `${Object.keys(baseTools).length} 个`)
+          })
+    const baseTools = toolsDisabled
+      ? {}
+      : withToolTimeouts({
+        ...applicationTools,
+        ...webSearch.nativeTools,
+      })
+    perf('构建工具集', `${Object.keys(baseTools).length} 个 / 联网 ${webSearch.backend}`)
     const prepared = buildAgentInstructions(input, memoryContext, relevantMemoryContext, baseTools, webSearchOn, imageGenOn)
     const providerCache = buildProviderCacheStatus(input, prepared.promptCacheKey)
     perf('组装系统提示')
@@ -337,8 +422,8 @@ export async function runAgent(
       tools: prepared.tools,
       temperature: DEFAULT_AGENT_TEMPERATURE,
       reasoning: buildReasoningOption(input.providerConfig),
-      // 步数上限 + 死循环检测（连续 N 步相同工具调用即停），见 guards.ts
-      stopWhen: [isStepCount(MAX_STEPS), loopGuardCondition()],
+      // 最后一个预算步骤会在 prepareStep 中禁用工具并强制收尾，避免撞上上限时只留下推理过程。
+      stopWhen: [isStepCount(MAX_STEPS)],
       providerOptions: buildProviderOptions(input, prepared.promptCacheKey),
       toolApproval: buildAgentToolApproval(input, input.mcpTools?.map((item) => item.name) ?? []),
       // @ts-expect-error AI SDK beta 的 ToolLoopAgentSettings 类型漏了此字段；settings 会原样透传给
@@ -377,6 +462,7 @@ export async function runAgent(
       // 每步先做 >90% AI 压缩（折叠早期历史为摘要并发持久标记），再叠加确定性裁剪 + query_sql 门控状态
       prepareStep: async ({ messages, steps }) => {
         const runtimeContext = buildToolRuntimeContext(steps)
+        const forceFinalAnswer = steps.length >= MAX_STEPS - 1 || hasRepeatedToolCallLoop(steps)
         return {
           messages: await aiCompactStep({
             messages,
@@ -387,13 +473,27 @@ export async function runAgent(
           }),
           runtimeContext: runtimeContext as any,
           toolsContext: { query_sql: runtimeContext } as any,
+          ...(forceFinalAnswer ? {
+            activeTools: [] as [],
+            toolChoice: 'none' as const,
+            instructions: [
+              ...prepared.instructions,
+              {
+                role: 'system' as const,
+                content: input.planMode
+                  ? `${FINAL_ANSWER_INSTRUCTION}\n当前处于计划模式：最终输出应是一份完整可执行的计划，不要实际执行计划。`
+                  : FINAL_ANSWER_INSTRUCTION,
+              },
+            ],
+          } : {}),
         }
       },
     })
 
+    const runMessages = prepared.turnMessage ? [...input.messages, prepared.turnMessage] : input.messages
     const result = await agent.stream({
       // 尾注入本轮上下文（当前时间/技能/相关记忆）：放消息末尾而非 system 前缀，跨轮才有 prompt cache 命中
-      messages: prepared.turnMessage ? [...input.messages, prepared.turnMessage] : input.messages,
+      messages: runMessages,
       abortSignal: signal,
       timeout: { totalMs: AGENT_TOTAL_TIMEOUT_MS },
     })
@@ -401,6 +501,10 @@ export async function runAgent(
     // 截留 message 的 finish，等主回答流真正结束、工具状态补齐后再发；自动记忆抽取改成后台异步，不再等它
     let finishChunk: UIMessageChunk | undefined
     let assistantText = ''
+    let awaitingToolApproval = false
+    let recoveryUsage: unknown
+    let recoveryFinishReason: FinishReason | undefined
+    let recoveryRawFinishReason: string | undefined
     let perfFirstEventSeen = false
     let perfFirstOutputSeen = false
     const toolNames = new Map<string, string>()
@@ -408,6 +512,8 @@ export async function runAgent(
     for await (const chunk of toUIMessageStream({
       stream: result.stream,
       tools: prepared.tools,
+      // 保留 OpenAI Responses / Google / Anthropic 等 provider 返回的网页与文档来源。
+      sendSources: true,
       // 默认 onError 只回 "An error occurred."，把真实报错（含 status code）透传给聊天区，别再靠猜
       onError: formatAgentError,
       messageMetadata: ({ part }) => {
@@ -438,9 +544,12 @@ export async function runAgent(
       }
       if (chunk.type === 'finish') { finishChunk = chunk; continue }
       if (chunk.type === 'text-delta') assistantText += chunk.delta
+      if (chunk.type === 'tool-approval-request') awaitingToolApproval = true
       trackToolChunk(chunk, toolNames, pendingToolCalls)
       onChunk(chunk)
     }
+    const primaryFinalText = (await result.text).trim()
+    const primaryFinishReason = await result.finishReason
     perf('主回答流结束')
     if (pendingToolCalls.size > 0 && !signal?.aborted) {
       for (const [toolCallId, pending] of pendingToolCalls.entries()) {
@@ -451,6 +560,97 @@ export async function runAgent(
         })
       }
       perf('补齐未完成工具状态', `${pendingToolCalls.size} 个`)
+    }
+
+    // stopWhen 命中步数/循环护栏时，最后一步可能仍是 tool-calls，AI SDK 会正常结束但没有最终 text。
+    // 用已有响应消息做一次禁用工具的收尾；审批等待和用户取消属于正常的无正文状态，不应触发。
+    if (!primaryFinalText && !awaitingToolApproval && !signal?.aborted) {
+      if (primaryFinishReason === 'content-filter') {
+        throw new Error('模型响应被内容安全策略拦截，未生成最终答复。')
+      }
+      if (primaryFinishReason === 'error') {
+        throw new Error('模型在生成最终答复前返回错误。')
+      }
+      perf('检测到空最终答复', `${trace.steps.length} 步`)
+      reportAgentProgress({
+        stage: 'searching',
+        title: '正在整理最终答复',
+        category: 'system',
+      })
+      const responseMessages = await result.responseMessages
+      const recoveryMessages = compactMessages([...runMessages, ...responseMessages])
+      const recovery = streamText({
+        model: createLanguageModel(input.providerConfig, { promptCacheKey: prepared.promptCacheKey }),
+        instructions: [
+          ...prepared.instructions,
+          {
+            role: 'system',
+            content: input.planMode
+              ? `${FINAL_ANSWER_INSTRUCTION}\n当前处于计划模式：最终输出应是一份完整可执行的计划，不要实际执行计划。`
+              : FINAL_ANSWER_INSTRUCTION,
+          },
+        ],
+        messages: recoveryMessages,
+        allowSystemInMessages: true,
+        reasoning: buildReasoningOption(input.providerConfig),
+        providerOptions: buildProviderOptions(input, prepared.promptCacheKey),
+        abortSignal: signal,
+        timeout: { totalMs: FINAL_ANSWER_RECOVERY_TIMEOUT_MS },
+        telemetry: { functionId: 'agent-final-answer-recovery' },
+      })
+      let recoveryFinishChunk: UIMessageChunk | undefined
+      let recoveryErrorText = ''
+      let recoveryText = ''
+      for await (const chunk of toUIMessageStream({
+        stream: recovery.stream,
+        sendStart: false,
+        sendReasoning: false,
+        sendSources: true,
+        onError: formatAgentError,
+      })) {
+        if (chunk.type === 'finish') {
+          recoveryFinishChunk = chunk
+          continue
+        }
+        if (chunk.type === 'error') {
+          recoveryErrorText = chunk.errorText
+          continue
+        }
+        if (chunk.type === 'text-delta') {
+          recoveryText += chunk.delta
+          assistantText += chunk.delta
+        }
+        onChunk(chunk)
+      }
+
+      const recoveryStep = await recovery.finalStep
+      const normalizedRecoveryUsage = normalizeUsageForCacheStats(recoveryStep.usage)
+      if (usageReportsCacheRead(normalizedRecoveryUsage)) providerReportedCacheRead = true
+      recoveryUsage = normalizedRecoveryUsage
+      recoveryFinishReason = recoveryStep.finishReason
+      recoveryRawFinishReason = recoveryStep.rawFinishReason
+      trace.steps.push({
+        stepNumber: trace.steps.length,
+        callId: recoveryStep.callId,
+        provider: recoveryStep.model.provider,
+        modelId: recoveryStep.model.modelId,
+        finishReason: recoveryStep.finishReason,
+        usage: normalizedRecoveryUsage,
+        elapsedMs: recoveryStep.performance?.stepTimeMs,
+        responseMs: recoveryStep.performance?.responseTimeMs,
+        timeToFirstOutputMs: recoveryStep.performance?.timeToFirstOutputMs,
+        outputTokensPerSecond: recoveryStep.performance?.outputTokensPerSecond,
+        effectiveOutputTokensPerSecond: recoveryStep.performance?.effectiveOutputTokensPerSecond,
+      })
+      finishChunk = finishChunk || recoveryFinishChunk
+      perf('最终答复收尾结束', `${recoveryText.trim().length} 字符`)
+
+      if (!recoveryText.trim()) {
+        throw new Error(recoveryErrorText || `模型在 ${trace.steps.length} 个步骤后仍未生成最终答复，已阻止空回复被标记为完成。`)
+      }
+    }
+    if (!finishChunk && !signal?.aborted) {
+      throw new Error('模型响应流缺少 finish 事件，已阻止不完整回复被标记为完成。')
     }
     const traceEnd = Date.now()
     trace.finishedAt = traceEnd
@@ -464,10 +664,15 @@ export async function runAgent(
       const ciphertalkMetadata = finishMetadata.ciphertalk && typeof finishMetadata.ciphertalk === 'object'
         ? finishMetadata.ciphertalk as Record<string, any>
         : {}
+      const primaryUsage = finishMetadata.usage
       onChunk({
         ...finishChunk,
+        ...(recoveryFinishReason ? { finishReason: recoveryFinishReason } : {}),
         messageMetadata: {
           ...finishMetadata,
+          ...(recoveryUsage ? { usage: mergeNormalizedUsage(primaryUsage, recoveryUsage) } : {}),
+          ...(recoveryFinishReason ? { finishReason: recoveryFinishReason } : {}),
+          ...(recoveryRawFinishReason ? { rawFinishReason: recoveryRawFinishReason } : {}),
           ciphertalk: {
             ...ciphertalkMetadata,
             providerCache,
@@ -680,7 +885,8 @@ type DeepReplySuggestionArgs = {
 
 async function generateDeepReplySuggestionText({ input, instructions: replyInstructions, messages, prompt, contactName, sessionId, signal }: DeepReplySuggestionArgs): Promise<string> {
   const scope = { kind: 'global' as const }
-  const webSearchOn = isWebSearchAvailable()
+  const webSearch = resolveWebSearchSetup(input.providerConfig)
+  const webSearchOn = webSearch.active
   const imageGenOn = isImageGenAvailable()
   const agentInput: AgentRunInput = {
     messages,
@@ -692,9 +898,10 @@ async function generateDeepReplySuggestionText({ input, instructions: replyInstr
     codeWorkspace: input.codeWorkspace ?? null,
   }
   const tools = withToolTimeouts({
-    ...buildTools(scope, input.providerConfig, input.mcpTools, webSearchOn, imageGenOn, input.codeWorkspace ?? null, {
+    ...buildTools(scope, input.providerConfig, input.mcpTools, imageGenOn, input.codeWorkspace ?? null, {
       uploadedMediaContext: undefined,
     }),
+    ...webSearch.nativeTools,
     search_history: tool({
       description: `Search the current reply session history with ${contactName}. If the clue may live in other conversations, use global Agent tools such as search_messages or semantic_search instead.`,
       inputSchema: z.object({

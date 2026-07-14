@@ -31,10 +31,12 @@ import type { AgentProgressEvent } from '@/features/aiagent/transport/ipcChatTra
 import { MentionTargetChips, WorkspaceFileReferenceChips, getUserMessageDisplay } from './AgentMentions'
 import {
   MessageSources,
+  MessageProviderSources,
   buildRenderSegments,
   collectRetrievalBadges,
   collectToolBadges,
   extractSources,
+  extractProviderSources,
   formatElapsed,
   formatToolStepLabel,
   getDelegateTasks,
@@ -116,6 +118,8 @@ function AgentMessageItemImpl({
     || (isLastMessage && busy && runIsPlan)
   )
   const assistantDisplayText = isPlanMessage ? stripPlanControlMarkers(assistantText) : assistantText
+  const providerSources = message.role === 'assistant' ? extractProviderSources(message.parts) : []
+  const chatSources = message.role === 'assistant' ? extractSources(message.parts) : []
   const planNeedsDelegateAnalysis = isPlanMessage && planRequiresDelegateAnalysis(assistantText)
   const userDisplay = message.role === 'user' ? getUserMessageDisplay(message.parts) : null
   const persistedSubAgentEvents = message.role === 'assistant' ? readSubAgentProgressFromMessage(message) : []
@@ -319,7 +323,10 @@ function AgentMessageItemImpl({
           })}
           {assistantTextStreaming && <MessageStreamingIndicator />}
           {message.role === 'assistant' && (
-            <MessageSources items={extractSources(message.parts)} nameOf={sessionNameOf} />
+            <>
+              <MessageProviderSources items={providerSources} />
+              <MessageSources items={chatSources} nameOf={sessionNameOf} />
+            </>
           )}
           {message.role === 'assistant' && !(isLastMessage && busy) && (
             <MessageUsageStats

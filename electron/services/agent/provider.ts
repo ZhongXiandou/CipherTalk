@@ -6,7 +6,7 @@ import { createAnthropic } from '@ai-sdk/anthropic'
 import { createGoogle } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import type { LanguageModel } from 'ai'
+import type { LanguageModel, ToolSet } from 'ai'
 import type { FilesV4 } from '@ai-sdk/provider'
 import { createProxyFetch } from '../ai/proxyFetch'
 import { withOpenAIResponsesSanitizer } from '../ai/openaiResponsesSanitizer'
@@ -16,6 +16,45 @@ import type { AgentProviderConfig } from './types'
 
 export type AgentLanguageModelOptions = {
   promptCacheKey?: string
+}
+
+export type NativeWebSearchProvider = 'openai' | 'google' | 'anthropic'
+
+/** 当前协议是否能通过对应 AI SDK provider 挂载厂商执行的原生联网搜索。 */
+export function getNativeWebSearchProvider(config: Pick<AgentProviderConfig, 'providerKind'>): NativeWebSearchProvider | null {
+  if (config.providerKind === 'openai-responses') return 'openai'
+  if (config.providerKind === 'google') return 'google'
+  if (config.providerKind === 'anthropic') return 'anthropic'
+  return null
+}
+
+/**
+ * 构造 provider-executed 搜索工具。工具由厂商执行，不带本地 execute；搜索引用会由
+ * AI SDK 转成 source 事件，再由 engine.ts 的 toUIMessageStream(sendSources) 发给渲染端。
+ */
+export function createNativeWebSearchTools(config: Pick<AgentProviderConfig, 'providerKind'>): ToolSet {
+  const provider = getNativeWebSearchProvider(config)
+  if (provider === 'openai') {
+    return {
+      web_search: createOpenAI().tools.webSearch({
+        externalWebAccess: true,
+        searchContextSize: 'medium',
+      }),
+    }
+  }
+  if (provider === 'google') {
+    return {
+      google_search: createGoogle().tools.googleSearch({
+        searchTypes: { webSearch: {} },
+      }),
+    }
+  }
+  if (provider === 'anthropic') {
+    return {
+      web_search: createAnthropic().tools.webSearch_20250305({ maxUses: 5 }),
+    }
+  }
+  return {}
 }
 
 /**

@@ -76,14 +76,17 @@ function stepFingerprint(step: StepResult<ToolSet>): string | null {
     .join('|')
 }
 
+/** 最近连续步骤是否陷入相同工具调用；引擎可据此保留一个禁用工具的最终答复步骤。 */
+export function hasRepeatedToolCallLoop(steps: StepResult<ToolSet>[]): boolean {
+  if (steps.length < MAX_IDENTICAL_TOOL_REPEATS) return false
+  const recent = steps.slice(-MAX_IDENTICAL_TOOL_REPEATS).map(stepFingerprint)
+  const first = recent[0]
+  return first !== null && recent.every((fingerprint) => fingerprint === first)
+}
+
 /** 死循环检测：最近 N 步工具调用指纹完全相同（且非空）→ 停止。 */
 export function loopGuardCondition(): StopCondition<ToolSet> {
-  return ({ steps }) => {
-    if (steps.length < MAX_IDENTICAL_TOOL_REPEATS) return false
-    const recent = steps.slice(-MAX_IDENTICAL_TOOL_REPEATS).map(stepFingerprint)
-    const first = recent[0]
-    return first !== null && recent.every((fp) => fp === first)
-  }
+  return ({ steps }) => hasRepeatedToolCallLoop(steps)
 }
 
 /** 给每个工具的 execute 套超时，超时返回 {error}（不抛、不挂住循环）。 */

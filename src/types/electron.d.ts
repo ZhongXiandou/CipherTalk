@@ -29,12 +29,6 @@ export interface RerankConfig {
   timeoutMs: number
 }
 
-export interface WebSearchConfig {
-  enabled: boolean
-  apiKey: string
-  maxResults: number
-}
-
 
 export type AgentConversationChangeType =
   | 'created'
@@ -1547,11 +1541,6 @@ export interface ElectronAPI {
     getConfig: () => Promise<{ success: boolean; config?: RerankConfig; error?: string }>
     setConfig: (patch: Partial<RerankConfig>) => Promise<{ success: boolean; config?: RerankConfig; error?: string }>
     test: (cfg: RerankConfig) => Promise<{ success: boolean; error?: string }>
-  }
-  webSearch: {
-    getConfig: () => Promise<{ success: boolean; config?: WebSearchConfig; error?: string }>
-    setConfig: (patch: Partial<WebSearchConfig>) => Promise<{ success: boolean; config?: WebSearchConfig; error?: string }>
-    test: (cfg: WebSearchConfig) => Promise<{ success: boolean; resultCount?: number; error?: string }>
   }
   tts: {
     getConfig: () => Promise<{ success: boolean; config?: TtsConfig; available?: boolean; error?: string }>
