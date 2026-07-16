@@ -4,7 +4,7 @@
  * 等待回复时头部只显示「对方正在输入…」，不暴露内部检索过程。
  * 历史挂 agent 会话存储（scope kind='persona'），打开恢复、每轮保存。
  */
-import { ArrowsRotateLeft, CircleCheck, CircleDashed, CircleExclamation, Clock, ClockArrowRotateLeft, CommentSlash, FaceRobot, Microphone, PencilToLine, PencilToSquare, TrashBin } from '@gravity-ui/icons'
+import { ArrowsRotateLeft, CircleCheck, CircleDashed, CircleExclamation, CircleXmarkFill, Clock, ClockArrowRotateLeft, CommentSlash, FaceRobot, Microphone, PencilToLine, PencilToSquare, Smartphone, TrashBin, Volume } from '@gravity-ui/icons'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useChat } from '@ai-sdk/react'
@@ -31,6 +31,7 @@ import { PersonaChatTransport } from '../features/aiagent/transport/personaChatT
 import { cn } from '../lib/utils'
 import { useTtsSpeaker } from '../lib/ttsPlayer'
 import { startVoiceRecording, type ActiveRecorder } from '../lib/voiceRecorder'
+import { startVoiceCall, type VoiceCallSession } from '../lib/voiceCallSession'
 import { parseWechatEmoji } from '../utils/wechatEmoji'
 import { getAIProviders, type AIModelInfo, type AIProviderInfo } from '../types/ai'
 import type { AgentConversationUpdatedEvent, PersonaBuildProgressInfo, PersonaRecordInfo } from '../types/electron'
@@ -442,6 +443,12 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
   // 语音发问后自动朗读这一轮回复（打字发的消息不自动播）
   const autoPlayReplyRef = useRef(false)
   const wasBusyRef = useRef(false)
+  // 语音通话模式（打电话式：常开麦 + VAD 自动断句）
+  const [callActive, setCallActive] = useState(false)
+  const [callPhase, setCallPhase] = useState<'connecting' | 'listening' | 'recognizing' | 'thinking' | 'speaking'>('listening')
+  const callSessionRef = useRef<VoiceCallSession | null>(null)
+  const callActiveRef = useRef(false)
+  const handleCallUtteranceRef = useRef<(wavBase64: string) => void>(() => {})
   const [speakingStyleOpen, setSpeakingStyleOpen] = useState(false)
   const [speakingStyleSaving, setSpeakingStyleSaving] = useState(false)
   const [speakingStyleDraft, setSpeakingStyleDraft] = useState<SpeakingStyleDraft>(EMPTY_SPEAKING_STYLE_DRAFT)
@@ -667,18 +674,40 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
       }
     }
   }
-  // 语音发问：本轮回复流结束后，自动朗读最新一条分身回复的第一段语音
+  // 本轮回复流结束后：语音发问自动朗读一次；通话模式则播完继续听下一句
   useEffect(() => {
     const wasBusy = wasBusyRef.current
     wasBusyRef.current = busy
-    if (!(wasBusy && !busy && autoPlayReplyRef.current)) return
-    autoPlayReplyRef.current = false
+    if (!(wasBusy && !busy)) return
     const last = messages[messages.length - 1]
-    if (last?.role !== 'assistant') return
-    const bubbles = messageTextParts(last).map((part) => part.trim()).filter(Boolean).map(parseBubble)
-    const firstVoice = bubbles.findIndex((bubble) => bubble.isVoice)
-    if (firstVoice >= 0) void handlePlayVoice(last.id, bubbles, firstVoice)
+    const playReply = async () => {
+      if (last?.role !== 'assistant') return
+      const bubbles = messageTextParts(last).map((part) => part.trim()).filter(Boolean).map(parseBubble)
+      const firstVoice = bubbles.findIndex((bubble) => bubble.isVoice)
+      if (firstVoice >= 0) await handlePlayVoice(last.id, bubbles, firstVoice)
+    }
+    if (callActiveRef.current) {
+      setCallPhase('speaking')
+      void playReply().finally(() => {
+        if (callActiveRef.current) {
+          setCallPhase('listening')
+          callSessionRef.current?.resume()
+        }
+      })
+    } else if (autoPlayReplyRef.current) {
+      autoPlayReplyRef.current = false
+      void playReply()
+    }
   }, [busy, messages])
+
+  // 切会话/卸载时挂断通话，释放麦克风
+  useEffect(() => {
+    return () => {
+      callActiveRef.current = false
+      callSessionRef.current?.stop()
+      callSessionRef.current = null
+    }
+  }, [sessionId])
 
   // AI 已经开始逐条吐气泡后就不再显示"正在输入"指示器，否则像凭空多了一条带头像的消息
   const lastMessage = messages[messages.length - 1]
@@ -1221,6 +1250,68 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
     }
   }
 
+  // 通话模式：立即发送（绕过打字用的 2-4s 待发缓冲，避免通话时发闷）
+  const sendNow = async (rawText: string) => {
+    const text = rawText.trim()
+    if (!text) return
+    await ensureConversation()
+    clearPending()
+    await sendMessage({ parts: [{ type: 'text' as const, text }] })
+  }
+
+  // 通话模式：VAD 断句拿到一句话 → 转写 → 立即发送（回复的播放/续听在 busy→idle 的 effect 里）
+  const handleCallUtterance = async (wavBase64: string) => {
+    if (!callActiveRef.current) return
+    const session = callSessionRef.current
+    session?.pause() // 分身说话期间别听，避免外放回声自触发
+    setCallPhase('recognizing')
+    try {
+      const res = await window.electronAPI.stt.transcribeBuffer(wavBase64)
+      if (!callActiveRef.current) return
+      const text = res.success ? String(res.transcript || '').trim() : ''
+      if (!text) {
+        setCallPhase('listening')
+        session?.resume()
+        return
+      }
+      setCallPhase('thinking')
+      await sendNow(text)
+    } catch {
+      if (callActiveRef.current) {
+        setCallPhase('listening')
+        session?.resume()
+      }
+    }
+  }
+  handleCallUtteranceRef.current = handleCallUtterance // 每次渲染刷新，供常驻的通话会话回调取最新闭包
+
+  const startCall = async () => {
+    if (callActive) return
+    stopVoice()
+    setCallPhase('connecting')
+    try {
+      const session = await startVoiceCall({
+        onUtterance: (wav) => handleCallUtteranceRef.current(wav),
+        onError: (err) => setVoiceCloneStatus({ ok: false, text: err.message }),
+      })
+      callSessionRef.current = session
+      callActiveRef.current = true
+      setCallActive(true)
+      setCallPhase('listening')
+    } catch (e) {
+      setVoiceCloneStatus({ ok: false, text: `无法开始通话：${e instanceof Error ? e.message : String(e)}` })
+      setCallActive(false)
+    }
+  }
+
+  const endCall = () => {
+    callActiveRef.current = false
+    setCallActive(false)
+    callSessionRef.current?.stop()
+    callSessionRef.current = null
+    stopVoice()
+  }
+
   const handlePromptSubmit = async (message: PromptInputMessage) => {
     if (busy) {
       stop()
@@ -1736,6 +1827,16 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
                     ? <CircleDashed width={18} height={18} className="animate-spin" />
                     : <Microphone width={18} height={18} />}
                 </button>
+                {/* 语音通话：打电话式，常开麦自动断句 */}
+                <button
+                  type="button"
+                  aria-label="语音通话"
+                  disabled={busy || voiceInput !== 'idle'}
+                  onClick={() => void startCall()}
+                  className="grid size-9 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-surface/60 disabled:opacity-40"
+                >
+                  <Smartphone width={18} height={18} />
+                </button>
               </PromptInputTools>
               <PromptInputSubmit status={busy ? 'streaming' : undefined} />
             </PromptInputFooter>
@@ -1743,6 +1844,34 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
         </div>
         </div>
       </div>
+
+      {/* 语音通话浮层（打电话式：常开麦 + VAD 自动断句） */}
+      {callActive && (() => {
+        const meta = {
+          connecting: { label: '接通中…', icon: <CircleDashed width={16} height={16} className="animate-spin" /> },
+          listening: { label: '请说，聆听中…', icon: <Microphone width={16} height={16} className="text-danger" /> },
+          recognizing: { label: '识别中…', icon: <CircleDashed width={16} height={16} className="animate-spin" /> },
+          thinking: { label: '对方正在想…', icon: <CircleDashed width={16} height={16} className="animate-spin" /> },
+          speaking: { label: '对方说话中…', icon: <Volume width={16} height={16} className="text-accent" /> },
+        }[callPhase]
+        return (
+          <div className="absolute inset-0 z-50 grid place-items-center bg-black/55 backdrop-blur-sm">
+            <div className="flex w-72 flex-col items-center gap-5 rounded-3xl bg-surface/90 px-6 py-8 shadow-2xl">
+              <PersonaAvatar name={displayName} avatarUrl={avatarUrl} size={88} />
+              <div className="text-lg font-semibold text-foreground">{displayName || sessionId}</div>
+              <div className="flex items-center gap-2 text-sm text-muted">{meta.icon}<span>{meta.label}</span></div>
+              <button
+                type="button"
+                onClick={endCall}
+                aria-label="挂断"
+                className="mt-1 grid size-14 place-items-center rounded-full bg-danger text-white shadow-lg transition-colors hover:bg-danger/90"
+              >
+                <CircleXmarkFill width={26} height={26} />
+              </button>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* 删除分身画像确认 */}
       <AlertDialog.Backdrop

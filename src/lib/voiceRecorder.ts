@@ -21,7 +21,7 @@ export interface ActiveRecorder {
 }
 
 /** 平均降采样到 16k，够语音识别用（不追求高保真）。 */
-function downsampleTo16k(input: Float32Array, inputRate: number): Float32Array {
+export function downsampleTo16k(input: Float32Array, inputRate: number): Float32Array {
   if (inputRate <= TARGET_SAMPLE_RATE) return input
   const ratio = inputRate / TARGET_SAMPLE_RATE
   const outLength = Math.floor(input.length / ratio)
@@ -79,6 +79,12 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary)
 }
 
+/** 任意采样率的单声道 Float32 PCM → 16k 单声道 PCM16 WAV(base64)。供录音/通话共用。 */
+export function pcmToWav16Base64(pcm: Float32Array, inputRate: number): string {
+  const pcm16k = downsampleTo16k(pcm, inputRate)
+  return arrayBufferToBase64(encodeWav(pcm16k, TARGET_SAMPLE_RATE))
+}
+
 /**
  * 开始录音。调用方拿到 ActiveRecorder 后，按需 stop()/cancel()。
  * 会申请麦克风权限；被拒或不支持时抛错。
@@ -128,9 +134,7 @@ export async function startVoiceRecording(): Promise<ActiveRecorder> {
         off += c.length
       }
       const durationSec = inputRate > 0 ? total / inputRate : 0
-      const pcm16k = downsampleTo16k(merged, inputRate)
-      const wav = encodeWav(pcm16k, TARGET_SAMPLE_RATE)
-      return { wavBase64: arrayBufferToBase64(wav), durationSec }
+      return { wavBase64: pcmToWav16Base64(merged, inputRate), durationSec }
     },
     cancel(): void {
       teardown()
