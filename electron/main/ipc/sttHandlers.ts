@@ -68,6 +68,18 @@ export function registerSttHandlers(ctx: MainProcessContext): void {
     }
   })
 
+  // 转写临时录音（不走缓存，给语音对话「按住说话」用）
+  ipcMain.handle('stt:transcribeBuffer', async (_, wavBase64: string) => {
+    try {
+      const wavData = Buffer.from(wavBase64 || '', 'base64')
+      if (wavData.length === 0) return { success: false, error: '音频数据为空' }
+      return await sttRuntimeService.transcribeWavBuffer(wavData, {})
+    } catch (e) {
+      console.error('[Main] stt:transcribeBuffer 异常:', e)
+      return { success: false, error: String(e) }
+    }
+  })
+
   // 获取缓存的转写结果
   ipcMain.handle('stt:getCachedTranscript', async (_, sessionId: string, createTime: number, localId?: number) => {
     try {
