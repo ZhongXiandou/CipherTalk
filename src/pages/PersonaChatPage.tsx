@@ -4,8 +4,8 @@
  * 等待回复时头部只显示「对方正在输入…」，不暴露内部检索过程。
  * 历史挂 agent 会话存储（scope kind='persona'），打开恢复、每轮保存。
  */
-import { ArrowsRotateLeft, CircleCheck, CircleDashed, CircleExclamation, Clock, ClockArrowRotateLeft, CommentSlash, FaceRobot, Handset, HandsetArrowIn, Microphone, PencilToLine, PencilToSquare, TrashBin, Volume } from '@gravity-ui/icons'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowsRotateLeft, ChevronDown, CircleCheck, CircleDashed, CircleExclamation, Clock, ClockArrowRotateLeft, CommentSlash, FaceRobot, Handset, HandsetArrowIn, Microphone, PencilToLine, PencilToSquare, TrashBin, Volume } from '@gravity-ui/icons'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useChat } from '@ai-sdk/react'
 import { AlertDialog, Button, ProgressBar, Dropdown, Header, Label, Modal, ScrollShadow, Skeleton, Tooltip } from '@heroui/react'
@@ -162,17 +162,140 @@ function buildRealtimeDialogContext(messages: UIMessage[]): Array<{ role: 'user'
   return pairs.slice(-40)
 }
 
-function createRealtimeMessage(role: 'user' | 'assistant', text: string): UIMessage {
+type PersonaCallTranscriptTurn = {
+  id: string
+  role: 'user' | 'assistant'
+  text: string
+  at: number
+}
+
+type PersonaCallRecord = {
+  version: 1
+  callId: string
+  status: 'ended' | 'interrupted'
+  startedAt: number
+  endedAt: number
+  durationSeconds: number
+  transcript: PersonaCallTranscriptTurn[]
+}
+
+function createRealtimeMessage(role: 'user' | 'assistant', text: string, callId: string, at: number): UIMessage {
   return {
     id: `realtime-${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     role,
     parts: [{ type: 'text', text }],
+    metadata: { personaCallTurn: { callId, at, hidden: true } },
   }
 }
 
+function createPersonaCallRecordMessage(record: PersonaCallRecord): UIMessage {
+  const label = record.status === 'ended' ? '通话结束' : '通话中断'
+  return {
+    id: `realtime-call-${record.callId}`,
+    role: 'assistant',
+    parts: [{ type: 'text', text: `${label} ${formatCallDuration(record.durationSeconds)}` }],
+    metadata: { personaCallRecord: record },
+  }
+}
+
+function messageMetadata(message: UIMessage): Record<string, unknown> {
+  return message.metadata && typeof message.metadata === 'object'
+    ? message.metadata as Record<string, unknown>
+    : {}
+}
+
+function hiddenPersonaCallId(message: UIMessage): string | null {
+  const turn = messageMetadata(message).personaCallTurn
+  if (!turn || typeof turn !== 'object') return null
+  const value = turn as { callId?: unknown; hidden?: unknown }
+  return value.hidden === true && typeof value.callId === 'string' && value.callId
+    ? value.callId
+    : null
+}
+
+function readPersonaCallRecord(message: UIMessage): PersonaCallRecord | null {
+  const value = messageMetadata(message).personaCallRecord
+  if (!value || typeof value !== 'object') return null
+  const record = value as Partial<PersonaCallRecord>
+  if (
+    record.version !== 1
+    || typeof record.callId !== 'string'
+    || (record.status !== 'ended' && record.status !== 'interrupted')
+    || typeof record.startedAt !== 'number' || !Number.isFinite(record.startedAt)
+    || typeof record.endedAt !== 'number' || !Number.isFinite(record.endedAt)
+    || typeof record.durationSeconds !== 'number' || !Number.isFinite(record.durationSeconds)
+    || !Array.isArray(record.transcript)
+  ) return null
+  const transcript = record.transcript.filter((turn): turn is PersonaCallTranscriptTurn => (
+    Boolean(turn)
+    && typeof turn === 'object'
+    && typeof (turn as PersonaCallTranscriptTurn).id === 'string'
+    && ((turn as PersonaCallTranscriptTurn).role === 'user' || (turn as PersonaCallTranscriptTurn).role === 'assistant')
+    && typeof (turn as PersonaCallTranscriptTurn).text === 'string'
+    && typeof (turn as PersonaCallTranscriptTurn).at === 'number'
+    && Number.isFinite((turn as PersonaCallTranscriptTurn).at)
+  ))
+  return { ...record, transcript } as PersonaCallRecord
+}
+
 function formatCallDuration(seconds: number): string {
-  const minutes = Math.floor(seconds / 60)
-  return `${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+  const safeSeconds = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0))
+  const minutes = Math.floor(safeSeconds / 60)
+  return `${String(minutes).padStart(2, '0')}:${String(safeSeconds % 60).padStart(2, '0')}`
+}
+
+function PersonaCallRecordBubble({ record, displayName }: { record: PersonaCallRecord; displayName: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const transcriptId = useId()
+  const label = record.status === 'ended' ? '通话结束' : '通话中断'
+
+  return (
+    <div className="flex w-full justify-center py-1">
+      <div className="w-full max-w-xl">
+        <Button
+          aria-controls={transcriptId}
+          aria-expanded={expanded}
+          className="mx-auto flex text-muted"
+          onPress={() => setExpanded((value) => !value)}
+          size="sm"
+          variant="ghost"
+        >
+          <Handset aria-hidden width={15} height={15} />
+          <span>{label} {formatCallDuration(record.durationSeconds)}</span>
+          <ChevronDown
+            aria-hidden
+            className={`size-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`}
+          />
+        </Button>
+        {expanded && (
+          <div
+            id={transcriptId}
+            className="mt-2 max-h-72 overflow-y-auto rounded-lg border border-border/60 bg-surface/65 px-3 py-2.5"
+          >
+            {record.transcript.length > 0 ? (
+              <div className="divide-y divide-border/50">
+                {record.transcript.map((turn) => (
+                  <div className="py-2 first:pt-0 last:pb-0" key={turn.id}>
+                    <div className="mb-1 flex items-center justify-between gap-3 text-[11px] text-muted">
+                      <span>{turn.role === 'user' ? '我' : displayName}</span>
+                      <span className="tabular-nums">
+                        {formatCallDuration(Math.max(0, Math.floor((turn.at - record.startedAt) / 1000)))}
+                      </span>
+                    </div>
+                    <div className="whitespace-pre-wrap wrap-break-word text-sm leading-6 text-foreground">
+                      {parseWechatEmoji(turn.text)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-2 text-center text-sm text-muted">暂无可用转写内容</div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 /** 语音气泡标记（与 personaChatEngine 的提示词约定一致）：行首 [语音]/【语音】。 */
@@ -484,6 +607,9 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
   const callAsrTextRef = useRef('')
   const callReplyTextRef = useRef('')
   const callReplyIdRef = useRef('')
+  const callTranscriptRef = useRef<PersonaCallTranscriptTurn[]>([])
+  const callStartedAtRef = useRef(0)
+  const callRecordFinalizedRef = useRef(false)
   const callDropAudioRef = useRef(false)
   const callActiveRef = useRef(false)
   const [speakingStyleOpen, setSpeakingStyleOpen] = useState(false)
@@ -555,13 +681,25 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
   const loadingOlderRef = useRef(false)
 
   visibleMessageCountRef.current = visibleMessageCount
-  messagesLengthRef.current = messages.length
+  const displayMessages = useMemo(
+    () => {
+      const recordedCallIds = new Set(
+        messages.map(readPersonaCallRecord).filter((record): record is PersonaCallRecord => Boolean(record)).map((record) => record.callId),
+      )
+      return messages.filter((message) => {
+        const callId = hiddenPersonaCallId(message)
+        return !callId || !recordedCallIds.has(callId)
+      })
+    },
+    [messages],
+  )
+  messagesLengthRef.current = displayMessages.length
 
   const visibleMessages = useMemo(() => {
-    const start = Math.max(0, messages.length - visibleMessageCount)
-    return messages.slice(start)
-  }, [messages, visibleMessageCount])
-  const hiddenMessageCount = Math.max(0, messages.length - visibleMessages.length)
+    const start = Math.max(0, displayMessages.length - visibleMessageCount)
+    return displayMessages.slice(start)
+  }, [displayMessages, visibleMessageCount])
+  const hiddenMessageCount = Math.max(0, displayMessages.length - visibleMessages.length)
 
   const clearScheduledScroll = useCallback(() => {
     if (scrollFrameRef.current !== null) {
@@ -651,6 +789,9 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
     }
     stopVoiceRef.current()
     pendingRef.current = []
+    callTranscriptRef.current = []
+    callStartedAtRef.current = 0
+    callRecordFinalizedRef.current = false
     inputValueRef.current = ''
     setInputHasText(false)
     shouldStickToBottomRef.current = true
@@ -1269,11 +1410,21 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
   const appendRealtimeMessage = (role: 'user' | 'assistant', rawText: string) => {
     const text = rawText.trim()
     if (!text) return
-    setMessages((previous) => {
-      const last = previous[previous.length - 1]
-      if (last?.role === role && messageText(last).trim() === text) return previous
-      return [...previous, createRealtimeMessage(role, text)]
-    })
+    const transcript = callTranscriptRef.current
+    const previousTurn = transcript[transcript.length - 1]
+    if (previousTurn?.role === role && previousTurn.text === text) return
+    const at = Date.now()
+    const turn: PersonaCallTranscriptTurn = {
+      id: `call-turn-${at}-${Math.random().toString(36).slice(2, 8)}`,
+      role,
+      text,
+      at,
+    }
+    callTranscriptRef.current = [...transcript, turn]
+    setMessages((previous) => [
+      ...previous,
+      createRealtimeMessage(role, text, callIdRef.current, at),
+    ])
   }
 
   const flushRealtimeTranscripts = () => {
@@ -1283,11 +1434,30 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
     callReplyTextRef.current = ''
   }
 
-  const cleanupRealtimeCall = async (notifyMain: boolean) => {
+  const finalizeRealtimeCallRecord = (status: PersonaCallRecord['status']) => {
+    const startedAt = callStartedAtRef.current
+    if (!startedAt || callRecordFinalizedRef.current) return
+    const endedAt = Date.now()
+    const record: PersonaCallRecord = {
+      version: 1,
+      callId: callIdRef.current || `call-${startedAt}`,
+      status,
+      startedAt,
+      endedAt,
+      durationSeconds: Math.max(0, Math.floor((endedAt - startedAt) / 1000)),
+      transcript: callTranscriptRef.current.map((turn) => ({ ...turn })),
+    }
+    callRecordFinalizedRef.current = true
+    setMessages((previous) => [...previous, createPersonaCallRecordMessage(record)])
+  }
+
+  const cleanupRealtimeCall = async (
+    notifyMain: boolean,
+    status: PersonaCallRecord['status'] = 'ended',
+  ) => {
     const callId = callIdRef.current
     callActiveRef.current = false
     setCallActive(false)
-    callIdRef.current = ''
     callMicrophoneRef.current?.stop()
     callMicrophoneRef.current = null
     callPlayerRef.current?.close()
@@ -1295,7 +1465,11 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
     callEventOffRef.current?.()
     callEventOffRef.current = null
     flushRealtimeTranscripts()
+    finalizeRealtimeCallRecord(status)
+    callIdRef.current = ''
     callReplyIdRef.current = ''
+    callTranscriptRef.current = []
+    callStartedAtRef.current = 0
     callDropAudioRef.current = false
     setCallMuted(false)
     setCallLevel(0)
@@ -1368,7 +1542,7 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
         break
       case 'error':
         setVoiceCloneStatus({ ok: false, text: `实时通话中断：${event.error}` })
-        void cleanupRealtimeCall(false)
+        void cleanupRealtimeCall(false, 'interrupted')
         break
       case 'ended':
         void cleanupRealtimeCall(false)
@@ -1383,6 +1557,11 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
     setCallPhase('connecting')
     setCallMuted(false)
     setCallLiveText('')
+    callAsrTextRef.current = ''
+    callReplyTextRef.current = ''
+    callTranscriptRef.current = []
+    callStartedAtRef.current = 0
+    callRecordFinalizedRef.current = false
     setCallActive(true)
     callActiveRef.current = true
     const callId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -1412,7 +1591,9 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
         onLevel: setCallLevel,
         onError: (error) => setVoiceCloneStatus({ ok: false, text: `麦克风异常：${error.message}` }),
       })
-      setCallStartedAt(Date.now())
+      const startedAt = Date.now()
+      callStartedAtRef.current = startedAt
+      setCallStartedAt(startedAt)
       setCallPhase('listening')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -1799,6 +1980,10 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
           </div>
         )}
         {visibleMessages.map((message) => {
+          const callRecord = readPersonaCallRecord(message)
+          if (callRecord) {
+            return <PersonaCallRecordBubble key={message.id} record={callRecord} displayName={displayName || sessionId} />
+          }
           const rawBubbles = messageTextParts(message).map((part) => part.trim()).filter(Boolean)
           const fileParts = messageFileParts(message)
           if (rawBubbles.length === 0 && fileParts.length === 0) return null
