@@ -34,6 +34,7 @@ import type { PersonaTtsVoiceBinding } from '../agent/persona/personaTypes'
 const TOKEN_FILE = 'wechat-bot-token.json'
 const MODE_FILE = 'wechat-bot-modes.json'
 const QR_DEADLINE_MS = 5 * 60_000
+const QR_CODE_RENDER_OPTIONS = { width: 280, margin: 2, errorCorrectionLevel: 'H' as const }
 const TYPING_KEEPALIVE_MS = 5_000
 const PENDING_SELECTION_TTL_MS = 2 * 60_000
 const PERSONA_BUBBLE_SEND_PAUSE_MIN_MS = 700
@@ -863,7 +864,7 @@ class WeixinBotService {
       this.cancelConnect()
       this.error = null
       const qr = await fetchQrcode()
-      const qrcodeImage = await QRCode.toDataURL(qr.qrcodeContent, { width: 280, margin: 2 })
+      const qrcodeImage = await QRCode.toDataURL(qr.qrcodeContent, QR_CODE_RENDER_OPTIONS)
       this.setStatus('connecting')
       this.broadcast('qrcode', { qrcodeImage })
       void this.pollQrcode(qr.qrcode)
@@ -934,7 +935,7 @@ class WeixinBotService {
         try {
           const newQr = await fetchQrcode()
           qrcode = newQr.qrcode
-          const qrcodeImage = await QRCode.toDataURL(newQr.qrcodeContent, { width: 280, margin: 2 })
+          const qrcodeImage = await QRCode.toDataURL(newQr.qrcodeContent, QR_CODE_RENDER_OPTIONS)
           this.broadcast('qrcode', { qrcodeImage })
         } catch {
           this.failConnect('刷新二维码失败')
