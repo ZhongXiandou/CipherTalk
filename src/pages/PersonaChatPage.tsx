@@ -4,7 +4,7 @@
  * 等待回复时头部只显示「对方正在输入…」，不暴露内部检索过程。
  * 历史挂 agent 会话存储（scope kind='persona'），打开恢复、每轮保存。
  */
-import { ArrowsRotateLeft, CircleCheck, CircleDashed, CircleExclamation, CircleXmarkFill, Clock, ClockArrowRotateLeft, CommentSlash, FaceRobot, Microphone, PencilToLine, PencilToSquare, Smartphone, TrashBin, Volume } from '@gravity-ui/icons'
+import { ArrowsRotateLeft, CircleCheck, CircleDashed, CircleExclamation, Clock, ClockArrowRotateLeft, CommentSlash, FaceRobot, Handset, HandsetArrowIn, Microphone, PencilToLine, PencilToSquare, TrashBin, Volume } from '@gravity-ui/icons'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useChat } from '@ai-sdk/react'
@@ -27,6 +27,7 @@ import {
 } from '@/components/ai-elements/prompt-input'
 import { ImagePreview, type ImagePreviewOriginRect } from '@/components/ImagePreview'
 import { PersonaChatTransport } from '../features/aiagent/transport/personaChatTransport'
+import type { AgentReasoningEffort } from '../features/aiagent/transport/ipcChatTransport'
 import { cn } from '../lib/utils'
 import { useTtsSpeaker } from '../lib/ttsPlayer'
 import { createRealtimePcmPlayer, startRealtimeMicrophone, type RealtimeMicrophone, type RealtimePcmPlayer } from '../lib/realtimeVoiceCall'
@@ -36,6 +37,7 @@ import { getAIProviders, type AIModelInfo, type AIProviderInfo } from '../types/
 import type { AgentConversationUpdatedEvent, PersonaBuildProgressInfo, PersonaRecordInfo, VoiceRealtimeEvent } from '../types/electron'
 import { parseAgentMessageMetadata } from './agent/agentConversationHelpers'
 import { formatTokenCount } from './agent/AgentUsageStats'
+import { AgentReasoningEffortControl } from './agent/AgentReasoningEffortControl'
 
 type Phase = 'loading' | 'confirm' | 'building' | 'chat'
 
@@ -495,6 +497,7 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
   const [historyRecords, setHistoryRecords] = useState<PersonaConversationRecord[]>([])
   const [recordPendingDelete, setRecordPendingDelete] = useState<PersonaConversationRecord | null>(null)
   const [providersInfo, setProvidersInfo] = useState<AIProviderInfo[]>([])
+  const [reasoningEffort, setReasoningEffort] = useState<AgentReasoningEffort>('high')
   /** 待发缓冲：真人不会秒回——发出的消息先挂着，停顿几秒没有新消息了才一起交给 AI 回一轮 */
   const [pendingTexts, setPendingTexts] = useState<string[]>([])
   const [inputHasText, setInputHasText] = useState(false)
@@ -515,6 +518,7 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
   const clientIdRef = useRef(`persona-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const busyRef = useRef(false)
   const historyOpenRef = useRef(false)
+  const reasoningEffortRef = useRef(reasoningEffort)
 
   const resetWechatPushState = () => {
     conversationSourceRef.current = ''
@@ -522,7 +526,11 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
     wechatPushPendingMessageIdsRef.current = new Set()
   }
 
-  const transport = useMemo(() => new PersonaChatTransport(() => sessionId), [sessionId])
+  reasoningEffortRef.current = reasoningEffort
+  const transport = useMemo(
+    () => new PersonaChatTransport(() => sessionId, () => reasoningEffortRef.current),
+    [sessionId],
+  )
   const { messages, sendMessage, setMessages, status, stop, error } = useChat({ transport, experimental_throttle: 50 })
   const busy = status === 'submitted' || status === 'streaming'
   const modelInfoByKey = useMemo(() => {
@@ -1927,28 +1935,33 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
                     <PromptInputActionAddAttachments label="添加图片" />
                   </PromptInputActionMenuContent>
                 </PromptInputActionMenu>
-                {/* 豆包端到端 Realtime 语音通话 */}
-                <Button
-                  isIconOnly
-                  aria-label="语音通话"
-                  isDisabled={busy}
-                  onPress={() => void startCall()}
-                  size="sm"
-                  variant="ghost"
-                  className="shrink-0"
-                >
-                  <Smartphone width={18} height={18} />
-                </Button>
               </PromptInputTools>
-              <HoldToTalkSubmit
-                holdDisabled={busy}
-                voiceInputEnabled={!inputHasText}
-                status={busy ? 'streaming' : undefined}
-                onTranscript={(text) => {
-                  void handleSendText(text).then(() => { autoPlayReplyRef.current = true })
-                }}
-                onVoiceError={(msg) => setVoiceCloneStatus({ ok: false, text: msg })}
-              />
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-0.5">
+                  {/* 豆包端到端 Realtime 语音通话 */}
+                  <Button
+                    isIconOnly
+                    aria-label="语音通话"
+                    isDisabled={busy}
+                    onPress={() => void startCall()}
+                    size="sm"
+                    variant="ghost"
+                    className="shrink-0"
+                  >
+                    <Handset width={18} height={18} />
+                  </Button>
+                  <AgentReasoningEffortControl value={reasoningEffort} onChange={setReasoningEffort} />
+                </div>
+                <HoldToTalkSubmit
+                  holdDisabled={busy}
+                  voiceInputEnabled={!inputHasText}
+                  status={busy ? 'streaming' : undefined}
+                  onTranscript={(text) => {
+                    void handleSendText(text).then(() => { autoPlayReplyRef.current = true })
+                  }}
+                  onVoiceError={(msg) => setVoiceCloneStatus({ ok: false, text: msg })}
+                />
+              </div>
             </PromptInputFooter>
           </PromptInput>
         </div>
@@ -2007,7 +2020,7 @@ export default function PersonaChatPage({ sessionId: sessionIdProp, embedded = f
                   variant="danger"
                   className="rounded-full"
                 >
-                  <CircleXmarkFill width={26} height={26} />
+                  <HandsetArrowIn width={26} height={26} />
                 </Button>
                 <span className="text-xs text-muted">挂断</span>
               </div>

@@ -3,10 +3,10 @@
  * 与 IpcChatTransport 同构，但走 electronAPI.persona（persona:chat → 子进程完整生成后按气泡回推）。
  */
 import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai'
-import type { AgentProgressEvent } from './ipcChatTransport'
+import type { AgentProgressEvent, AgentReasoningEffort } from './ipcChatTransport'
 
 interface PersonaBridge {
-  chat: (runId: string, sessionId: string, messages: unknown[]) => Promise<{ success: boolean; error?: string }>
+  chat: (runId: string, sessionId: string, messages: unknown[], reasoningEffort?: AgentReasoningEffort) => Promise<{ success: boolean; error?: string }>
   abort: (runId: string) => Promise<{ success: boolean }>
   onChunk: (runId: string, callback: (chunk: unknown) => void) => () => void
   onProgress: (runId: string, callback: (progress: unknown) => void) => () => void
@@ -26,6 +26,7 @@ function randomRunId(): string {
 export class PersonaChatTransport<UI_MESSAGE extends UIMessage = UIMessage> implements ChatTransport<UI_MESSAGE> {
   constructor(
     private readonly getSessionId: () => string,
+    private readonly getReasoningEffort?: () => AgentReasoningEffort,
     private readonly onProgress?: (progress: AgentProgressEvent) => void,
   ) {}
 
@@ -37,6 +38,7 @@ export class PersonaChatTransport<UI_MESSAGE extends UIMessage = UIMessage> impl
     const runId = randomRunId()
     const sessionId = this.getSessionId()
     const messages = options.messages as unknown[]
+    const reasoningEffort = this.getReasoningEffort?.()
     const progressHandler = this.onProgress
 
     options.abortSignal?.addEventListener('abort', () => { void bridge.abort(runId) })
@@ -56,7 +58,7 @@ export class PersonaChatTransport<UI_MESSAGE extends UIMessage = UIMessage> impl
             progressHandler?.(progress as AgentProgressEvent)
           }
         })
-        void bridge.chat(runId, sessionId, messages).catch((error: unknown) => {
+        void bridge.chat(runId, sessionId, messages, reasoningEffort).catch((error: unknown) => {
           try {
             controller.enqueue({ type: 'error', errorText: error instanceof Error ? error.message : String(error) } as UIMessageChunk)
             controller.close()

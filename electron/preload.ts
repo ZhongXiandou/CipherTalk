@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AccountProfile } from '../src/types/account'
+import type { AgentReasoningEffort } from './services/agent/types'
 
 function getMcpLaunchConfigSafe(): Promise<{
   command: string
@@ -297,8 +298,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('persona:buildProgress', listener)
       return () => ipcRenderer.removeListener('persona:buildProgress', listener)
     },
-    chat: (runId: string, sessionId: string, messages: unknown[]) =>
-      ipcRenderer.invoke('persona:chat', { runId, sessionId, messages }) as Promise<{ success: boolean; error?: string }>,
+    chat: (runId: string, sessionId: string, messages: unknown[], reasoningEffort?: AgentReasoningEffort) =>
+      ipcRenderer.invoke('persona:chat', { runId, sessionId, messages, reasoningEffort }) as Promise<{ success: boolean; error?: string }>,
     abort: (runId: string) => ipcRenderer.invoke('persona:abort', runId) as Promise<{ success: boolean }>,
     onChunk: (runId: string, callback: (chunk: unknown) => void): (() => void) => {
       const listener = (_e: unknown, data: { runId: string; chunk: unknown }) => {

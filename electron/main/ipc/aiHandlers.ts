@@ -5,7 +5,7 @@ import { join } from 'path'
 import type { UIMessage } from 'ai'
 import type { ConfigService } from '../../services/config'
 import type { MainProcessContext } from '../context'
-import type { AgentProviderConfig, AgentProviderConfigOverride, AgentScope, AgentSkillContextItem, AgentToolProfile, AgentUploadedMediaContext } from '../../services/agent/types'
+import type { AgentProviderConfig, AgentProviderConfigOverride, AgentReasoningEffort, AgentScope, AgentSkillContextItem, AgentToolProfile, AgentUploadedMediaContext } from '../../services/agent/types'
 import type { CodeWorkspaceRef } from '../../services/agent/codeWorkspaceTypes'
 import type { PersonaCard, PersonaNotes, PersonaRecord, PersonaTtsVoiceBinding } from '../../services/agent/persona/personaTypes'
 import { formatAgentError } from '../../services/agent/errorFormat'
@@ -1567,6 +1567,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     runId: string
     sessionId: string
     messages: UIMessage[]
+    reasoningEffort?: AgentReasoningEffort
   }) => {
     const sender = event.sender
     const { runId } = payload
@@ -1587,7 +1588,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
       const { sanitizeModelMessageToolPairs } = await import('../../services/agent/compaction')
       const { prepareProviderFileUploads } = await import('../../services/agent/providerFileUpload')
       const { convertToModelMessages } = await import('ai')
-      const providerConfig = resolveProviderConfig()
+      const providerConfig = resolveProviderConfig({ reasoningEffort: payload.reasoningEffort })
       await refreshAgentRunProxyCached(refreshResolvedProxyUrl)
       const providerFileUpload = await prepareProviderFileUploads(payload.messages || [], providerConfig, logger)
       const messages = sanitizeModelMessageToolPairs(await convertToModelMessages(providerFileUpload.messages))

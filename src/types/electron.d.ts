@@ -6,6 +6,7 @@ import type {
 } from './models'
 import type { AccountProfile, AccountProfileInput, AccountProfilePatch } from './account'
 import type { AIModelInfo, AIProviderInfo } from './ai'
+import type { AgentReasoningEffort } from '../features/aiagent/transport/ipcChatTransport'
 
 export interface EmbeddingConfig {
   enabled: boolean
@@ -1533,7 +1534,7 @@ export interface ElectronAPI {
     refreshIfStale: (sessionId: string) => Promise<{ success: boolean; refreshed?: boolean; persona?: PersonaRecordInfo | null; error?: string }>
     reflect: (payload: { sessionId: string; conversationId: number }) => Promise<{ success: boolean; reflected?: boolean; error?: string }>
     onBuildProgress: (callback: (progress: PersonaBuildProgressInfo) => void) => () => void
-    chat: (runId: string, sessionId: string, messages: unknown[]) => Promise<{ success: boolean; error?: string }>
+    chat: (runId: string, sessionId: string, messages: unknown[], reasoningEffort?: AgentReasoningEffort) => Promise<{ success: boolean; error?: string }>
     abort: (runId: string) => Promise<{ success: boolean }>
     onChunk: (runId: string, callback: (chunk: unknown) => void) => () => void
     onProgress: (runId: string, callback: (progress: unknown) => void) => () => void
