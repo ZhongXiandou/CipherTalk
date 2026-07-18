@@ -6,7 +6,7 @@
  * 约定：id === 0 && type === 'ready' 为启动就绪信号。
  * 隔离收益：AI 崩溃（如 sqlite-vec 原生 fatal）只终止本子进程，主进程会重启，不拖垮 UI。
  */
-import { generateConversationTitle, generateReplySuggestions, runAgent } from './services/agent/engine'
+import { generateConversationTitle, generateReplySuggestions, optimizeAgentPrompt, runAgent } from './services/agent/engine'
 import { runPersonaChat } from './services/agent/persona/personaChatEngine'
 import { extractPersona } from './services/agent/persona/personaLlm'
 import {
@@ -84,6 +84,17 @@ async function handleMessage(msg: any): Promise<void> {
         try {
           const title = await generateConversationTitle(payload, aborter.signal)
           parentPort!.postMessage({ id, result: { title } })
+        } finally {
+          aborter.abort()
+        }
+        break
+      }
+
+      case 'optimizePrompt': {
+        const aborter = new AbortController()
+        try {
+          const text = await optimizeAgentPrompt(payload, aborter.signal)
+          parentPort!.postMessage({ id, result: { text } })
         } finally {
           aborter.abort()
         }

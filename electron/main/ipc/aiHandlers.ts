@@ -1955,6 +1955,26 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     }
   })
 
+  ipcMain.handle('agent:optimizePrompt', async (_event, payload: {
+    prompt: string
+    modelConfig?: AgentProviderConfigOverride | null
+  }) => {
+    try {
+      const { agentProcessService } = await import('../../services/agent/agentProcessService')
+      const { resolveProviderConfig } = await import('../../services/agent/resolveProviderConfig')
+      const { refreshResolvedProxyUrl } = await import('../../services/ai/proxyFetch')
+      await refreshResolvedProxyUrl()
+      const providerConfig = resolveProviderConfig(payload.modelConfig)
+      const text = await agentProcessService.optimizePrompt({
+        prompt: payload.prompt,
+        providerConfig,
+      })
+      return { success: true, text }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
   ipcMain.handle('agent:replySuggest', async (_event, payload: {
     input: Omit<import('../../services/agent/engine').ReplySuggestInput, 'providerConfig'>
     modelConfig?: AgentProviderConfigOverride | null

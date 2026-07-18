@@ -133,6 +133,12 @@ export class AgentProcessService {
     return result.title
   }
 
+  /** 提示词优化：子进程内单次 generateText，把输入框草稿润色成更清晰的提示词。 */
+  async optimizePrompt(input: { prompt: string; providerConfig: AgentProviderConfig }): Promise<string> {
+    const result = await this.call<{ text: string }>('optimizePrompt', input)
+    return result.text
+  }
+
   /** 聊天回复建议：子进程内单次 generateText（可带图/带检索工具），返回建议 + 附图诊断信息。 */
   async replySuggest(input: import('./engine').ReplySuggestInput): Promise<import('./engine').ReplySuggestOutcome> {
     return this.call<import('./engine').ReplySuggestOutcome>('replySuggest', input)

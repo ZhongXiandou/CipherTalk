@@ -193,6 +193,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     abort: (runId: string) => ipcRenderer.invoke('agent:abort', runId) as Promise<{ success: boolean }>,
     generateTitle: (firstMessage: string, modelConfig?: unknown) =>
       ipcRenderer.invoke('agent:generateTitle', { firstMessage, modelConfig }) as Promise<{ success: boolean; title?: string; error?: string }>,
+    optimizePrompt: (prompt: string, modelConfig?: unknown) =>
+      ipcRenderer.invoke('agent:optimizePrompt', { prompt, modelConfig }) as Promise<{ success: boolean; text?: string; error?: string }>,
     replySuggest: (input: unknown, modelConfig?: unknown) =>
       ipcRenderer.invoke('agent:replySuggest', { input, modelConfig }) as Promise<{ success: boolean; suggestions?: string[]; error?: string }>,
     listConversations: (scope?: unknown) =>

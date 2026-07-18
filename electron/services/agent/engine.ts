@@ -709,6 +709,27 @@ export async function generateConversationTitle(
   return sanitizeGeneratedTitle(result.text)
 }
 
+// 提示词优化：把用户输入框里的草稿润色成更清晰完整的提示词，仅回优化后的文本
+export async function optimizeAgentPrompt(
+  input: { prompt: string; providerConfig: AgentProviderConfig },
+  signal?: AbortSignal,
+): Promise<string> {
+  const prompt = input.prompt.trim().slice(0, 4000)
+  if (!prompt) return ''
+
+  const result = await generateText({
+    model: createLanguageModel(input.providerConfig),
+    instructions: '你是提示词优化助手。把用户的草稿改写成一条目标明确、信息完整、表述清晰的提示词：保留原意和关键细节，补全模糊表述，去掉冗余口水话；语言与草稿保持一致。只输出优化后的提示词本身，不要解释，不要加引号或任何前缀。',
+    prompt: `优化下面这条提示词：\n${prompt}`,
+    abortSignal: signal,
+    timeout: TITLE_TIMEOUT_MS,
+    telemetry: { functionId: 'agent-prompt-optimize' },
+  })
+
+  const text = result.text.trim()
+  return text || prompt
+}
+
 function sanitizeGeneratedTitle(value: string): string {
   const title = value
     .replace(/^[\s"'“”‘’`]+|[\s"'“”‘’`]+$/g, '')

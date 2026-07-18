@@ -7,13 +7,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { useChat } from '@ai-sdk/react'
 import { isToolUIPart, lastAssistantMessageIsCompleteWithApprovalResponses, type ChatStatus, type UIMessage } from 'ai'
 import { AlertDialog, Button as HeroButton, ButtonGroup, Dropdown, Header, Label, Modal, SearchField, Separator, Spinner, Surface, Switch, Toolbar, Tooltip, toast } from '@heroui/react'
-import { ArrowDownToLine, ArrowsRotateLeft, ArrowUpRightFromSquare, Bulb, Check, ChevronDown, CircleInfo, Clock, Display, LayoutSideContentLeft, ListCheck, PencilToLine, PencilToSquare, Terminal, TrashBin, Xmark } from '@gravity-ui/icons'
+import { ArrowDownToLine, ArrowsRotateLeft, ArrowUpRightFromSquare, Bulb, Check, ChevronDown, CircleInfo, Clock, Display, LayoutSideContentLeft, ListCheck, MagicWand, PencilToLine, PencilToSquare, Terminal, TrashBin, Xmark } from '@gravity-ui/icons'
 import { toPng } from 'dom-to-image-more'
 import {
   Conversation,
   ConversationAutoScroll,
   ConversationContent,
-  ConversationEmptyState,
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation'
 import { Message, MessageContent } from '@/components/ai-elements/message'
@@ -115,6 +114,30 @@ function AgentPromptTextarea({ workspaceReferenceCount }: { workspaceReferenceCo
       className={hasAssets ? 'min-h-10 max-h-40 py-2 text-sm leading-5' : 'min-h-14 max-h-40 py-2 text-sm leading-5'}
       placeholder="问问你的聊天记录，Enter 发送，Shift + Enter 换行…"
     />
+  )
+}
+
+// 提示词优化按钮：挂在输入框（InputGroup）右上角，把当前草稿交给模型润色后回填；空输入或优化中不可点。
+function AgentPromptOptimizeButton({ optimizing, onOptimize }: { optimizing: boolean; onOptimize: () => void }) {
+  const { textInput } = usePromptInputController()
+  const disabled = optimizing || !textInput.value.trim()
+  return (
+    <div className="absolute top-1.5 right-1.5 z-10">
+      <Tooltip delay={0}>
+        <HeroButton
+          aria-label="优化提示词"
+          className="size-7 p-0 text-muted-foreground"
+          isDisabled={disabled}
+          isIconOnly
+          onPress={onOptimize}
+          size="sm"
+          variant="tertiary"
+        >
+          {optimizing ? <Spinner size="sm" /> : <MagicWand className="size-4" />}
+        </HeroButton>
+        <Tooltip.Content placement="top">{optimizing ? '正在优化提示词…' : 'AI 优化提示词'}</Tooltip.Content>
+      </Tooltip>
+    </div>
   )
 }
 
@@ -397,6 +420,27 @@ export default function AgentPage() {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const { speakingKey: speakingMessageId, speak: speakMessage, stop: stopSpeakingMessage } = useTtsSpeaker()
   const promptInputControllerRef = useRef<PromptInputControllerProps | null>(null)
+  // 提示词优化：用当前所选模型把输入框草稿润色后原地回填
+  const [promptOptimizing, setPromptOptimizing] = useState(false)
+  const handleOptimizePrompt = useCallback(async () => {
+    const controller = promptInputControllerRef.current
+    const text = controller?.textInput.value.trim() ?? ''
+    if (!controller || !text) return
+    setPromptOptimizing(true)
+    try {
+      const result = await window.electronAPI.agent.optimizePrompt(text, selectedModelConfigRef.current)
+      const optimized = result.success ? (result.text?.trim() ?? '') : ''
+      if (optimized) {
+        controller.textInput.setInput(optimized)
+      } else {
+        toast.danger(`提示词优化失败：${result.error || '未知错误'}`, { timeout: 3000 })
+      }
+    } catch (error) {
+      toast.danger(`提示词优化失败：${error instanceof Error ? error.message : String(error)}`, { timeout: 3000 })
+    } finally {
+      setPromptOptimizing(false)
+    }
+  }, [])
   // 跨窗口自动运行（聊天窗口「AI 摘要」）：待发送的提示词，等 @提及状态落地后由下方 effect 自动提交
   const [pendingAutoRun, setPendingAutoRun] = useState<string | null>(null)
   const selectedPreset = useMemo(
@@ -2198,6 +2242,8 @@ export default function AgentPage() {
       break
     }
   }
+  // 新对话（还没有任何消息）时输入框居中展示，发出首条消息后回到底部
+  const promptCentered = messages.length === 0
 
   return (
     <Surface
@@ -2337,19 +2383,8 @@ export default function AgentPage() {
           <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
       <Conversation className="min-h-0 flex-1">
         <ConversationAutoScroll enabled={shouldAnchorLatestUser} trigger={latestUserMessageId} />
-        <ConversationContent
-          className={
-            messages.length === 0
-              ? 'mx-auto h-full w-full min-w-80 max-w-[82%] pt-4 pb-48'
-              : 'mx-auto w-full min-w-80 max-w-[82%] pt-4 pb-48'
-          }
-        >
-          {messages.length === 0 ? (
-            <ConversationEmptyState
-              title="开始查询聊天记录"
-              description="输入问题后，助手会基于本地聊天数据回答"
-            />
-          ) : (
+        <ConversationContent className="mx-auto w-full min-w-80 max-w-[82%] pt-4 pb-48">
+          {messages.length === 0 ? null : (
             messages.map((message, messageIndex) => (
               <AgentMessageItem
                 busy={effectiveBusy}
@@ -2398,9 +2433,23 @@ export default function AgentPage() {
         <ConversationScrollButton className="bottom-36 z-30 agent-scroll-glass" />
       </Conversation>
 
-      <div className="pointer-events-none absolute right-0 bottom-0 left-0 h-44">
-        <div className="absolute right-0 bottom-3 left-0 grid place-items-center px-5">
-          <div className="pointer-events-auto w-full max-w-4xl">
+      {/* 新对话时输入框居中变窄并带标题；首条消息发出后平滑下移到底部恢复全宽 */}
+      <div className="pointer-events-none absolute inset-0">
+        <div
+          className={`absolute right-0 left-0 grid place-items-center px-5 transition-all duration-500 ease-in-out ${
+            promptCentered ? 'bottom-1/2 translate-y-1/2' : 'bottom-3 translate-y-0'
+          }`}
+        >
+          <div className={`pointer-events-auto w-full transition-[max-width] duration-500 ease-in-out ${promptCentered ? 'max-w-2xl' : 'max-w-4xl'}`}>
+        <div
+          aria-hidden={!promptCentered}
+          className={`overflow-hidden text-center transition-all duration-500 ease-in-out ${
+            promptCentered ? 'mb-6 max-h-28 opacity-100' : 'mb-0 max-h-0 opacity-0'
+          }`}
+        >
+          <div className="font-semibold text-2xl text-foreground">开始查询聊天记录</div>
+          <div className="mt-2 text-muted-foreground text-sm">输入问题后，助手会基于本地聊天数据回答</div>
+        </div>
         {localAgentPatchRequest && (
           <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 rounded-(--agent-radius,12px) border border-border bg-surface/90 px-3 py-2 text-xs shadow-lg">
             <Terminal className="size-4 shrink-0 text-muted" />
@@ -2442,7 +2491,7 @@ export default function AgentPage() {
           <PromptInputControllerBridge controllerRef={promptInputControllerRef} />
           <PromptInput
             accept="image/*,.txt,.md,.json,.csv,.pdf,application/pdf"
-            className={`agent-prompt-input w-full **:data-[slot=input-group]:overflow-visible **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface/55 **:data-[slot=input-group]:shadow-lg ${workspaceFileDragOver ? '**:data-[slot=input-group]:ring-2 **:data-[slot=input-group]:ring-primary/45' : ''}`}
+            className={`agent-prompt-input w-full **:data-[slot=input-group]:relative **:data-[slot=input-group]:overflow-visible **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface/55 **:data-[slot=input-group]:shadow-lg ${workspaceFileDragOver ? '**:data-[slot=input-group]:ring-2 **:data-[slot=input-group]:ring-primary/45' : ''}`}
             maxFiles={6}
             maxFileSize={8 * 1024 * 1024}
             multiple
@@ -2468,9 +2517,10 @@ export default function AgentPage() {
                 sessions={sessions}
               />
               <PromptInputTextarea
-                className="min-h-10 max-h-40 py-2 text-sm leading-5"
+                className="min-h-10 max-h-40 py-2 pr-10 text-sm leading-5"
                 placeholder={selectedLocalAgentId ? '让本地智能体处理当前代码工作区，Enter 发送，Shift + Enter 换行…' : '问问你的聊天记录，Enter 发送，Shift + Enter 换行…'}
               />
+              <AgentPromptOptimizeButton onOptimize={handleOptimizePrompt} optimizing={promptOptimizing} />
             </PromptInputBody>
 
             <PromptInputFooter className="items-center gap-1.5 px-2.5 pt-1 pb-2">
@@ -2644,7 +2694,8 @@ export default function AgentPage() {
             </PromptInputFooter>
           </PromptInput>
         </PromptInputProvider>
-        <div className="mt-2 flex w-full items-center justify-between gap-3 px-2">
+        {/* 居中态不展示输入框下方这行（工作区面板 + Token 用量），仅渐隐渐显 */}
+        <div className={`mt-2 flex w-full items-center justify-between gap-3 px-2 transition-opacity duration-500 ease-in-out ${promptCentered ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
           <CodeWorkspacePanel
             approval={codeWorkspaceApproval}
             className="min-w-0 flex-1"
