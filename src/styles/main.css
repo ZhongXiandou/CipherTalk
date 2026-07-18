@@ -581,6 +581,105 @@ img {
   }
 }
 
+.agent-prompt-optimize-button {
+  --button-bg: transparent;
+  --button-bg-hover: transparent;
+  --button-bg-pressed: transparent;
+  box-shadow: none;
+}
+
+.agent-prompt-optimize-button::after {
+  display: none;
+}
+
+/* 提示词优化时，用被输入框轮廓裁切的斜向柔光取代沿边框旋转的跑马灯。 */
+.agent-prompt-input--optimizing [data-slot="input-group"] {
+  isolation: isolate;
+  overflow: hidden;
+  border-color: color-mix(in oklch, var(--accent) 14%, var(--border));
+}
+
+.agent-prompt-input--optimizing [data-slot="input-group"] > * {
+  position: relative;
+  z-index: 2;
+}
+
+.agent-prompt-input--optimizing [data-slot="input-group"]::before,
+.agent-prompt-input--optimizing [data-slot="input-group"]::after {
+  content: "";
+  position: absolute;
+  top: -40%;
+  bottom: -40%;
+  left: -68%;
+  z-index: 1;
+  width: 66%;
+  pointer-events: none;
+  transform: translate3d(-15%, 0, 0) skewX(-12deg);
+  will-change: transform, opacity;
+  animation: agent-prompt-sheen-sweep 3.8s cubic-bezier(0.36, 0, 0.2, 1) infinite;
+}
+
+/* 宽光带提供彩色、低透明度的柔和过渡。 */
+.agent-prompt-input--optimizing [data-slot="input-group"]::before {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    oklch(0.82 0.17 195 / 0.02) 10%,
+    oklch(0.78 0.18 225 / 0.1) 30%,
+    oklch(1 0 0 / 0.2) 50%,
+    oklch(0.74 0.2 350 / 0.09) 70%,
+    oklch(0.8 0.18 65 / 0.02) 90%,
+    transparent 100%
+  );
+  filter: blur(18px) saturate(120%);
+}
+
+/* 窄亮芯让掠过动作有明确的高光中心，同时保持两侧羽化。 */
+.agent-prompt-input--optimizing [data-slot="input-group"]::after {
+  background: linear-gradient(
+    90deg,
+    transparent 28%,
+    oklch(0.86 0.11 220 / 0.08) 41%,
+    oklch(1 0 0 / 0.3) 50%,
+    oklch(0.84 0.14 335 / 0.07) 59%,
+    transparent 72%
+  );
+  filter: blur(6px);
+}
+
+@keyframes agent-prompt-sheen-sweep {
+  0% {
+    opacity: 0;
+    transform: translate3d(-15%, 0, 0) skewX(-12deg);
+  }
+
+  16% {
+    opacity: 0.18;
+  }
+
+  34%,
+  68% {
+    opacity: 0.82;
+  }
+
+  84% {
+    opacity: 0;
+    transform: translate3d(285%, 0, 0) skewX(-12deg);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(285%, 0, 0) skewX(-12deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-prompt-input--optimizing [data-slot="input-group"]::before,
+  .agent-prompt-input--optimizing [data-slot="input-group"]::after {
+    display: none;
+  }
+}
+
 /* 滚动到底部按钮液态玻璃折射质感：圆形 36px，复用朋友圈媒体按钮的位移贴图参数。
    贴图由 AgentGlassDefs 运行时生成，注入 #agent-glass-36；就绪后用位移折射替换普通模糊。 */
 .agent-glass-defs {

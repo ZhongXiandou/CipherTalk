@@ -36,6 +36,17 @@ export interface AgentProviderConfigOverride {
   reasoningEffort?: AgentReasoningEffort
 }
 
+export interface AgentPromptOptimizeContextMessage {
+  role: 'user' | 'assistant'
+  text: string
+}
+
+export interface AgentPromptOptimizeInput {
+  prompt: string
+  context?: AgentPromptOptimizeContextMessage[]
+  providerConfig: AgentProviderConfig
+}
+
 /** 提问范围：全局 / 限定单个会话（@ 某联系人或群时收窄）。 */
 export type AgentScope =
   | { kind: 'global' }

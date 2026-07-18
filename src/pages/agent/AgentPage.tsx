@@ -103,6 +103,7 @@ import { AGENT_PENDING_TITLE, ModelWaitingLine, SubAgentProgressPanel, mergeSubA
 import { ModelCapabilityIcons, ModelItem, type AgentModelItem } from './AgentMessageBlocks'
 import { AgentMessageItem } from './AgentMessageItem'
 import { AgentRecordsMenu } from './AgentRecordsMenu'
+import { buildPromptOptimizeContext, type PromptOptimizeContextMessage } from './promptOptimizeContext'
 import {
   normalizeLocalCodingAgentConfig,
 } from '@/lib/localCodingAgent'
@@ -127,8 +128,8 @@ function AgentPromptOptimizeButton({ optimizing, onOptimize }: { optimizing: boo
     <div className="absolute top-1.5 right-1.5 z-10">
       <Tooltip delay={0}>
         <HeroButton
-          aria-label="优化提示词"
-          className="size-7 p-0 text-muted-foreground"
+          aria-label={optimizing ? '正在优化提示词' : '优化提示词'}
+          className="agent-prompt-optimize-button size-7 p-0 text-muted-foreground"
           isDisabled={disabled}
           isIconOnly
           onPress={onOptimize}
@@ -422,7 +423,8 @@ export default function AgentPage() {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const { speakingKey: speakingMessageId, speak: speakMessage, stop: stopSpeakingMessage } = useTtsSpeaker()
   const promptInputControllerRef = useRef<PromptInputControllerProps | null>(null)
-  // 提示词优化：用当前所选模型把输入框草稿润色后原地回填
+  const promptOptimizeContextRef = useRef<PromptOptimizeContextMessage[]>([])
+  // 提示词优化：结合最近两轮完整问答消解指代，再把润色后的草稿原地回填
   const [promptOptimizing, setPromptOptimizing] = useState(false)
   const handleOptimizePrompt = useCallback(async () => {
     const controller = promptInputControllerRef.current
@@ -430,7 +432,11 @@ export default function AgentPage() {
     if (!controller || !text) return
     setPromptOptimizing(true)
     try {
-      const result = await window.electronAPI.agent.optimizePrompt(text, selectedModelConfigRef.current)
+      const result = await window.electronAPI.agent.optimizePrompt(
+        text,
+        selectedModelConfigRef.current,
+        promptOptimizeContextRef.current,
+      )
       const optimized = result.success ? (result.text?.trim() ?? '') : ''
       if (optimized) {
         controller.textInput.setInput(optimized)
@@ -706,6 +712,7 @@ export default function AgentPage() {
   const lastStreamingSaveAtRef = useRef(0)
   const [modelOpen, setModelOpen] = useState(false)
   const busy = status === 'submitted' || status === 'streaming'
+  promptOptimizeContextRef.current = buildPromptOptimizeContext(busy ? messages.slice(0, -1) : messages)
   const awaitingToolApproval = useMemo(() => {
     const lastMessage = messages[messages.length - 1]
     return lastMessage?.role === 'assistant' && lastMessage.parts.some((part) => (
@@ -2509,7 +2516,8 @@ export default function AgentPage() {
           <PromptInputControllerBridge controllerRef={promptInputControllerRef} />
           <PromptInput
             accept="image/*,.txt,.md,.json,.csv,.pdf,application/pdf"
-            className={`agent-prompt-input w-full **:data-[slot=input-group]:relative **:data-[slot=input-group]:overflow-visible **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface/55 **:data-[slot=input-group]:shadow-lg ${workspaceFileDragOver ? '**:data-[slot=input-group]:ring-2 **:data-[slot=input-group]:ring-primary/45' : ''}`}
+            aria-busy={promptOptimizing}
+            className={`agent-prompt-input w-full **:data-[slot=input-group]:relative **:data-[slot=input-group]:overflow-visible **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface/55 **:data-[slot=input-group]:shadow-lg ${promptOptimizing ? 'agent-prompt-input--optimizing' : ''} ${workspaceFileDragOver ? '**:data-[slot=input-group]:ring-2 **:data-[slot=input-group]:ring-primary/45' : ''}`}
             maxFiles={6}
             maxFileSize={8 * 1024 * 1024}
             multiple

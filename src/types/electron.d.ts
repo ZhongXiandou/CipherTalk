@@ -54,6 +54,11 @@ export interface AgentConversationUpdatedEvent {
   originClientId?: string | null
 }
 
+export interface AgentPromptOptimizeContextMessage {
+  role: 'user' | 'assistant'
+  text: string
+}
+
 export type TtsProviderId = 'xiaomi' | 'volcengine' | 'aliyun-qwen'
 export type TtsProtocol = 'xiaomi-mimo-tts' | 'volcengine-bidirectional' | 'aliyun-qwen-realtime'
 
@@ -1456,7 +1461,11 @@ export interface ElectronAPI {
     ) => Promise<{ success: boolean; error?: string }>
     abort: (runId: string) => Promise<{ success: boolean }>
     generateTitle: (firstMessage: string, modelConfig?: unknown) => Promise<{ success: boolean; title?: string; error?: string }>
-    optimizePrompt: (prompt: string, modelConfig?: unknown) => Promise<{ success: boolean; text?: string; error?: string }>
+    optimizePrompt: (
+      prompt: string,
+      modelConfig?: unknown,
+      context?: AgentPromptOptimizeContextMessage[]
+    ) => Promise<{ success: boolean; text?: string; error?: string }>
     replySuggest: (
       input: {
         contactName: string

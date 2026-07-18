@@ -5,7 +5,7 @@ import { join } from 'path'
 import type { UIMessage } from 'ai'
 import type { ConfigService } from '../../services/config'
 import type { MainProcessContext } from '../context'
-import type { AgentProviderConfig, AgentProviderConfigOverride, AgentReasoningEffort, AgentScope, AgentSkillContextItem, AgentToolProfile, AgentUploadedMediaContext } from '../../services/agent/types'
+import type { AgentPromptOptimizeContextMessage, AgentProviderConfig, AgentProviderConfigOverride, AgentReasoningEffort, AgentScope, AgentSkillContextItem, AgentToolProfile, AgentUploadedMediaContext } from '../../services/agent/types'
 import type { CodeWorkspaceRef } from '../../services/agent/codeWorkspaceTypes'
 import type { PersonaCard, PersonaNotes, PersonaRecord, PersonaTtsVoiceBinding } from '../../services/agent/persona/personaTypes'
 import { formatAgentError } from '../../services/agent/errorFormat'
@@ -1958,6 +1958,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
   ipcMain.handle('agent:optimizePrompt', async (_event, payload: {
     prompt: string
     modelConfig?: AgentProviderConfigOverride | null
+    context?: AgentPromptOptimizeContextMessage[]
   }) => {
     try {
       const { agentProcessService } = await import('../../services/agent/agentProcessService')
@@ -1967,6 +1968,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
       const providerConfig = resolveProviderConfig(payload.modelConfig)
       const text = await agentProcessService.optimizePrompt({
         prompt: payload.prompt,
+        context: payload.context,
         providerConfig,
       })
       return { success: true, text }

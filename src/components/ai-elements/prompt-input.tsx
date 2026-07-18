@@ -33,12 +33,12 @@ import { createLiquidGlassBubbleMap, type GlassBubbleRadii, type GlassFilterMap 
 import { Button as HeroButton, ButtonGroup, Dropdown, Label, Toolbar } from "@heroui/react";
 import type { ChatStatus, FileUIPart } from "ai";
 import {
-  ArrowUp,
   ArrowsRotateLeft,
   CircleStop,
   File,
   Microphone,
-  Picture,
+  Paperclip,
+  PaperPlane,
   Plus,
   Xmark,
 } from "@gravity-ui/icons";
@@ -426,7 +426,7 @@ export const PromptInputActionAddAttachments = ({
         attachments.openFileDialog();
       }}
     >
-      <Picture className="size-4 shrink-0 text-muted" />
+      <Paperclip className="size-4 shrink-0 text-muted" />
       <Label>{label}</Label>
     </Dropdown.Item>
   );
@@ -1200,7 +1200,7 @@ export const PromptInputSubmit = ({
   children,
   ...props
 }: PromptInputSubmitProps) => {
-  let Icon = <ArrowUp className="size-4" />;
+  let Icon = <PaperPlane className="size-4" />;
 
   if (status === "submitted" || status === "streaming") {
     Icon = <CircleStop className="size-4 animate-pulse" />;
