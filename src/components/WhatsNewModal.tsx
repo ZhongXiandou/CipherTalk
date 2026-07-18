@@ -2,6 +2,8 @@ import { Button, Modal } from '@heroui/react'
 import { LogoTelegram, Volume, VolumeXmark, Xmark } from '@gravity-ui/icons'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import * as configService from '../services/config'
+import { LottieView } from '@/components/LottieView'
+import visionOrbUrl from '@/assets/lottie/Anumation.lottie?url'
 
 interface WhatsNewModalProps {
   onClose: () => void
@@ -598,6 +600,12 @@ function WhatsNewModal({ onClose }: WhatsNewModalProps) {
             {visionArticle}
           </div>
         </div>
+        {/* 讲述中的光球：固定在屏幕顶部中间；界面隐藏时不渲染，避免后台空转 WASM 渲染循环 */}
+        {isVisionOpen && (
+          <div className="pointer-events-none fixed inset-x-0 top-4 z-10 flex justify-center">
+            <LottieView autoplay loop className="size-24" src={visionOrbUrl} />
+          </div>
+        )}
       </div>
     )
   }

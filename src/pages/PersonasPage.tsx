@@ -7,6 +7,8 @@ import type { PersonaRecordInfo } from '../types/electron'
 import type { ChatSession } from '../types/models'
 import { cn } from '../lib/utils'
 import PersonaChatPage from './PersonaChatPage'
+import { LottieView } from '@/components/LottieView'
+import personaOrbUrl from '@/assets/lottie/Anumation.lottie?url'
 
 type ListMode = 'all' | 'cloned'
 
@@ -446,9 +448,7 @@ export default function PersonasPage() {
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted">
-            <div className="flex size-14 items-center justify-center rounded-full bg-accent-soft text-accent-soft-foreground">
-              <PersonPlus className="size-6" />
-            </div>
+            <LottieView autoplay loop className="size-36" src={personaOrbUrl} />
             <div>
               <div className="text-sm font-semibold text-foreground">选择一个联系人</div>
               <div className="mt-1 text-sm">右侧会显示克隆确认和分身聊天窗口</div>
