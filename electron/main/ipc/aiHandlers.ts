@@ -1076,6 +1076,16 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     return { success: true }
   })
 
+  ipcMain.handle('agent:resolveCodexToolApproval', async (_event, payload: { approvalId?: string; approved?: boolean }) => {
+    try {
+      const { agentProcessService } = await import('../../services/agent/agentProcessService')
+      const handled = await agentProcessService.resolveCodexToolApproval(String(payload?.approvalId || ''), payload?.approved === true)
+      return { success: true, handled }
+    } catch (error) {
+      return { success: false, handled: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   // ========= 嵌入模型（语义/向量检索）=========
   ipcMain.handle('embedding:getConfig', async () => {
     try {
@@ -2114,8 +2124,13 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     }
   })
 
-  ipcMain.handle('ai:testConnection', async (_, provider: string, apiKey: string, baseURL?: string, protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google', model?: string) => {
+  ipcMain.handle('ai:testConnection', async (_, provider: string, apiKey: string, baseURL?: string, protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription', model?: string) => {
     try {
+      if (protocol === 'codex-subscription' || provider === 'openai-codex') {
+        const { codexSubscriptionService } = await import('../../services/ai/codexSubscriptionService')
+        const status = await codexSubscriptionService.getStatus(true)
+        return status.authenticated ? { success: true } : { success: false, error: status.error || '请先登录 ChatGPT 账号' }
+      }
       const { aiService } = await import('../../services/ai/aiService')
       const { refreshResolvedProxyUrl } = await import('../../services/ai/proxyFetch')
       await refreshResolvedProxyUrl() // 测试连接也走代理，保证"测试通过=实际可用"
@@ -2125,8 +2140,24 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
     }
   })
 
-  ipcMain.handle('ai:listModels', async (_, options: { provider: string; apiKey?: string; baseURL?: string; protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' }) => {
+  ipcMain.handle('ai:listModels', async (_, options: { provider: string; apiKey?: string; baseURL?: string; protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription' }) => {
     try {
+      if (options.protocol === 'codex-subscription' || options.provider === 'openai-codex') {
+        const { codexSubscriptionService } = await import('../../services/ai/codexSubscriptionService')
+        const items = await codexSubscriptionService.listModels()
+        return {
+          success: true,
+          models: items.map((item) => item.id),
+          modelDetails: items.map((item) => ({
+            id: item.id,
+            name: item.displayName,
+            providerId: 'openai-codex',
+            modalities: { input: ['text', 'image'], output: ['text'] },
+            capabilities: { attachment: true, reasoning: true, toolCall: true, structuredOutput: true, temperature: false, openWeights: false },
+            limits: {},
+          })),
+        }
+      }
       const { aiService } = await import('../../services/ai/aiService')
       return await aiService.listProviderModels(options)
     } catch (e) {

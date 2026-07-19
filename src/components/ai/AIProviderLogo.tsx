@@ -31,6 +31,7 @@ function iconClassName(className?: string) {
 function normalizeProviderId(providerId?: string) {
   if (!providerId) return ''
   if (providerId === 'custom-responses') return 'openai'
+  if (providerId === 'openai-codex') return 'openai'
   if (providerId === 'openai-compatible') return 'custom'
   if (providerId === 'google') return 'gemini'
   if (providerId === 'alibaba-cn') return 'qwen'

@@ -19,6 +19,7 @@ import type { PersonaChatInput } from './services/agent/persona/personaTypes'
 import type { AgentRunInput } from './services/agent/types'
 import { formatAgentError } from './services/agent/errorFormat'
 import { initAiTelemetry } from './services/ai/telemetry'
+import { resolveCodexToolApproval } from './services/agent/codexSubscriptionRunner'
 
 initAiTelemetry('ciphertalk-ai-utility')
 
@@ -77,6 +78,15 @@ async function handleMessage(msg: any): Promise<void> {
       case 'abort':
         aborters.get(payload?.runId)?.abort()
         parentPort!.postMessage({ id, result: { aborted: true } })
+        break
+
+      case 'codexToolApproval':
+        parentPort!.postMessage({
+          id,
+          result: {
+            handled: resolveCodexToolApproval(String(payload?.approvalId || ''), payload?.approved === true),
+          },
+        })
         break
 
       case 'generateTitle': {

@@ -373,4 +373,7 @@ app.on('before-quit', () => {
   void import('./services/exportProcessService').then(({ exportProcessService }) => {
     exportProcessService.shutdown()
   })
+  void import('./services/ai/codexSubscriptionService').then(({ codexSubscriptionService }) => {
+    codexSubscriptionService.shutdown()
+  })
 })

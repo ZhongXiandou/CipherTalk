@@ -59,6 +59,24 @@ export interface AgentPromptOptimizeContextMessage {
   text: string
 }
 
+export interface CodexSubscriptionStatus {
+  available: boolean
+  authenticated: boolean
+  email?: string
+  planType?: string
+  requiresOpenaiAuth?: boolean
+  error?: string
+}
+
+export interface CodexSubscriptionModel {
+  id: string
+  displayName: string
+  description: string
+  isDefault: boolean
+  hidden: boolean
+  defaultReasoningEffort?: string
+}
+
 // ========= Agent Canvas（对话内可编辑产物） =========
 export type AgentCanvasKind = 'document' | 'code'
 export type AgentCanvasStatus = 'active' | 'archived'
@@ -1523,6 +1541,7 @@ export interface ElectronAPI {
       canvasContext?: { activeCanvasId?: string; activeRevision?: number } | null
     ) => Promise<{ success: boolean; error?: string }>
     abort: (runId: string) => Promise<{ success: boolean }>
+    resolveCodexToolApproval: (approvalId: string, approved: boolean) => Promise<{ success: boolean; handled: boolean; error?: string }>
     generateTitle: (firstMessage: string, modelConfig?: unknown) => Promise<{ success: boolean; title?: string; error?: string }>
     optimizePrompt: (
       prompt: string,
@@ -1699,12 +1718,12 @@ export interface ElectronAPI {
       message?: string
       error?: string
     }>
-    testConnection: (provider: string, apiKey: string, baseURL?: string, protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google', model?: string) => Promise<{
+    testConnection: (provider: string, apiKey: string, baseURL?: string, protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription', model?: string) => Promise<{
       success: boolean
       error?: string
       needsProxy?: boolean
     }>
-    listModels: (options: { provider: string; apiKey?: string; baseURL?: string; protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' }) => Promise<{
+    listModels: (options: { provider: string; apiKey?: string; baseURL?: string; protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription' }) => Promise<{
       success: boolean
       models?: string[]
       modelDetails?: AIModelInfo[]
@@ -1721,6 +1740,13 @@ export interface ElectronAPI {
       content?: string
       error?: string
     }>
+  }
+  codexSubscription: {
+    getStatus: () => Promise<CodexSubscriptionStatus>
+    login: () => Promise<{ success: boolean; loginId?: string; error?: string }>
+    logout: () => Promise<{ success: boolean; error?: string }>
+    listModels: () => Promise<{ success: boolean; models?: CodexSubscriptionModel[]; error?: string }>
+    onStatusChanged: (callback: (status: CodexSubscriptionStatus) => void) => () => void
   }
 }
 export interface ExportOptions {

@@ -23,7 +23,7 @@ export type AgentModelConfig = {
   apiKey?: string
   model?: string
   baseURL?: string
-  protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google'
+  protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription'
   reasoningEffort?: AgentReasoningEffort
 }
 

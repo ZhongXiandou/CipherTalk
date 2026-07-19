@@ -1,0 +1,39 @@
+import { ipcMain, shell } from 'electron'
+import type { MainProcessContext } from '../context'
+import { codexSubscriptionService } from '../../services/ai/codexSubscriptionService'
+
+export function registerCodexSubscriptionHandlers(ctx: MainProcessContext): void {
+  codexSubscriptionService.onStatusChanged((status) => {
+    ctx.broadcastToWindows('codexSubscription:statusChanged', status)
+  })
+
+  ipcMain.handle('codexSubscription:getStatus', async () => codexSubscriptionService.getStatus())
+
+  ipcMain.handle('codexSubscription:login', async () => {
+    try {
+      const result = await codexSubscriptionService.startLogin()
+      await shell.openExternal(result.authUrl)
+      return { success: true, loginId: result.loginId }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('codexSubscription:logout', async () => {
+    try {
+      await codexSubscriptionService.logout()
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('codexSubscription:listModels', async () => {
+    try {
+      const models = await codexSubscriptionService.listModels()
+      return { success: true, models }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+}

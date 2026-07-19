@@ -133,6 +133,11 @@ export class AgentProcessService {
     return result.title
   }
 
+  async resolveCodexToolApproval(approvalId: string, approved: boolean): Promise<boolean> {
+    const result = await this.call<{ handled: boolean }>('codexToolApproval', { approvalId, approved })
+    return result.handled === true
+  }
+
   /** 提示词优化：子进程内单次 generateText，近期对话仅用于消解草稿中的指代。 */
   async optimizePrompt(input: AgentPromptOptimizeInput): Promise<string> {
     const result = await this.call<{ text: string }>('optimizePrompt', input)

@@ -191,6 +191,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     run: (runId: string, messages: unknown[], scope?: unknown, modelConfig?: unknown, conversationId?: number | null, planMode?: boolean, toolProfile?: unknown, codeWorkspace?: unknown, canvasContext?: unknown) =>
       ipcRenderer.invoke('agent:run', { runId, messages, scope, modelConfig, conversationId, planMode, toolProfile, codeWorkspace, canvasContext }) as Promise<{ success: boolean; error?: string }>,
     abort: (runId: string) => ipcRenderer.invoke('agent:abort', runId) as Promise<{ success: boolean }>,
+    resolveCodexToolApproval: (approvalId: string, approved: boolean) =>
+      ipcRenderer.invoke('agent:resolveCodexToolApproval', { approvalId, approved }) as Promise<{ success: boolean; handled: boolean; error?: string }>,
     generateTitle: (firstMessage: string, modelConfig?: unknown) =>
       ipcRenderer.invoke('agent:generateTitle', { firstMessage, modelConfig }) as Promise<{ success: boolean; title?: string; error?: string }>,
     optimizePrompt: (prompt: string, modelConfig?: unknown, context?: Array<{ role: 'user' | 'assistant'; text: string }>) =>
@@ -923,10 +925,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getProxyStatus: () => ipcRenderer.invoke('ai:getProxyStatus'),
     refreshProxy: () => ipcRenderer.invoke('ai:refreshProxy'),
     testProxy: (proxyUrl: string, testUrl?: string) => ipcRenderer.invoke('ai:testProxy', proxyUrl, testUrl),
-    testConnection: (provider: string, apiKey: string, baseURL?: string, protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google', model?: string) => ipcRenderer.invoke('ai:testConnection', provider, apiKey, baseURL, protocol, model),
-    listModels: (options: { provider: string; apiKey?: string; baseURL?: string; protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' }) => ipcRenderer.invoke('ai:listModels', options),
+    testConnection: (provider: string, apiKey: string, baseURL?: string, protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription', model?: string) => ipcRenderer.invoke('ai:testConnection', provider, apiKey, baseURL, protocol, model),
+    listModels: (options: { provider: string; apiKey?: string; baseURL?: string; protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription' }) => ipcRenderer.invoke('ai:listModels', options),
     estimateCost: (messageCount: number, provider: string) => ipcRenderer.invoke('ai:estimateCost', messageCount, provider),
     readGuide: (guideName: string) => ipcRenderer.invoke('ai:readGuide', guideName)
+  },
+
+  codexSubscription: {
+    getStatus: () => ipcRenderer.invoke('codexSubscription:getStatus'),
+    login: () => ipcRenderer.invoke('codexSubscription:login'),
+    logout: () => ipcRenderer.invoke('codexSubscription:logout'),
+    listModels: () => ipcRenderer.invoke('codexSubscription:listModels'),
+    onStatusChanged: (callback: (status: unknown) => void): (() => void) => {
+      const listener = (_event: unknown, status: unknown) => callback(status)
+      ipcRenderer.on('codexSubscription:statusChanged', listener)
+      return () => ipcRenderer.removeListener('codexSubscription:statusChanged', listener)
+    },
   }
 })
 

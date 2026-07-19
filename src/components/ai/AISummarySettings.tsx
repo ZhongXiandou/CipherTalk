@@ -39,6 +39,7 @@ import RerankTab from '../settings/tabs/RerankTab'
 import TtsTab from '../settings/tabs/TtsTab'
 import ImageGenTab from '../settings/tabs/ImageGenTab'
 import LocalCodingAgentSettings from './LocalCodingAgentSettings'
+import ChatGPTSubscriptionAuth from './ChatGPTSubscriptionAuth'
 
 type AiProviderProtocol = configService.AiProviderProtocol
 type PresetTab = 'name' | 'provider' | 'config'
@@ -92,8 +93,11 @@ const PROTOCOL_LABELS: Record<AiProviderProtocol, string> = {
   'openai-responses': 'OpenAI Responses',
   'openai-compatible': 'OpenAI Compatible',
   anthropic: 'Anthropic',
-  google: 'Google Gemini'
+  google: 'Google Gemini',
+  'codex-subscription': 'Codex App Server'
 }
+
+const CODEX_SUBSCRIPTION_PROVIDER_ID = 'openai-codex'
 
 const AI_DROPDOWN_LIST_CLASS = 'ct-ai-dropdown-list max-h-80 overflow-y-auto'
 
@@ -318,6 +322,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
   const [remoteModels, setRemoteModels] = useState<string[]>([])
   const [remoteModelDetails, setRemoteModelDetails] = useState<AIModelInfo[]>([])
   const [modelListError, setModelListError] = useState('')
+  const [codexAuthenticated, setCodexAuthenticated] = useState(false)
   const [presets, setPresets] = useState<configService.AiConfigPreset[]>([])
   const [configMode, setConfigMode] = useState<ConfigMode>('llm')
   const [showPresetDrawer, setShowPresetDrawer] = useState(false)
@@ -352,6 +357,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
   })
 
   const currentProvider = providers.find(p => p.id === provider)
+  const isCodexSubscription = provider === CODEX_SUBSCRIPTION_PROVIDER_ID || currentProvider?.protocol === 'codex-subscription'
   const currentProtocol: AiProviderProtocol = currentProvider?.protocolOptions?.length
     ? customProtocol
     : (currentProvider?.protocol || 'openai-responses')
@@ -434,8 +440,8 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
     if (config) {
       setField('aiApiKey', config.apiKey || '')
       setField('aiModel', normalizeProviderModel(provider, config.model || ''))
-    } else if (currentProvider?.models?.length && !model) {
-      setField('aiModel', normalizeProviderModel(provider, currentProvider.models[0]))
+    } else {
+      setField('aiModel', normalizeProviderModel(provider, currentProvider?.models?.[0] || ''))
     }
     setCustomProtocol(config?.protocol || currentProvider?.protocol || 'openai-responses')
     setRemoteModels([])
@@ -600,6 +606,10 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
     }
   }
 
+  useEffect(() => {
+    if (isCodexSubscription && codexAuthenticated) void handleRefreshModels()
+  }, [isCodexSubscription, codexAuthenticated])
+
   const loadPresetDraftModels = async (notify = true) => {
     const providerInfo = providers.find(item => item.id === presetDraft.provider)
     if (!canFetchProviderModelList(presetDraft.provider, presetDraft.baseURL, providerInfo)) {
@@ -653,6 +663,17 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
 
   useEffect(() => {
     if (
+      showSavePresetDialog &&
+      presetTab === 'config' &&
+      presetDraftProvider?.protocol === 'codex-subscription' &&
+      codexAuthenticated
+    ) {
+      void loadPresetDraftModels(false)
+    }
+  }, [showSavePresetDialog, presetTab, presetDraft.provider, codexAuthenticated])
+
+  useEffect(() => {
+    if (
       !showSavePresetDialog ||
       presetTab !== 'config' ||
       presetDraft.provider !== 'custom' ||
@@ -675,7 +696,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
   ])
 
   const handleTestConnection = async () => {
-    if (provider !== 'ollama' && !apiKey.trim()) {
+    if (provider !== 'ollama' && !isCodexSubscription && !apiKey.trim()) {
       showMessage('请先填写 API 密钥', false)
       return
     }
@@ -838,7 +859,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <Typography.Heading level={2} className="text-lg">AI 接入配置</Typography.Heading>
-            <Typography.Paragraph size="sm" color="muted" className="mt-1">管理第三方 AI 服务商、模型、API 密钥和代理连接。</Typography.Paragraph>
+            <Typography.Paragraph size="sm" color="muted" className="mt-1">管理 AI 服务商、模型、账号登录、API 密钥和代理连接。</Typography.Paragraph>
           </div>
           <div className="ml-auto flex shrink-0 items-center justify-end">
             {/* 大模型 / 向量 / 重排 切换：同一套 UI 配置不同对象 */}
@@ -866,6 +887,18 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
               <GearDot width={16} height={16} /> 预设管理
             </Button>
           </div>
+        )}
+
+        {configMode === 'llm' && (
+          <Card>
+            <Card.Header>
+              <Card.Title>ChatGPT 订阅账号</Card.Title>
+              <Card.Description>Codex App Server</Card.Description>
+            </Card.Header>
+            <Card.Content>
+              <ChatGPTSubscriptionAuth compact onAuthenticationChange={setCodexAuthenticated} />
+            </Card.Content>
+          </Card>
         )}
 
         <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_330px]" style={{ display: configMode !== 'llm' ? 'none' : undefined }}>
@@ -965,7 +998,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
                     )}
                   </div>
 
-                  <TextField fullWidth value={apiKey} onChange={(value) => setField('aiApiKey', value)} type={showApiKey ? 'text' : 'password'}>
+                  {!isCodexSubscription && <TextField fullWidth value={apiKey} onChange={(value) => setField('aiApiKey', value)} type={showApiKey ? 'text' : 'password'}>
                     <Label>API 密钥</Label>
                     <InputGroup variant="secondary" fullWidth>
                       <InputGroup.Input
@@ -988,7 +1021,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
                         </Tooltip>
                       </InputGroup.Suffix>
                     </InputGroup>
-                  </TextField>
+                  </TextField>}
 
                   <div className="space-y-2">
                     <div className="flex min-w-0 items-end gap-2">
@@ -1089,8 +1122,8 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
                   <dd className="truncate font-medium text-foreground">{model || '未选择'}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <dt className="text-muted">密钥</dt>
-                  <dd className="truncate font-medium text-foreground">{maskSecret(apiKey)}</dd>
+                  <dt className="text-muted">认证</dt>
+                  <dd className="truncate font-medium text-foreground">{isCodexSubscription ? 'ChatGPT 登录' : maskSecret(apiKey)}</dd>
                 </div>
                 <div className="flex items-start justify-between gap-3">
                   <dt className="shrink-0 text-muted">地址</dt>
@@ -1103,7 +1136,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
             <Alert status="default">
               <Alert.Content>
                 <Alert.Title>本地保存</Alert.Title>
-                <Alert.Description>API 密钥仅保存在本地。连接测试与模型刷新会向当前服务商发起请求。</Alert.Description>
+                <Alert.Description>{isCodexSubscription ? '登录凭据由 Codex 运行时管理，密语不会读取账号令牌。' : 'API 密钥仅保存在本地。连接测试与模型刷新会向当前服务商发起请求。'}</Alert.Description>
               </Alert.Content>
             </Alert>
           </aside>
@@ -1333,14 +1366,14 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
                             </TextField>
                           )}
 
-                          <TextField fullWidth value={presetDraft.apiKey} onChange={(value) => updatePresetDraft({ apiKey: value })} type="password">
+                          {presetDraftProvider?.protocol !== 'codex-subscription' && <TextField fullWidth value={presetDraft.apiKey} onChange={(value) => updatePresetDraft({ apiKey: value })} type="password">
                             <Label>API 密钥</Label>
                             <Input
                               type="password"
                               placeholder={presetDraft.provider === 'ollama' ? '本地服务无需密钥（可选）' : '请输入 API 密钥'}
                               variant="secondary"
                             />
-                          </TextField>
+                          </TextField>}
 
                           <div className="space-y-2">
                             <div className="flex min-w-0 items-end gap-2">

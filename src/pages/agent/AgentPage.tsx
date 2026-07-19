@@ -2092,18 +2092,26 @@ export default function AgentPage() {
   }, [effectiveBusy, selectedModelSupportsTools, sendMessage])
 
   const handleToolApproval = useCallback((approvalId: string, approved: boolean) => {
-    if (!approvalId || busy || localAgentRunning) return
+    if (!approvalId || localAgentRunning) return
+    void (async () => {
+      if (approvalId.startsWith('codex-')) {
+        const live = await window.electronAPI.agent.resolveCodexToolApproval(approvalId, approved).catch(() => ({ success: false, handled: false, error: '审批请求失败' }))
+        if (!live.handled) setAgentNotice(live.error || '这次工具审批已失效，请重新发送请求')
+        return
+      }
+      if (busy) return
     setAgentNotice('')
     setAgentProgress([])
     setAgentRunPending(true)
     setSubAgentProgress([])
     runIsPlanRef.current = false
     submitScopeRef.current = activeScopeRef.current
-    void addToolApprovalResponse({
-      id: approvalId,
-      approved,
-      reason: approved ? '用户已确认' : '用户拒绝',
-    })
+      await addToolApprovalResponse({
+        id: approvalId,
+        approved,
+        reason: approved ? '用户已确认' : '用户拒绝',
+      })
+    })()
   }, [addToolApprovalResponse, busy, localAgentRunning])
 
   // 补丁应用/丢弃的结果属于密语状态，走气泡外的提示条，不改动助手消息（否则会抹掉折叠链的思考/工具卡片）。

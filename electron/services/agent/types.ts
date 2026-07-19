@@ -7,7 +7,7 @@ import type { CodeWorkspaceRef } from './codeWorkspaceTypes'
 import type { AgentCanvasRunContext } from './canvasTypes'
 
 /** AI SDK provider 协议种类（对齐 ai/providers/base.ts 的 ProviderKind）。 */
-export type ProviderKind = 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google'
+export type ProviderKind = 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription'
 
 /** 由主进程注入子进程的 provider 配置（子进程不依赖 ConfigService/Electron app）。 */
 export interface AgentProviderConfig {

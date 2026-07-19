@@ -946,17 +946,23 @@ export function createInspectMediaImage(providerConfig: AgentProviderConfig) {
             { type: 'image', image: buffer, mediaType },
           ],
         }]
-        const result = await generateText({
-          model: createLanguageModel(providerConfig),
-          system: '你是密语的图片理解工具。用中文回答，只说你从图里能确定的内容；看不清或信息不足时直接说明。',
-          messages,
-          temperature: 0.2,
-          abortSignal,
-        })
+        const instructions = '你是密语的图片理解工具。用中文回答，只说你从图里能确定的内容；看不清或信息不足时直接说明。'
+        const description = providerConfig.providerKind === 'codex-subscription'
+          ? await (async () => {
+            const { runCodexSubscriptionText } = await import('../codexSubscriptionRunner')
+            return runCodexSubscriptionText({ providerConfig, instructions, messages }, abortSignal)
+          })()
+          : (await generateText({
+            model: createLanguageModel(providerConfig),
+            system: instructions,
+            messages,
+            temperature: 0.2,
+            abortSignal,
+          })).text.trim()
 
         return {
           success: true,
-          description: result.text.trim(),
+          description,
           filePath,
           kind: 'image',
           source: resolved.source,

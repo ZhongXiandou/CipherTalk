@@ -22,6 +22,7 @@ export interface AIProviderMetadata {
   website?: string
   logo?: string
   optionalApiKey?: boolean
+  accountAuth?: boolean
   allowCustomBaseURL?: boolean
   protocolOptions?: AIProviderProtocol[]
 }
@@ -91,6 +92,24 @@ const CUSTOM_PROVIDER_DEFINITION: AIProviderMetadata = {
   pricingDetail: { input: 0, output: 0 },
   allowCustomBaseURL: true,
   protocolOptions: ['openai-responses', 'openai-compatible', 'anthropic', 'google']
+}
+
+export const CODEX_SUBSCRIPTION_PROVIDER_ID = 'openai-codex'
+
+const CODEX_SUBSCRIPTION_PROVIDER_DEFINITION: AIProviderMetadata = {
+  id: CODEX_SUBSCRIPTION_PROVIDER_ID,
+  name: CODEX_SUBSCRIPTION_PROVIDER_ID,
+  displayName: 'ChatGPT 订阅',
+  description: '使用 ChatGPT 账号登录，通过 Codex App Server 调用订阅内额度',
+  protocol: 'codex-subscription',
+  baseURL: '',
+  models: [],
+  modelDetails: [],
+  pricing: '订阅额度',
+  pricingDetail: { input: 0, output: 0 },
+  optionalApiKey: true,
+  accountAuth: true,
+  logo: 'openai'
 }
 
 const PROVIDER_ID_ALIASES: Record<string, string> = {
@@ -482,7 +501,8 @@ function sortProviderDefinitions(providers: AIProviderMetadata[]): AIProviderMet
 function withCustomProvider(providers: AIProviderMetadata[]): AIProviderMetadata[] {
   return [
     cloneMetadata(CUSTOM_PROVIDER_DEFINITION),
-    ...providers.filter(provider => provider.id !== CUSTOM_PROVIDER_DEFINITION.id)
+    cloneMetadata(CODEX_SUBSCRIPTION_PROVIDER_DEFINITION),
+    ...providers.filter(provider => provider.id !== CUSTOM_PROVIDER_DEFINITION.id && provider.id !== CODEX_SUBSCRIPTION_PROVIDER_ID)
   ]
 }
 
@@ -512,6 +532,9 @@ export async function getProviderDefinitions(): Promise<AIProviderMetadata[]> {
 
 export function getProviderDefinition(providerId: string): AIProviderMetadata | undefined {
   const resolvedProviderId = normalizeProviderId(providerId)
+  if (resolvedProviderId === CODEX_SUBSCRIPTION_PROVIDER_ID) {
+    return cloneMetadata(CODEX_SUBSCRIPTION_PROVIDER_DEFINITION)
+  }
   if (resolvedProviderId === CUSTOM_PROVIDER_DEFINITION.id) {
     return cloneMetadata(CUSTOM_PROVIDER_DEFINITION)
   }
@@ -527,6 +550,9 @@ export function getProviderDefinition(providerId: string): AIProviderMetadata | 
 
 export async function getProviderDefinitionOnline(providerId: string): Promise<AIProviderMetadata | undefined> {
   const resolvedProviderId = normalizeProviderId(providerId)
+  if (resolvedProviderId === CODEX_SUBSCRIPTION_PROVIDER_ID) {
+    return cloneMetadata(CODEX_SUBSCRIPTION_PROVIDER_DEFINITION)
+  }
   if (resolvedProviderId === CUSTOM_PROVIDER_DEFINITION.id) {
     return cloneMetadata(CUSTOM_PROVIDER_DEFINITION)
   }
@@ -567,7 +593,7 @@ export class CatalogAIProvider extends BaseAIProvider {
 
 export async function getModelsDevModels(providerId: string): Promise<string[]> {
   const resolvedProviderId = normalizeProviderId(providerId)
-  if (resolvedProviderId === CUSTOM_PROVIDER_DEFINITION.id) return []
+  if (resolvedProviderId === CUSTOM_PROVIDER_DEFINITION.id || resolvedProviderId === CODEX_SUBSCRIPTION_PROVIDER_ID) return []
 
   const data = await getModelsDevData()
   const provider = getModelsDevProvider(data, resolvedProviderId)
@@ -576,7 +602,7 @@ export async function getModelsDevModels(providerId: string): Promise<string[]> 
 
 export async function getModelsDevModelDetails(providerId: string): Promise<AIModelInfo[]> {
   const resolvedProviderId = normalizeProviderId(providerId)
-  if (resolvedProviderId === CUSTOM_PROVIDER_DEFINITION.id) return []
+  if (resolvedProviderId === CUSTOM_PROVIDER_DEFINITION.id || resolvedProviderId === CODEX_SUBSCRIPTION_PROVIDER_ID) return []
 
   const data = await getModelsDevData()
   const provider = getModelsDevProvider(data, resolvedProviderId)

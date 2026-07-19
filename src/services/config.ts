@@ -52,7 +52,7 @@ export const CONFIG_KEYS = {
 } as const
 
 export type { AccountProfile, AccountProfileInput, AccountProfilePatch }
-export type AiProviderProtocol = 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google'
+export type AiProviderProtocol = 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription'
 export type AiProviderConfig = {
   apiKey: string
   model: string

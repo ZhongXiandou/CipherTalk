@@ -48,7 +48,7 @@ export interface AIModelInfo {
   }
 }
 
-export type AIProviderProtocol = 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google'
+export type AIProviderProtocol = 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription'
 
 /**
  * AI 提供商信息
@@ -72,6 +72,7 @@ export interface AIProviderInfo {
   protocolOptions?: AIProviderProtocol[]
   allowCustomBaseURL?: boolean
   optionalApiKey?: boolean
+  accountAuth?: boolean
 }
 
 /**

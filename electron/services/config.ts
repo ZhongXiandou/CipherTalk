@@ -118,7 +118,7 @@ interface ConfigSchema {
       apiKey: string
       model: string
       baseURL?: string
-      protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google'
+      protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription'
     }
   }
   aiProviderModelCache: {
@@ -1032,7 +1032,7 @@ export class ConfigService {
     this.set('aiCurrentProvider', provider)
   }
 
-  getAIProviderConfig(providerId: string): { apiKey: string; model: string; baseURL?: string; protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' } | null {
+  getAIProviderConfig(providerId: string): { apiKey: string; model: string; baseURL?: string; protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription' } | null {
     const configs = this.get('aiProviderConfigs') as any
     const providerConfig = configs?.[providerId]
     if (!providerConfig) return null
@@ -1045,13 +1045,13 @@ export class ConfigService {
     return providerConfig
   }
 
-  setAIProviderConfig(providerId: string, config: { apiKey: string; model: string; baseURL?: string; protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' }): void {
+  setAIProviderConfig(providerId: string, config: { apiKey: string; model: string; baseURL?: string; protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription' }): void {
     const configs = this.get('aiProviderConfigs')
     configs[providerId] = config
     this.set('aiProviderConfigs', configs)
   }
 
-  getAllAIProviderConfigs(): { [providerId: string]: { apiKey: string; model: string; baseURL?: string; protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' } } {
+  getAllAIProviderConfigs(): { [providerId: string]: { apiKey: string; model: string; baseURL?: string; protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription' } } {
     return this.get('aiProviderConfigs')
   }
 

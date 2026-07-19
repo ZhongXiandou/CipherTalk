@@ -161,7 +161,7 @@ export interface NativeToolCallResult {
   finishReason?: string | null
 }
 
-export type ProviderKind = 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google'
+export type ProviderKind = 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription'
 type MutableToolCall = AIStreamToolCall
 
 export const NATIVE_TOOL_CALLING_UNSUPPORTED_MESSAGE = '当前模型/服务商不支持原生工具调用，请切换支持 tools 的 OpenAI-compatible 模型'
@@ -383,6 +383,9 @@ export abstract class BaseAIProvider implements AIProvider {
   protected getModelProvider(model: string): LanguageModel {
     const headers = this.getDefaultHeaders()
     const fetch = createProxyFetch(getResolvedProxyUrl()) // 无代理时为 undefined → 默认直连，国内零影响
+    if (this.providerKind === 'codex-subscription') {
+      throw new Error('ChatGPT 订阅模型仅通过 Codex App Server Agent 运行')
+    }
     if (this.providerKind === 'anthropic') {
       return createAnthropic({
         apiKey: this.apiKey,

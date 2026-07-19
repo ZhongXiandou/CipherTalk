@@ -108,6 +108,9 @@ export function createLanguageModel(config: AgentProviderConfig, options: AgentL
   const { providerKind, name, apiKey, baseURL, model, headers, proxyUrl } = config
   const fetch = createProxyFetch(proxyUrl)
 
+  if (providerKind === 'codex-subscription') {
+    throw new Error('ChatGPT 订阅模型仅通过 Codex App Server Agent 运行')
+  }
   if (providerKind === 'anthropic') {
     return createAnthropic({ apiKey, baseURL, name, headers, fetch: withAnthropicSanitizer(fetch) })(model as any)
   }
@@ -136,6 +139,7 @@ export function createProviderFilesApi(config: AgentProviderConfig): FilesV4 | n
   const { providerKind, name, apiKey, baseURL, headers, proxyUrl } = config
   const fetch = createProxyFetch(proxyUrl)
 
+  if (providerKind === 'codex-subscription') return null
   if (providerKind === 'anthropic') {
     return createAnthropic({ apiKey, baseURL, name, headers, fetch: withAnthropicSanitizer(fetch) }).files()
   }

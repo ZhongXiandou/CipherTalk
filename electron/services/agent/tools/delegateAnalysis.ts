@@ -198,6 +198,35 @@ export function createDelegateAnalysis(opts: {
         })
         try {
           const tools = opts.buildSubTools()
+          if (opts.providerConfig.providerKind === 'codex-subscription') {
+            const { runCodexSubscriptionToolLoop } = await import('../codexSubscriptionRunner')
+            const result = await runCodexSubscriptionToolLoop({
+              providerConfig: opts.providerConfig,
+              instructions: buildSystemPrompt(opts.scope) + DELEGATE_SUFFIX,
+              messages: [{ role: 'user', content: taskItem.task }],
+              tools,
+              maxToolCalls: SUB_AGENT_MAX_STEPS,
+            }, abortSignal)
+            const conclusion = result.text.trim()
+            const evidence = collectEvidence([{
+              toolResults: result.toolOutputs.map((output) => ({ output })),
+            }])
+            reportAgentProgress({
+              stage: 'run_finished',
+              title: '子助手分析完成',
+              detail: conclusion ? summarizeProgressDetail(conclusion) : '未得出明确结论',
+              elapsedMs: Date.now() - startedAt,
+            })
+            return {
+              id: taskItem.id,
+              task: taskItem.task,
+              conclusion: conclusion || '（子助手未得出结论，可能任务过大或数据不足，建议缩小范围重试）',
+              steps: Math.max(1, result.toolCalls + 1),
+              evidence,
+              elapsedMs: Date.now() - startedAt,
+            }
+          }
+
           const subAgent = new ToolLoopAgent({
             model: createLanguageModel(opts.providerConfig),
             instructions: buildSystemPrompt(opts.scope) + DELEGATE_SUFFIX,
