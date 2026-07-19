@@ -6,7 +6,7 @@ import { getUserDataPath } from '../../services/runtimePaths'
 
 const HOME_BACKGROUND_IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif'])
 const HOME_BACKGROUND_VIDEO_EXTS = new Set(['.mp4', '.webm', '.ogg'])
-const MAX_HOME_BACKGROUND_BYTES = 30 * 1000 * 1000
+const MAX_HOME_BACKGROUND_BYTES = 100 * 1000 * 1000
 
 function resolveHomeBackgroundMediaType(ext: string): 'image' | 'video' | null {
   if (HOME_BACKGROUND_IMAGE_EXTS.has(ext)) return 'image'
@@ -73,7 +73,7 @@ export function registerSystemHandlers(): void {
       }
       const sourceStat = fs.statSync(source)
       if (sourceStat.size > MAX_HOME_BACKGROUND_BYTES) {
-        return { success: false, error: '背景文件不能超过 30MB' }
+        return { success: false, error: '背景文件不能超过 100MB' }
       }
 
       const ext = path.extname(source).toLowerCase()

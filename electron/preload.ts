@@ -934,7 +934,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ; (async () => {
     try {
       const theme = await ipcRenderer.invoke('config:get', 'theme') || 'cloud-dancer'
-      const themeMode = await ipcRenderer.invoke('config:get', 'themeMode') || 'light'
+      const themeMode = await ipcRenderer.invoke('config:get', 'themeMode') || 'system'
 
       // 更新 localStorage 以供下次同步使用（主窗口场景）
       try {

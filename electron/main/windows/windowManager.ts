@@ -114,7 +114,7 @@ function getThemeQueryParams(ctx: MainProcessContext): string {
   const configService = ctx.getConfigService()
   if (!configService) return ''
   const theme = configService.get('theme') || 'cloud-dancer'
-  const themeMode = configService.get('themeMode') || 'light'
+  const themeMode = configService.get('themeMode') || 'system'
   return `theme=${encodeURIComponent(theme)}&mode=${encodeURIComponent(themeMode)}`
 }
 
@@ -122,7 +122,7 @@ function getThemeQuery(ctx: MainProcessContext): Record<string, string> {
   const configService = ctx.getConfigService()
   return {
     theme: configService?.get('theme') || 'cloud-dancer',
-    mode: configService?.get('themeMode') || 'light'
+    mode: configService?.get('themeMode') || 'system'
   }
 }
 
@@ -731,12 +731,15 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
         app.quit()
       })
 
+      // 启动屏阶段已成功连库：直接落地首页，避免首帧闪现新增账号引导页
+      const initialHash = ctx.getStartupDbConnected() ? '/home' : ''
       if (process.env.VITE_DEV_SERVER_URL) {
-        win.loadURL(`${process.env.VITE_DEV_SERVER_URL}?${getThemeQueryParams(ctx)}`)
+        win.loadURL(`${process.env.VITE_DEV_SERVER_URL}?${getThemeQueryParams(ctx)}${initialHash ? `#${initialHash}` : ''}`)
         setupDevToolsShortcut(win)
       } else {
         win.loadFile(join(__dirname, '../dist/index.html'), {
-          query: getThemeQuery(ctx)
+          query: getThemeQuery(ctx),
+          ...(initialHash ? { hash: initialHash } : {})
         })
       }
 

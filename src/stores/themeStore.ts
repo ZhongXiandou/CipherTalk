@@ -84,7 +84,7 @@ const clampHomeBackgroundBlur = (value: unknown): number => {
 }
 
 export const useThemeStore = create<ThemeState>()((set, get) => ({
-  themeMode: 'light',
+  themeMode: 'system',
   navLayout: 'sidebar',
   dockAutoHide: true,
   homeGlassBall: true,
@@ -205,7 +205,7 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
       const homeBackgroundCustomUrl = await window.electronAPI.config.get('homeBackgroundCustomUrl') as string | undefined
       const homeBackgroundPreset = await window.electronAPI.config.get('homeBackgroundPreset') as HomeBackgroundPreset | undefined
       const homeBackgroundBlur = await window.electronAPI.config.get('homeBackgroundBlur') as number | undefined
-      const nextThemeMode: ThemeMode = themeMode === 'dark' || themeMode === 'system' ? themeMode : 'light'
+      const nextThemeMode: ThemeMode = themeMode === 'dark' || themeMode === 'light' ? themeMode : 'system'
       const nextHomeBackground: HomeBackgroundSettings = {
         source: homeBackgroundSource === 'custom' ? 'custom' : 'preset',
         preset: normalizeHomeBackgroundPreset(homeBackgroundPreset),

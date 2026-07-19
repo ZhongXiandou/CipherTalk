@@ -22,10 +22,10 @@
         
         // 设置默认值
         theme = theme || 'cloud-dancer';
-        mode = mode || 'light';
+        mode = mode || 'system';
 
-        if (mode !== 'dark' && mode !== 'system') {
-          mode = 'light';
+        if (mode !== 'dark' && mode !== 'light') {
+          mode = 'system';
         }
 
         var resolvedMode = mode;

@@ -303,7 +303,7 @@ const defaults: ConfigSchema = {
   lastSession: '',
   exportPath: '',
   theme: 'cloud-dancer',
-  themeMode: 'light',
+  themeMode: 'system',
   language: 'zh-CN',
   releaseAnnouncementVersion: '',
   releaseAnnouncementId: '',
@@ -631,7 +631,7 @@ export class ConfigService {
     return `acct_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   }
 
-  private normalizeAccountInput(profile: Partial<AccountProfileInput>, fallback?: AccountProfile): AccountProfileInput {
+  private normalizeAccountInput(profile: Partial<AccountProfileInput>, fallback?: AccountProfile): Omit<AccountProfile, 'id' | 'createdAt' | 'updatedAt' | 'lastUsedAt'> {
     const wxid = String(profile.wxid ?? fallback?.wxid ?? '').trim()
     const dbPath = String(profile.dbPath ?? fallback?.dbPath ?? '').trim()
     const decryptKey = String(profile.decryptKey ?? fallback?.decryptKey ?? '').trim()

@@ -167,11 +167,21 @@ function Sidebar({ autoCollapse = false }: { autoCollapse?: boolean }) {
           collapsed ? 'h-12! w-12! min-w-12! justify-center p-0' : 'h-12! w-full justify-start gap-2 px-3'
         )}
       >
-        <span className="flex w-6 shrink-0 items-center justify-center">{item.icon}</span>
         {collapsed ? (
-          <span className="sr-only">{item.label}</span>
+          <>
+            <Tooltip delay={0}>
+              <Tooltip.Trigger aria-label={item.label}>
+                <span className="flex w-6 shrink-0 items-center justify-center">{item.icon}</span>
+              </Tooltip.Trigger>
+              <Tooltip.Content placement="right">{item.label}</Tooltip.Content>
+            </Tooltip>
+            <span className="sr-only">{item.label}</span>
+          </>
         ) : (
-          <span className="truncate text-base font-semibold">{item.label}</span>
+          <>
+            <span className="flex w-6 shrink-0 items-center justify-center">{item.icon}</span>
+            <span className="truncate text-base font-semibold">{item.label}</span>
+          </>
         )}
         <Tabs.Indicator />
       </Tabs.Tab>

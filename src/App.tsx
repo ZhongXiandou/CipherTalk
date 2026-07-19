@@ -747,7 +747,7 @@ function App() {
   return (
     <div className={`app-container${navLayout === 'sidebar' ? ' app-container--sidebar' : ''}`}>
       <Toast.Provider className="ct-toast-region" placement="top" />
-      {navLayout === 'sidebar' && <Sidebar autoCollapse={isAgentPage} />}
+      {navLayout === 'sidebar' && <Sidebar autoCollapse={isAgentPage || location.pathname === '/home'} />}
       <div className="app-shell">
       <TitleBar showTitle={false} />
       {pendingMemoryMigrationStatus && (
