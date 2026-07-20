@@ -2,7 +2,11 @@ import { asSchema, generateId, type ModelMessage, type ToolSet, type UIMessageCh
 import { mkdirSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
-import { CodexAppServerClient, type CodexAppServerMessage } from '../ai/codexAppServerClient'
+import {
+  CODEX_CHATGPT_MODEL_PROVIDER,
+  CodexAppServerClient,
+  type CodexAppServerMessage,
+} from '../ai/codexAppServerClient'
 import { isImageGenAvailable } from '../ai/imageGenService'
 import { buildAgentInstructions } from './engine'
 import { withToolTimeouts } from './guards'
@@ -153,6 +157,7 @@ export async function runCodexSubscriptionToolLoop(
     const history = conversationHistory(input.messages, current.index)
     const thread = await client.request<any>('thread/start', {
       model: input.providerConfig.model || null,
+      modelProvider: CODEX_CHATGPT_MODEL_PROVIDER,
       cwd: runtimeDir,
       runtimeWorkspaceRoots: [],
       approvalPolicy: 'never',
@@ -505,7 +510,7 @@ export async function runCodexSubscriptionAgent(
 
       const approvalStatus = approval?.({
         toolCall: { toolCallId, toolName, input: args },
-      } as any)
+      })
       if (approvalStatus?.type === 'user-approval') {
         const approvalId = `codex-${generateId()}`
         onChunk({ type: 'tool-approval-request', approvalId, toolCallId })
@@ -574,6 +579,7 @@ export async function runCodexSubscriptionAgent(
 
       const thread = await client.request<any>('thread/start', {
         model: input.providerConfig.model || null,
+        modelProvider: CODEX_CHATGPT_MODEL_PROVIDER,
         cwd: runtimeDir,
         runtimeWorkspaceRoots: [],
         approvalPolicy: 'never',

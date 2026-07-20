@@ -2126,7 +2126,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
 
   ipcMain.handle('ai:testConnection', async (_, provider: string, apiKey: string, baseURL?: string, protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription', model?: string) => {
     try {
-      if (protocol === 'codex-subscription' || provider === 'openai-codex') {
+      if (provider === 'openai-codex') {
         const { codexSubscriptionService } = await import('../../services/ai/codexSubscriptionService')
         const status = await codexSubscriptionService.getStatus(true)
         return status.authenticated ? { success: true } : { success: false, error: status.error || '请先登录 ChatGPT 账号' }
@@ -2142,7 +2142,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
 
   ipcMain.handle('ai:listModels', async (_, options: { provider: string; apiKey?: string; baseURL?: string; protocol?: 'openai-responses' | 'openai-compatible' | 'anthropic' | 'google' | 'codex-subscription' }) => {
     try {
-      if (options.protocol === 'codex-subscription' || options.provider === 'openai-codex') {
+      if (options.provider === 'openai-codex') {
         const { codexSubscriptionService } = await import('../../services/ai/codexSubscriptionService')
         const items = await codexSubscriptionService.listModels()
         return {

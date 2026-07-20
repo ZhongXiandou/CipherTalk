@@ -28,6 +28,11 @@ export function getUserDataPath(): string {
   return path.join(appData, 'ciphertalk')
 }
 
+export function getCipherTalkCodexHome(): string {
+  const override = String(process.env.CIPHERTALK_CODEX_HOME || '').trim()
+  return override || path.join(getUserDataPath(), 'codex-subscription')
+}
+
 export function getAppDataPath(): string {
   const app = getElectronAppSafe()
   if (app?.getPath) {

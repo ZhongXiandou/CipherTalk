@@ -1,4 +1,3 @@
-import type { ToolApprovalConfiguration, ToolApprovalStatus, ToolSet } from 'ai'
 import { ConfigService } from '../config'
 import type { AgentRunInput } from './types'
 
@@ -34,16 +33,6 @@ const LOW_RISK_TOOL_NAMES = new Set([
 
 const APPROVAL_POLICY_CONFIG_KEY = 'agentToolApprovalPolicy'
 
-function approvalReason(toolName: string): string {
-  if (toolName.startsWith('mcp__') || toolName.startsWith('mcp_')) return '外部 MCP 工具需要用户确认'
-  if (toolName.startsWith('send_')) return '发送微信消息、媒体或文件需要用户确认'
-  if (toolName === 'export_chat' || toolName === 'create_artifact') return '导出或写入本机文件需要用户确认'
-  if (toolName === 'canvas_replace') return '全文替换画布内容需要用户确认'
-  if (toolName.endsWith('_task') || toolName === 'run_task_now') return '主动/定时任务变更需要用户确认'
-  if (toolName.includes('memory')) return '修改长期记忆需要用户确认'
-  return '高风险工具调用需要用户确认'
-}
-
 function readConfiguredApprovalPolicy(): 'on-request' | 'risk-based' | 'full-access' {
   const config = new ConfigService()
   try {
@@ -54,10 +43,17 @@ function readConfiguredApprovalPolicy(): 'on-request' | 'risk-based' | 'full-acc
   }
 }
 
+/** 全局审批函数：返回 undefined 表示放行，返回 user-approval 表示需要用户确认。
+ * 类型收窄为可直接调用的函数形式（AI SDK 的 ToolApprovalConfiguration 是"函数 | 按工具记录表"联合，
+ * codexSubscriptionRunner 需要直接调用，联合类型不可调用）。 */
+export type AgentToolApprovalFunction = (options: {
+  toolCall: { toolCallId: string; toolName: string; input: unknown }
+}) => { type: 'user-approval' } | undefined
+
 export function buildAgentToolApproval(
   input: AgentRunInput,
   mcpToolNames: readonly string[] = [],
-): ToolApprovalConfiguration<ToolSet, unknown> | undefined {
+): AgentToolApprovalFunction | undefined {
   // 微信机器人入口没有当前 Agent 页审批 UI；该入口只允许当前触发会话的受控回复附件。
   if (input.outputMode === 'wechat') return undefined
 
@@ -65,10 +61,10 @@ export function buildAgentToolApproval(
   if (policy === 'full-access') return undefined
 
   const mcpTools = new Set(mcpToolNames)
-  return ({ toolCall }): ToolApprovalStatus => {
+  return ({ toolCall }) => {
     const toolName = String(toolCall.toolName || '')
     if (!HIGH_RISK_TOOL_NAMES.has(toolName) && !mcpTools.has(toolName)) return undefined
     if (policy === 'risk-based' && LOW_RISK_TOOL_NAMES.has(toolName)) return undefined
-    return { type: 'user-approval', reason: approvalReason(toolName) }
+    return { type: 'user-approval' }
   }
 }

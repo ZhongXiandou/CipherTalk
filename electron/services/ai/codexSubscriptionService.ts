@@ -51,9 +51,6 @@ class CodexSubscriptionService {
   async startLogin(): Promise<{ loginId: string; authUrl: string }> {
     const result = await this.getClient().request<any>('account/login/start', {
       type: 'chatgpt',
-      codexStreamlinedLogin: true,
-      useHostedLoginSuccessPage: true,
-      appBrand: 'chatgpt',
     })
     if (result?.type !== 'chatgpt' || !result.loginId || !result.authUrl) {
       throw new Error('Codex App Server 未返回 ChatGPT 登录地址')

@@ -1,8 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
-import { existsSync } from 'fs'
+import { existsSync, mkdirSync } from 'fs'
 import { createRequire } from 'module'
 import path from 'path'
 import readline from 'readline'
+import { getCipherTalkCodexHome } from '../runtimePaths'
 
 type JsonRpcId = number | string
 
@@ -24,6 +25,7 @@ type PendingRequest = {
 }
 
 const REQUEST_TIMEOUT_MS = 30_000
+export const CODEX_CHATGPT_MODEL_PROVIDER = 'openai'
 
 const TARGETS: Record<string, { packageName: string; triple: string; executable: string }> = {
   'win32:x64': { packageName: '@openai/codex-win32-x64', triple: 'x86_64-pc-windows-msvc', executable: 'codex.exe' },
@@ -125,10 +127,24 @@ export class CodexAppServerClient {
 
   private async startInternal(): Promise<void> {
     const executable = resolveBundledCodexExecutable()
-    const child = spawn(executable, ['app-server', '--listen', 'stdio://'], {
+    const codexHome = getCipherTalkCodexHome()
+    mkdirSync(codexHome, { recursive: true })
+    const env = { ...process.env, CODEX_HOME: codexHome }
+    delete env.OPENAI_API_KEY
+    delete env.OPENAI_BASE_URL
+    delete env.OPENAI_API_BASE
+    const child = spawn(executable, [
+      '-c',
+      `model_provider="${CODEX_CHATGPT_MODEL_PROVIDER}"`,
+      '-c',
+      'cli_auth_credentials_store="file"',
+      'app-server',
+      '--listen',
+      'stdio://',
+    ], {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
-      env: { ...process.env },
+      env,
     })
     this.child = child
 
